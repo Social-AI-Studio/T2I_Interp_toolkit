@@ -1,0 +1,47 @@
+encoders:
+  text:
+    - id: 0
+      embed: { path: "<...>" }
+      blocks:
+        - id: 0
+          attn:
+            q: { path: "<...>" }
+            k: { path: "<...>" }
+            v: { path: "<...>" }
+            z: { path: "<...>" }           # A @ V (pre W_O)
+            pattern: { derived: "sdpa" }   # softmax(QK^T/√d) if fused
+            out_proj: { path: "<...>" }
+          mlp:
+            - { id: 0, path: "<...>" }
+            - { id: 1, path: "<...>" }
+
+  image:
+    - id: 0
+      type: vae | vq | pixel
+      encode_out: { path: "<...>" }
+      decode_out: { path: "<...>" }
+
+denoisers:
+  - id: 0   #for timesteps
+    arch: unet | dit
+    stages:                # UNet only
+      down:
+        - { id: 0, attn_blocks: [ ... ], mlp: [ ... ], conv: [ ... ] }
+      mid:
+        - { id: 0, ... }
+      up:
+        - { id: 0, ... }
+    blocks:                # DiT only
+      - id: 0
+        attn_blocks:
+          - name: attn2
+            q: { path: "<...>" }
+            k: { path: "<...>" }
+            v: { path: "<...>" }
+            z: { path: "<...>" }
+            pattern: { derived: "sdpa" }
+            out_proj: { path: "<...>" }
+        mlp:
+          - { id: 0, path: "<...>" }
+          - { id: 1, path: "<...>" }
+
