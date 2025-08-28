@@ -1,47 +1,119 @@
+version: 0.2
+assume_hf_model: true
+
+arch_map:                       # infer by HF class name
+  unet:
+    class_names: ["UNet2DConditionModel", "UNet3DConditionModel"]
+  dit:
+    class_names: ["DiT", "Transformer2DModel", "FlowMatchTransformer", "MMDiT", "FluxTransformer2DModel", "PixArt*", "UViT*"]
+
 encoders:
   text:
-    - id: 0
-      embed: { path: "<...>" }
+    - id: 0                     # primary text encoder (CLIP/T5/OpenCLIP, etc.)
+      # Token/pos embeddings (optional; resolver tolerates missing slots)
+      embed:
+        discover: "**.text_model.embeddings"
+        slots:
+          token: "token_embedding"
+          position: "position_embedding"
+
+      # Transformer blocks (no counts hardcoded; {i} assigned by discovery order)
       blocks:
-        - id: 0
-          attn:
-            q: { path: "<...>" }
-            k: { path: "<...>" }
-            v: { path: "<...>" }
-            z: { path: "<...>" }           # A @ V (pre W_O)
-            pattern: { derived: "sdpa" }   # softmax(QK^T/√d) if fused
-            out_proj: { path: "<...>" }
-          mlp:
-            - { id: 0, path: "<...>" }
-            - { id: 1, path: "<...>" }
+        self_attn:
+          discover: "**.text_model.encoder.layers.*.self_attn"
+          slots:
+            q:        "q_proj"
+            k:        "k_proj"
+            v:        "v_proj"
+            out_proj: "out_proj"
+            z:        { derived: "sdpa_out" }   # A @ V (exposed by your SDPA wrapper)
+            pattern:  { derived: "sdpa" }       # softmax(QK^T/√d)
+        mlp:
+          discover: "**.text_model.encoder.layers.*.mlp"
+          slots:
+            fc1: "fc1"
+            fc2: "fc2"
+
+      # Optional final norm layer (if present)
+      final_norm:
+        discover: "**.text_model.final_layer_norm"
+        slots: {}
+
+    # - id: 1                  # optional secondary text encoder (e.g., SDXL)
 
   image:
-    - id: 0
+    - id: 0                     # image (de)coder, typically a VAE in latent diffusion
       type: vae | vq | pixel
-      encode_out: { path: "<...>" }
-      decode_out: { path: "<...>" }
+      vae:
+        encoder:
+          discover: "**.vae.encoder"
+          slots: {}             # structure-only; you can add conv slots later if wanted
+        decoder:
+          discover: "**.vae.decoder"
+          slots: {}
+        misc:
+          discover: "**.vae"
+          slots:
+            quant_conv:     "quant_conv"        # optional in diffusers AutoencoderKL
+            post_quant_conv:"post_quant_conv"   # optional
 
 denoisers:
-  - id: 0   #for timesteps
-    arch: unet | dit
-    stages:                # UNet only
-      down:
-        - { id: 0, attn_blocks: [ ... ], mlp: [ ... ], conv: [ ... ] }
-      mid:
-        - { id: 0, ... }
-      up:
-        - { id: 0, ... }
-    blocks:                # DiT only
-      - id: 0
-        attn_blocks:
-          - name: attn2
-            q: { path: "<...>" }
-            k: { path: "<...>" }
-            v: { path: "<...>" }
-            z: { path: "<...>" }
-            pattern: { derived: "sdpa" }
-            out_proj: { path: "<...>" }
-        mlp:
-          - { id: 0, path: "<...>" }
-          - { id: 1, path: "<...>" }
+  - id: 0
+    steps: "{k}"                # common time axis for UNet & DiT (filled at runtime)
 
+    unet:                       # Stable Diffusion / SDXL style UNet
+      stages:
+        down:
+          self_attn:
+            discover: "**.down_blocks.*.attentions.*.transformer_blocks.*.attn1"
+            slots:
+              q: "to_q"; k: "to_k"; v: "to_v"; out_proj: "to_out.0"
+              z: { derived: "sdpa_out" }; pattern: { derived: "sdpa" }
+          cross_attn:
+            discover: "**.down_blocks.*.attentions.*.transformer_blocks.*.attn2"
+            slots:
+              q: "to_q"; k: "to_k"; v: "to_v"; out_proj: "to_out.0"
+              z: { derived: "sdpa_out" }; pattern: { derived: "sdpa" }
+        mid:
+          self_attn:
+            discover: "**.mid_block.attentions.*.transformer_blocks.*.attn1"
+            slots:
+              q: "to_q"; k: "to_k"; v: "to_v"; out_proj: "to_out.0"
+              z: { derived: "sdpa_out" }; pattern: { derived: "sdpa" }
+          cross_attn:
+            discover: "**.mid_block.attentions.*.transformer_blocks.*.attn2"
+            slots:
+              q: "to_q"; k: "to_k"; v: "to_v"; out_proj: "to_out.0"
+              z: { derived: "sdpa_out" }; pattern: { derived: "sdpa" }
+        up:
+          self_attn:
+            discover: "**.up_blocks.*.attentions.*.transformer_blocks.*.attn1"
+            slots:
+              q: "to_q"; k: "to_k"; v: "to_v"; out_proj: "to_out.0"
+              z: { derived: "sdpa_out" }; pattern: { derived: "sdpa" }
+          cross_attn:
+            discover: "**.up_blocks.*.attentions.*.transformer_blocks.*.attn2"
+            slots:
+              q: "to_q"; k: "to_k"; v: "to_v"; out_proj: "to_out.0"
+              z: { derived: "sdpa_out" }; pattern: { derived: "sdpa" }
+
+    dit:                        # Transformer denoiser (PixArt/Flux/MM-DiT-like)
+      blocks:
+        self_attn:
+          discover: "**.blocks.*.self_attn"
+          slots:
+            q:        "q_proj"
+            k:        "k_proj"
+            v:        "v_proj"
+            out_proj: "out_proj"
+            z:        { derived: "sdpa_out" }
+            pattern:  { derived: "sdpa" }
+        cross_attn:
+          discover: "**.blocks.*.cross_attn"
+          slots:
+            q:        "q_proj"
+            k:        "k_proj"
+            v:        "v_proj"
+            out_proj: "out_proj"
+            z:        { derived: "sdpa_out" }
+            pattern:  { derived: "sdpa" }

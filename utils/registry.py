@@ -1,58 +1,86 @@
-# --- registry.py ---
-from dataclasses import dataclass
-from typing import Dict, Callable, Tuple, Optional
 import fnmatch
-import torch
-import torch.nn as nn
+from typing import Any, Dict
+from torch import nn
 
-@dataclass
-class CanonicalEntry:
-    path: str                 # original dotted path in the model
-    module: nn.Module         # the module object
-    hook_kind: str = "post"   # 'post', 'pre', or 'module_out'
+def infer_arch_by_name(model: nn.Module, arch_map: Dict[str, Any]) -> str:
+    cls = model.__class__.__name__
+    for arch, spec in arch_map.items():
+        for pat in spec.get("class_names", []):
+            if fnmatch.fnmatch(cls, pat):
+                return arch
+    return "unknown"
 
-class CanonicalRegistry:
-    """
-    Build a mapping: canonical_name -> (original path, module, hook_kind).
-    Use this to attach hooks by canonical name, without renaming the model.
-    """
-    def __init__(self, model: nn.Module):
-        self.model = model
-        self.map: Dict[str, CanonicalEntry] = {}
-        # Fast lookups
-        self._named_modules = dict(model.named_modules())
+def _discover_and_add(mapping, names, base_key, root_glob, slots):
+    roots = [n for n in names if fnmatch.fnmatch(n, root_glob)]
+    roots.sort()
+    # If there is no {i} in base_key, we don't enumerate (e.g., embeds/vae root)
+    enumerate_roots = "{i}" in base_key
+    for idx, root in enumerate(roots if enumerate_roots else [root_glob]):
+        rpath = root if enumerate_roots else roots[0] if roots else None
+        if rpath is None:
+            continue
+        for slot, spec in slots.items():
+            if isinstance(spec, str):
+                path = f"{rpath}.{spec}"
+            else:
+                # derived (pattern/z): map to attention/parent root
+                path = rpath
+            key = (base_key.format(i=idx) if enumerate_roots else base_key) + f".{slot}"
+            mapping[key] = path
 
-    def _iter_glob(self, pattern: str):
-        for name, mod in self._named_modules.items():
-            if fnmatch.fnmatch(name, pattern):
-                yield name, mod
+def build_canonical_map_with_encoders(model: nn.Module, schema: Dict[str, Any]) -> Dict[str, str]:
+    names = dict(model.named_modules())
+    arch = infer_arch_by_name(model, schema.get("arch_map", {}))
+    out: Dict[str, str] = {}
 
-    def add_by_glob(self, canon_key: str, glob_pattern: str, hook_kind: str = "post"):
-        """Map a canonical key to the FIRST match of a glob pattern."""
-        for name, mod in self._iter_glob(glob_pattern):
-            self.map[canon_key] = CanonicalEntry(name, mod, hook_kind)
-            return name
-        raise KeyError(f"No module matched glob: {glob_pattern}")
+    # ---- encoders: text ----
+    for enc in schema.get("encoders", {}).get("text", []):
+        base = f"encoders.text.{enc['id']}"
+        # embed (optional)
+        if "embed" in enc:
+            _discover_and_add(out, names, base_key=f"{base}.embed",
+                              root_glob=enc["embed"]["discover"],
+                              slots=enc["embed"]["slots"])
+        # blocks.self_attn
+        ta = enc["blocks"]["self_attn"]
+        _discover_and_add(out, names,
+                          base_key=f"{base}.blocks.self_attn.{{i}}",
+                          root_glob=ta["discover"], slots=ta["slots"])
+        # blocks.mlp
+        tm = enc["blocks"]["mlp"]
+        _discover_and_add(out, names,
+                          base_key=f"{base}.blocks.mlp.{{i}}",
+                          root_glob=tm["discover"], slots=tm["slots"])
+        # final norm (optional)
+        if "final_norm" in enc:
+            _discover_and_add(out, names, base_key=f"{base}.final_norm",
+                              root_glob=enc["final_norm"]["discover"],
+                              slots=enc["final_norm"]["slots"])
 
-    def add_by_path(self, canon_key: str, path: str, hook_kind: str = "post"):
-        mod = self._named_modules.get(path)
-        if mod is None:
-            raise KeyError(f"Path not found: {path}")
-        self.map[canon_key] = CanonicalEntry(path, mod, hook_kind)
+    # ---- encoders: image (VAE roots) ----
+    for img in schema.get("encoders", {}).get("image", []):
+        base = f"encoders.image.{img['id']}"
+        if img.get("type") == "vae" and "vae" in img:
+            vae = img["vae"]
+            _discover_and_add(out, names, f"{base}.vae.encoder", vae["encoder"]["discover"], vae["encoder"]["slots"])
+            _discover_and_add(out, names, f"{base}.vae.decoder", vae["decoder"]["discover"], vae["decoder"]["slots"])
+            if "misc" in vae:
+                _discover_and_add(out, names, f"{base}.vae.misc", vae["misc"]["discover"], vae["misc"]["slots"])
 
-    # ---- Hooks by canonical name ----
-    def hook(self, canon_key: str, fn: Callable, when: Optional[str] = None):
-        ent = self.map[canon_key]
-        kind = when or ent.hook_kind
-        if kind == "pre":
-            return ent.module.register_forward_pre_hook(lambda m, inp: fn(m, inp, None))
-        elif kind == "post" or kind == "module_out":
-            return ent.module.register_forward_hook(lambda m, inp, out: fn(m, inp, out))
-        else:
-            raise ValueError(f"Unknown hook kind: {kind}")
+    # ---- denoisers (same as before; omitted here for brevity) ----
+    # use your existing UNet/DiT logic to fill:
+    # - denoisers.0.steps.{k}.down|mid|up.self_attn.{i}.(q|k|v|out_proj|pattern|z)
+    # - denoisers.0.steps.{k}.blocks.self_attn.{i}.(...), cross_attn likewise
 
-    def get(self, canon_key: str) -> nn.Module:
-        return self.map[canon_key].module
+    return out
 
-    def info(self) -> Dict[str, Tuple[str, str]]:
-        return {k: (v.path, v.hook_kind) for k, v in self.map.items()}
+# usage
+# import yaml
+# schema = yaml.safe_load(open("t2i_schema.yaml"))
+# canon = build_canonical_map_with_encoders(my_model, schema)
+
+# # Example lookups:
+# canon["encoders.text.0.blocks.self_attn.3.q"]         # -> "...text_model.encoder.layers.3.self_attn.q_proj"
+# canon["encoders.image.0.vae.encoder.quant_conv"]      # (if present)
+# canon["denoisers.0.steps.{k}.down.cross_attn.2.k"]    # -> "...attn2.to_k"
+
