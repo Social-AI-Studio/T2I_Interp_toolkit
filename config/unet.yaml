@@ -1,0 +1,15 @@
+transformer_blocks:
+  discover: "**.unet.**attentions.*.transformer_blocks.*"   # BasicTransformerBlock
+  slots:
+    self_attn:
+      target: "attn1"                      # rename attn1 → self_attn
+
+    cross_attn:
+      target: "attn2"                      # rename attn2 → cross_attn
+
+    mlp:
+      target: "ff"                         # FeedForward (GEGLU + Linear)
+      slots:
+        up:   "net.0.proj"                 # 640 → 5120 (gated: splits to 2×2560)
+        act:  "net.0"                      # GEGLU wrapper
+        down: "net.2"                      # 2560 → 640

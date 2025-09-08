@@ -1,0 +1,14 @@
+const:
+  TEXT_ENCODER: text_encoder
+  TEXT_SPACE : text_space
+  IMAGE_SPACE : image_space
+  TEXT_IMAGE_SPACE : text_image_space
+  IMAGE_DECODER: image_decoder
+  TEXT_TIME_SPACE: text_time_space
+  ATTN: attn
+  MLP: mlp
+  FINAL_NORM: final_norm
+  Q: q
+  K: k
+  V: v
+  ATTN_OUT: attn_out

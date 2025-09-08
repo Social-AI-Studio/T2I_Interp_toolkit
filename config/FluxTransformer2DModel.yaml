@@ -1,0 +1,13 @@
+transformer:
+    discover: "**.transformer"
+    slots:
+      text_encoder: 
+        $include: "./CLIPEncoder.yaml"
+      text_encoder_2: 
+        $include: "./T5EncoderModel.yaml"  
+      image_token_embed: "x_embedder"
+      text_token_embed:  "context_embedder"
+      dual_stream_blocks:
+        $include: "./FluxTransformerBlock.yaml#dual_stream_blocks"
+      single_stream_blocks:
+        $include: "./FluxSingleTransformerBlock.yaml#single_stream_blocks"
