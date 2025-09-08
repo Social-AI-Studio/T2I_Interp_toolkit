@@ -1,0 +1,11 @@
+mlp:
+  discover: "**.text_model.encoder.layers.*.mlp"
+  slots:
+    up: "fc1"    # 768 -> 3072
+    down: "fc2"    # 3072 -> 768
+
+norms:
+  discover: "**.text_model.encoder.layers.*"
+  slots:
+    pre_norm:  "layer_norm1"
+    post_norm: "layer_norm2"
