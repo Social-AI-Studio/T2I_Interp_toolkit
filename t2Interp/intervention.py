@@ -38,7 +38,7 @@ class DiffusionIntervention:
     def fields(cls):
         return []
     
-class EncoderIntervention(DiffusionIntervention):
+class EncoderAttentionIntervention(DiffusionIntervention):
 
     def __init__(self, replacement_text, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -52,7 +52,7 @@ class EncoderIntervention(DiffusionIntervention):
 
         if self.selection:
             
-            self.selection = self.selection["spatial_location"], self.selection["heads"]
+            selection = self.selection["spatial_location"], self.selection["heads"]
             envoy.input = torch.cat([envoy.input, envoy.input[1:]])
             
             envoy.inputs[1]['encoder_hidden_states'] = torch.cat([envoy.inputs[1]['encoder_hidden_states'], self.replacement[1:]])
@@ -66,7 +66,7 @@ class EncoderIntervention(DiffusionIntervention):
                 (hidden_states.shape[0], spatial_dim, n_heads, -1)
             )
 
-            hidden_states[1, self.selection[0], self.selection[1]] = hidden_states[2, self.selection[0], self.selection[1]]
+            hidden_states[1, selection[0], selection[1]] = hidden_states[2, selection[0], selection[1]]
             
             envoy.to_out[0].input = envoy.to_out[0].input[:2]
 
@@ -85,11 +85,25 @@ def apply(hidden_states: torch.Tensor, factor, selection, attn):
         (hidden_states.shape[0], spatial_dim, n_heads, -1)
     )
     
-    # THis is effecting both the cond and uncond
-    hidden_states[1, selection[0], selection[1]] *= factor
+    spatial_idx, head_idx = selection["spatial_location"], selection["heads"]
+    
+    if selection is not None:
+        # THis is effecting both the cond and uncond
+        if not torch.is_tensor(spatial_idx):
+            spatial_idx = torch.tensor(spatial_idx, dtype=torch.long, device=hidden_states.device)
+        else:
+            spatial_idx = spatial_idx.to(hidden_states.device).long()
+        if not torch.is_tensor(head_idx):
+            head_idx = torch.tensor(head_idx, dtype=torch.long, device=hidden_states.device)
+        else:
+            head_idx = head_idx.to(hidden_states.device).long()
+        # hidden_states[1, selection[0], selection[1], :] *= factor
+        hidden_states[1, spatial_idx[:, None], head_idx[None, :], :] *= factor
+    else:
+        hidden_states *= factor    
 
 
-class ScalingIntervention(DiffusionIntervention):
+class ScalingAttentionIntervention(DiffusionIntervention):
 
     def __init__(self, factor, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -101,22 +115,22 @@ class ScalingIntervention(DiffusionIntervention):
         # envoy = attn_envoy.to_out[0]
 
         # (batch, spatial * spatial, heads * dim)
-        hidden_states: torch.Tensor = attn_to_out.input
+        hidden_states: torch.Tensor = attn_to_out.output
 
         # if attn_envoy.path in self.selections:
         #     selection = self.selections[attn_envoy.path]
             
-        if self.selection:
-            selection = self.selection["spatial_location"], self.selection["heads"]
-        apply(hidden_states, self.factor, selection, attn_to_out)
+        # if self.selection:
+            # selection = self.selection["spatial_location"], self.selection["heads"]
+        apply(hidden_states, self.factor, self.selection, attn_to_out)
 
     @classmethod
     def fields(cls):
         return [FieldModel(name="Factor", type=FieldModel.FieldType.float)]
 
-def run_intervention(model:T2IModel, prompt:str, n_steps:int = 50, seed:int=40, interventions: List[DiffusionIntervention] = []):
+def run_intervention(model:T2IModel, prompt:str, n_steps:int = 50, start_step:int=0, end_step:int=50, seed:int=40, interventions: List[DiffusionIntervention] = []):
     with model.generate(prompt, num_inference_steps=n_steps, seed=seed, validate=False, scan=False) as tracer:
-        with tracer.iter[0:50]:
+        with tracer.iter[start_step:end_step]:
             for intervention in interventions:
                 intervention()    
             output = model.output.save()

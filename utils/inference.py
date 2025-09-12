@@ -4,6 +4,7 @@ from typing import Callable, Dict, Any, Protocol, Optional, Sequence
 import torch
 from transformers import Trainer, TrainingArguments
 from utils.output import Output
+from utils. metrics import MetricBase
 
 InferenceFn = Callable[[torch.nn.Module, Dict[str, Any]], Dict[str, Any]]
 
@@ -11,7 +12,7 @@ InferenceFn = Callable[[torch.nn.Module, Dict[str, Any]], Dict[str, Any]]
 class InferenceSpec:
     name: str
     inference_fn: InferenceFn 
-    metric_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])
+    metric_fns: Optional[Sequence[MetricBase.compute]] = field(default_factory=list[MetricBase.compute])
     callback_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])            
     kwargs: Dict[str, Any] = field(default_factory=dict)
     
