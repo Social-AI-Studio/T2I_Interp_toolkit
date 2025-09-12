@@ -1,0 +1,39 @@
+from __future__ import annotations
+from dataclasses import dataclass, field
+from typing import Callable, Dict, Any, Protocol, Optional, Sequence
+import torch
+from transformers import Trainer, TrainingArguments
+from utils.output import Output
+
+InferenceFn = Callable[[torch.nn.Module, Dict[str, Any]], Dict[str, Any]]
+
+@dataclass
+class InferenceSpec:
+    name: str
+    inference_fn: InferenceFn 
+    metric_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])
+    callback_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])            
+    kwargs: Dict[str, Any] = field(default_factory=dict)
+    
+class Inference:
+    # """
+    # A thin wrapper around HF Trainer that calls a custom inference function
+    # to produce predictions. We override prediction_step so Trainer handles
+    # batching/DDP/AMP/gathering, while you provide the forward logic.
+    # """
+    def __init__(self, inference_spec: InferenceSpec,*args, **kw):
+        super().__init__(*args, **kw)
+        self.inference_spec = inference_spec
+
+    def predict(self) -> tuple:
+        # Move inputs to the right device the Trainer way
+        # inputs = self._prepare_inputs(inputs)
+        with torch.no_grad():
+            out: Output = self.inference_spec.inference_fn(
+                **self.inference_spec.kwargs
+            )
+            if len(self.inference_spec.metric_fns)>0:
+                for cb in self.inference_spec.metric_fns:
+                    cb(out)
+                    
+        return out   

@@ -1,9 +1,9 @@
 import torch as th
-from accessors import ModuleAccessor, AttentionAccessor
+from t2Interp.accessors import ModuleAccessor, AttentionAccessor
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional, List
-from accessors import IOType
-from blocks import TransformerBlock
+from t2Interp.accessors import IOType
+from t2Interp.blocks import TransformerBlock
 
 class ClipEncoder:
     """
@@ -15,10 +15,11 @@ class ClipEncoder:
       - get_block(i) / set_block(i, block)
       - summary()
     """
-    def __init__(self, encoder: th.nn.Module):
+    def __init__(self, clip_text_model: th.nn.Module):
+        encoder=clip_text_model.text_model.encoder
         self.blocks: Dict[int, TransformerBlock] = {
             i: TransformerBlock(
-                layer=i, in_=ModuleAccessor(encoder.layers[i],"clip_encoder_input",IOType.INPUT),
+                in_=ModuleAccessor(encoder.layers[i],"clip_encoder_input",IOType.INPUT),
                 out_=ModuleAccessor(encoder.layers[i],"clip_encoder_output",IOType.OUTPUT),
                 attn_in=ModuleAccessor(encoder.layers[i].self_attn,"clip_encoder_attn",IOType.INPUT),
                 attn_out=ModuleAccessor(encoder.layers[i].self_attn,"clip_encoder_attn",IOType.OUTPUT),

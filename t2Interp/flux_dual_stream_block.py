@@ -1,9 +1,8 @@
 import torch as th
-from accessors import ModuleAccessor, AttentionAccessor
+from t2Interp.accessors import ModuleAccessor, AttentionAccessor, IOType
 from dataclasses import dataclass
 from typing import Dict, Iterable, Optional, List, Tuple
-from accessors import IOType
-from blocks import TransformerBlock
+from t2Interp.blocks import TransformerBlock
 
 @dataclass
 class DualStreamBlock(TransformerBlock):

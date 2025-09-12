@@ -2,6 +2,7 @@
 from __future__ import annotations
 import os, re, copy, pathlib, fnmatch, yaml
 from typing import Any, Dict, Iterable, Tuple
+import torch.nn as nn
 
 # ---------------------------
 # YAML loader: extends + $include (+ lists) + ${CONST} in KEYS & VALUES
@@ -231,7 +232,7 @@ def build_module_mapper(hf_model: Any, top_yaml_path: str, *, strict: bool = Fal
         slots = section.get("slots", {})
         if not discover or not isinstance(slots, dict):
             return
-
+        # print(discover, _match(discover))
         for base in _match(discover):
             for label, spec in slots.items():
 
@@ -241,7 +242,7 @@ def build_module_mapper(hf_model: Any, top_yaml_path: str, *, strict: bool = Fal
                     dst = _join(base, label)
                     add(src, dst, ctx)
                     continue
-
+                # print(245,spec)
                 # Case 2: object mapping with target (+ optional nested slots)
                 if isinstance(spec, dict):
                     target = spec.get("target")
@@ -251,10 +252,10 @@ def build_module_mapper(hf_model: Any, top_yaml_path: str, *, strict: bool = Fal
                         if strict:
                             raise ValueError(f"[{ctx}] slot '{label}' missing 'target'")
                         continue
-
+                    # print(base,target)
                     src_parent = _join(base, target)
                     dst_parent = _join(base, (canonical or label))
-
+                    # print(src_parent,dst_parent)
                     # build child prefix map: {"net.2": "down", "net.0.proj": "up", ...}
                     child_map: Dict[str, str] = {}
                     for sublabel, subpath in inner.items():
@@ -282,7 +283,7 @@ def build_module_mapper(hf_model: Any, top_yaml_path: str, *, strict: bool = Fal
         elif isinstance(node, list):
             for i, v in enumerate(node):
                 recurse(v, f"{prefix}[{i}]")
-
+    # print(cfg)
     recurse(cfg)
     return out
 

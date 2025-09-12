@@ -1,9 +1,15 @@
+from __future__ import annotations
 from datasets import load_dataset
 import zstandard as zstd
 import io
 import json
 import os
 from nnsight import LanguageModel
+from typing import Any, List, Dict
+from pydantic import BaseModel
+from enum import Enum
+import torch
+from nnsight.modeling.diffusion import DiffusionModel
 
 # from .trainers.top_k import AutoEncoderTopK
 # from .trainers.batch_top_k import BatchTopKSAE
@@ -93,6 +99,10 @@ def get_nested_folders(path: str) -> list[str]:
 
 #     return dictionary, config
 
+def encode_prompt(prompt:str, model:DiffusionModel):  
+    prompt_embeds, negative_prompt_embeds = model.pipeline.encode_prompt(prompt, model.device, 1, True, None) #tokens for empty prompt
+    prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
+    return prompt_embeds
 
 def get_submodule(model: LanguageModel, layer: int):
     """Gets the residual stream submodule"""
@@ -108,3 +118,26 @@ def get_submodule(model: LanguageModel, layer: int):
         return model.model.layers[layer]
     else:
         raise ValueError(f"Please add submodule for model {model_name}")
+
+class FieldModel(BaseModel):
+    
+    class FieldType(Enum):
+        
+        string = 'string'
+        float = 'float'
+        integer = 'integer'
+    
+    name: str
+    
+    type: FieldModel.FieldType
+
+
+class InterventionModel(BaseModel):
+
+    name: str
+
+    fields: List[FieldModel] = []
+    
+    num_instances: int = 0
+    
+    instances: List = []    

@@ -1,18 +1,20 @@
 from __future__ import annotations
 from loguru import logger
 import torch.nn as nn
+import torch
 from nnsight.modeling.diffusion import DiffusionModel
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from typing import Dict, List, Optional, Union
-from clip_encoder import ClipEncoder
-from flux_transformer2D_model import FluxTransformer
-from t5_encoder import T5Encoder
-from unet import Unet
+from t2Interp.clip_encoder import ClipEncoder
+from t2Interp.flux_transformer2D_model import FluxTransformer
+from t2Interp.t5_encoder import T5Encoder
+from t2Interp.unet import Unet
 from transformers import CLIPTextModel, T5EncoderModel
 from diffusers.models import UNet2DConditionModel
 from diffusers.models.transformers.transformer_flux import FluxTransformer2DModel
 from utils.config_loader import build_module_mapper
+import warnings
 
 def _by_type(type_):
     def pred(m): 
@@ -39,10 +41,10 @@ def _from_comp_key(default_name):
 #     ["flux"] : "../config/FluxTransformer2DModel.yaml"    
 #     }
 
-CONFIG_MAP = [(_by_type(CLIPTextModel), "../config/CLIPEncoder.yaml"),
-                 (_by_type(T5EncoderModel), "../config/T5EncoderModel.yaml"),
-                 (_by_type(UNet2DConditionModel), "../config/unet.yaml"),
-                (_by_type(FluxTransformer2DModel), "../config/FluxTransformer2DModel.yaml"),
+CONFIG_MAP = [(_by_type(CLIPTextModel), "./config/CLIPEncoder.yaml"),
+                 (_by_type(T5EncoderModel), "./config/T5EncoderModel.yaml"),
+                 (_by_type(UNet2DConditionModel), "./config/unet.yaml"),
+                (_by_type(FluxTransformer2DModel), "./config/FluxTransformer2DModel.yaml"),
                  ]
 
 REGISTRY = []
@@ -52,17 +54,43 @@ REGISTRY.extend([(_by_type(CLIPTextModel), _from_comp_key("clip_encoder"), ClipE
                 (_by_type(FluxTransformer2DModel), _from_comp_key("flux_transformer"), FluxTransformer),
                  ])
 
+def _parse_dtype(x):
+    _DTYPE_ALIASES = {
+        "float16": torch.float16, "fp16": torch.float16, "half": torch.float16,
+        "bfloat16": torch.bfloat16, "bf16": torch.bfloat16,
+        "float32": torch.float32, "fp32": torch.float32, "single": torch.float32,
+        "float64": torch.float64, "fp64": torch.float64, "double": torch.float64,
+    }
+    if x is None or isinstance(x, torch.dtype): return x
+    if isinstance(x, str): return _DTYPE_ALIASES.get(x.lower())
+    return x
+
+def _parse_device(x):
+    if x is None: return None
+    if isinstance(x, torch.device): return x
+    if torch.is_tensor(x): return x.device
+    if isinstance(x, int): return torch.device(f"cuda:{x}")
+    if isinstance(x, str):
+        if x.lower() == "auto":   # people sometimes pass device_map through here by mistake
+            return None
+        try:
+            return torch.device(x)   # "cuda:0", "cpu", "cuda"
+        except Exception:
+            return None
+    return None
+
 class T2IModel(DiffusionModel):
     def __init__(
         self,
         model: str | nn.Module,
+        device: Optional[Union[str, Dict[str, int]]] = "cuda:0",
+        dtype: Optional[torch.dtype] = torch.float16,
         trust_remote_code: bool = False,
         check_renaming: bool = True,
         allow_dispatch: bool = True,
         rename_config: Dict[str, str] | None = None,
         **kwargs,
     ):
-        kwargs.setdefault("device_map", "auto")
         # Check if attention implementation is supported for attention pattern tracing
         if "attn_implementation" in kwargs:
             impl = kwargs.pop("attn_implementation", None)
@@ -82,9 +110,20 @@ class T2IModel(DiffusionModel):
         # #         f"Updating default rename with user-provided rename: {user_rename}"
         # #     )
         # #     rename_config.update(user_rename)
+        self.init_kwargs={
+            "model": model,
+            "device": device,
+            "dtype": dtype,
+            "trust_remote_code": trust_remote_code,
+            "check_renaming": check_renaming,
+            "allow_dispatch": allow_dispatch,
+            "rename_config": rename_config,
+            **kwargs,
+        }
         
         super().__init__(
             model,
+            dispatch=True,
             attn_implementation=impl,
             tokenizer_kwargs=tokenizer_kwargs,
             trust_remote_code=trust_remote_code,
@@ -92,51 +131,71 @@ class T2IModel(DiffusionModel):
             **kwargs,
         )
         
-        # if isinstance(model, str):
-        #     model_name = model
-        # else:
-        #     model_name = model.__class__.__name__
+        device= _parse_device(device)
+        dtype = _parse_dtype(dtype)
+
+        if device:
+            self.to(device)
+        if dtype:
+            self.to(dtype)                
+    
+        self.map_properties()
         
+        # if isinstance(model, str):
+        #     self.model_name = model
+        # else:
+        #     self.model_name = model.__class__.__name__
+       
     def map_properties(self):
         comps = getattr(self.pipeline, "components", None)
         visited = set()
-
+        rename_config={}
+        self._wrappers = {}
         def consider(comp_key, module):
             if module in visited:
                 return
             visited.add(module)
             for pred, name_fn, ctor in REGISTRY:
-                try:
-                    if pred(module):
-                        attr_name = name_fn(comp_key, module)
-                        # Disambiguate duplicates by suffixing the attr_name when names collide
-                        if hasattr(self, attr_name):
-                            i = 2
-                            while hasattr(self, f"{attr_name}_{i}"):
-                                i += 1
-                            attr_name = f"{attr_name}_{i}"
-                        wrapper = ctor(module, name=attr_name)
-                        setattr(self, attr_name, wrapper)
-                        self._wrappers[attr_name] = wrapper
-                        # if verbose:
-                        #     print(f"[T2I] attached {attr_name}: {module.__class__.__name__}") # logger
-                        return
-                except Exception:
-                    continue  # keep scanning other rules
+                if pred(module):
+                    attr_name = name_fn(comp_key, module)
+                    # Disambiguate duplicates by suffixing the attr_name when names collide
+                    if hasattr(self, attr_name):
+                        wrapper = ctor(getattr(self, attr_name)) # wrap existing
+                        i = 2
+                        while hasattr(self, f"{attr_name}_{i}"):
+                            i += 1
+                        attr_name = f"{attr_name}_{i}"
+                    else:
+                        # wrapper = ctor(module)    
+                        # log skip
+                        continue
+                    setattr(self, attr_name, wrapper)
+                    self._wrappers[attr_name] = wrapper
+                    # if verbose:
+                    #     print(f"[T2I] attached {attr_name}: {module.__class__.__name__}") # logger
+              
                     
         # renaming modules for consistency
         if isinstance(comps, dict):
-            rename_config={}
             for k, v in comps.items():
                 # v can be nn.Module, tokenizer, scheduler, etc.
                 is_mod = isinstance(v, nn.Module)
                 if is_mod:
                     config_applicable = [cfg for pred, cfg  in CONFIG_MAP if pred(v)]
-                    rename_config.update({build_module_mapper(self,cfg) for cfg in config_applicable})
+                    # rename_config= {k:v for cfg in config_applicable for k,v in build_module_mapper(self,cfg).items()}
+                    for cfg in config_applicable:
+                        rename_config.update(build_module_mapper(self,cfg))
+            
+            self.init_kwargs["rename_config"]=rename_config
+            # super().__init__(
+            #     self.init_kwargs.pop("model"),
+            #     **self.init_kwargs
+            # )  
             super().__init__(
                 self._model,
                 rename=rename_config,
-            )        
+            )    
+        
         
         # creating properties dynamically based on what classes exist in the model            
         if isinstance(comps, dict):
@@ -146,8 +205,30 @@ class T2IModel(DiffusionModel):
                 if is_mod:
                     consider(k, v)       
         del visited      
-        # log
 
+
+    # def to(self, *args, **kwargs):
+        
+
+    #     if getattr(self, "_uses_dispatch", False):
+    #         warnings.warn(
+    #             "Model is sharded via device_map; skipping .to(). "
+    #             "Load without device_map to allow .to(...)."
+    #         )
+    #         return self
+        
+    #     device = kwargs.pop("device", None)
+    #     dtype  = kwargs.pop("dtype", None)
+
+    #     device= _parse_device(device)
+    #     dtype = _parse_dtype(dtype)
+    #     print(device,dtype)
+    #     if device:    
+    #         self.to(device)
+    #     if dtype:
+    #         self.to(dtype)                
+    #     return self
+    
     def run_with_cache(self, prompt, modules: List[nn.Module]):
         with self.trace(prompt) as tracer:
             cache = tracer.cache(modules=modules).save()

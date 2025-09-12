@@ -73,135 +73,138 @@ class ModuleAccessor:
     def __call__(self, layer: int) -> TraceTensor | Envoy:
         return self[layer]
 
-
 class AttentionAccessor:
-    def __init__(self, model, rename_config: RenameConfig | None = None):
-        self.model = model
-        if rename_config is not None and rename_config.attn_prob_source is not None:
-            self.source_attr = rename_config.attn_prob_source
-        elif isinstance(model._model, BloomForCausalLM):
-            self.source_attr = bloom_attention_prob_source
-        elif isinstance(model._model, GPT2LMHeadModel):
-            self.source_attr = gpt2_attention_prob_source
-        elif isinstance(model._model, GPTJForCausalLM):
-            self.source_attr = gptj_attention_prob_source
-        else:
-            self.source_attr = default_attention_prob_source
-        self.enabled = True
+    def __init__(self):
+        pass
 
-    def disable(self):
-        self.enabled = False
+# class AttentionAccessor:
+#     def __init__(self, model, rename_config: RenameConfig | None = None):
+#         self.model = model
+#         if rename_config is not None and rename_config.attn_prob_source is not None:
+#             self.source_attr = rename_config.attn_prob_source
+#         elif isinstance(model._model, BloomForCausalLM):
+#             self.source_attr = bloom_attention_prob_source
+#         elif isinstance(model._model, GPT2LMHeadModel):
+#             self.source_attr = gpt2_attention_prob_source
+#         elif isinstance(model._model, GPTJForCausalLM):
+#             self.source_attr = gptj_attention_prob_source
+#         else:
+#             self.source_attr = default_attention_prob_source
+#         self.enabled = True
 
-    def __getitem__(self, layer: int) -> TraceTensor:
-        if not self.enabled:
-            raise RenamingError("Attention probabilities are disabled for this model.")
-        return self.source_attr(self.model.layers[layer].self_attn).output
+#     def disable(self):
+#         self.enabled = False
 
-    def __setitem__(self, layer: int, value: TraceTensor):
-        if not self.enabled:
-            raise RenamingError("Attention probabilities are disabled for this model.")
-        self.source_attr(self.model.layers[layer].self_attn).output = value
+#     def __getitem__(self, layer: int) -> TraceTensor:
+#         if not self.enabled:
+#             raise RenamingError("Attention probabilities are disabled for this model.")
+#         return self.source_attr(self.model.layers[layer].self_attn).output
 
-    def check_source(
-        self, layer: int = 0, allow_dispatch: bool = True, use_trace: bool = True
-    ):
-        if self.model.num_heads is None:
-            raise RenamingError(
-                f"Can't check the shapes of the model internals because the number of attention heads is not available in {self.model.repo_id} architecture."
-                "You should pass the number of attention heads as an integer or look at the config and pass the key in the attn_head_config_key argument of a RenameConfig."
-            )
+#     def __setitem__(self, layer: int, value: TraceTensor):
+#         if not self.enabled:
+#             raise RenamingError("Attention probabilities are disabled for this model.")
+#         self.source_attr(self.model.layers[layer].self_attn).output = value
 
-        def test_prob_source():
-            batch_size, seq_len = self.model.input_size
-            num_heads = self.model.num_heads
-            probs = self[layer]
-            if probs.shape != (batch_size, num_heads, seq_len, seq_len):
-                raise RenamingError(
-                    f"Attention probabilities have shape {probs.shape} != {(batch_size, num_heads, seq_len, seq_len)} (batch_size, n_head, seq_len, seq_len) in {self.model.repo_id} architecture. This means it's not properly initialized."
-                )
-            rnd = th.randn_like(probs).abs()
-            rnd = rnd / rnd.sum(dim=-1, keepdim=True)
-            self[layer] = rnd
-            if probs.device != th.device("meta"):
-                sum_last = probs.sum(dim=-1)
-                if not th.allclose(sum_last, th.ones_like(sum_last)):
-                    raise RenamingError("Attention probabilities do not sum to 1.")
+#     def check_source(
+#         self, layer: int = 0, allow_dispatch: bool = True, use_trace: bool = True
+#     ):
+#         if self.model.num_heads is None:
+#             raise RenamingError(
+#                 f"Can't check the shapes of the model internals because the number of attention heads is not available in {self.model.repo_id} architecture."
+#                 "You should pass the number of attention heads as an integer or look at the config and pass the key in the attn_head_config_key argument of a RenameConfig."
+#             )
 
-        if use_trace:
-            with self.model.trace(dummy_inputs()):
-                test_prob_source()
-                corr_logits = self.model.logits.save()
-            with self.model.trace(dummy_inputs()):
-                clean_logits = self.model.logits.save()
+#         def test_prob_source():
+#             batch_size, seq_len = self.model.input_size
+#             num_heads = self.model.num_heads
+#             probs = self[layer]
+#             if probs.shape != (batch_size, num_heads, seq_len, seq_len):
+#                 raise RenamingError(
+#                     f"Attention probabilities have shape {probs.shape} != {(batch_size, num_heads, seq_len, seq_len)} (batch_size, n_head, seq_len, seq_len) in {self.model.repo_id} architecture. This means it's not properly initialized."
+#                 )
+#             rnd = th.randn_like(probs).abs()
+#             rnd = rnd / rnd.sum(dim=-1, keepdim=True)
+#             self[layer] = rnd
+#             if probs.device != th.device("meta"):
+#                 sum_last = probs.sum(dim=-1)
+#                 if not th.allclose(sum_last, th.ones_like(sum_last)):
+#                     raise RenamingError("Attention probabilities do not sum to 1.")
 
-            if th.allclose(corr_logits, clean_logits):
-                raise RenamingError(
-                    "Attention probabilities are not properly initialized: changing the attention probabilities should change the logits."
-                )
-            return
+#         if use_trace:
+#             with self.model.trace(dummy_inputs()):
+#                 test_prob_source()
+#                 corr_logits = self.model.logits.save()
+#             with self.model.trace(dummy_inputs()):
+#                 clean_logits = self.model.logits.save()
 
-        try_with_scan(
-            self.model,
-            test_prob_source,
-            RenamingError(
-                "Can't access attention probabilities. It is most likely not yet supported for this architecture and transformers version."
-            ),
-            allow_dispatch=allow_dispatch,
-            errors_to_raise=(RenamingError,),
-        )
+#             if th.allclose(corr_logits, clean_logits):
+#                 raise RenamingError(
+#                     "Attention probabilities are not properly initialized: changing the attention probabilities should change the logits."
+#                 )
+#             return
 
-    def print_source(self, layer: int = 0, allow_dispatch: bool = True):
-        in_notebook = is_notebook()
-        if in_notebook:
-            markdown_text = "## Accessing attention probabilities from:\n"
-        else:
-            print("Accessing attention probabilities from:")
+#         try_with_scan(
+#             self.model,
+#             test_prob_source,
+#             RenamingError(
+#                 "Can't access attention probabilities. It is most likely not yet supported for this architecture and transformers version."
+#             ),
+#             allow_dispatch=allow_dispatch,
+#             errors_to_raise=(RenamingError,),
+#         )
 
-        def print_hook_source():
-            nonlocal markdown_text
-            source = self.source_attr(self.model.layers[layer].self_attn)
-            if in_notebook:
-                markdown_text += f"```py\n{source}\n```"
-            else:
-                print(source)
+#     def print_source(self, layer: int = 0, allow_dispatch: bool = True):
+#         in_notebook = is_notebook()
+#         if in_notebook:
+#             markdown_text = "## Accessing attention probabilities from:\n"
+#         else:
+#             print("Accessing attention probabilities from:")
 
-        used_scan = try_with_scan(
-            self.model,
-            print_hook_source,
-            RenamingError(
-                "Can't access attention probabilities. It is most likely not yet supported for this architecture and transformers version."
-            ),
-            allow_dispatch=allow_dispatch,
-        )
-        if in_notebook:
-            markdown_text += "\n\n## Full module source:\n"
-        else:
-            print("\n\nFull module source:")
+#         def print_hook_source():
+#             nonlocal markdown_text
+#             source = self.source_attr(self.model.layers[layer].self_attn)
+#             if in_notebook:
+#                 markdown_text += f"```py\n{source}\n```"
+#             else:
+#                 print(source)
 
-        def print_attn_source():
-            nonlocal markdown_text
-            source = str(
-                self.source_attr(
-                    self.model.layers[layer].self_attn, return_module_source=True
-                )
-            )
-            if in_notebook:
-                markdown_text += f"```py\n{source}\n```"
-            else:
-                print(source)
+#         used_scan = try_with_scan(
+#             self.model,
+#             print_hook_source,
+#             RenamingError(
+#                 "Can't access attention probabilities. It is most likely not yet supported for this architecture and transformers version."
+#             ),
+#             allow_dispatch=allow_dispatch,
+#         )
+#         if in_notebook:
+#             markdown_text += "\n\n## Full module source:\n"
+#         else:
+#             print("\n\nFull module source:")
 
-        try_with_scan(
-            self.model,
-            print_attn_source,
-            RenamingError(
-                "Can't access attention probabilities. It is most likely not yet supported for this architecture and transformers version."
-            ),
-            allow_dispatch=allow_dispatch,
-            warn_if_scan_fails=used_scan,
-        )
+#         def print_attn_source():
+#             nonlocal markdown_text
+#             source = str(
+#                 self.source_attr(
+#                     self.model.layers[layer].self_attn, return_module_source=True
+#                 )
+#             )
+#             if in_notebook:
+#                 markdown_text += f"```py\n{source}\n```"
+#             else:
+#                 print(source)
 
-        if in_notebook:
-            display_markdown(markdown_text)
+#         try_with_scan(
+#             self.model,
+#             print_attn_source,
+#             RenamingError(
+#                 "Can't access attention probabilities. It is most likely not yet supported for this architecture and transformers version."
+#             ),
+#             allow_dispatch=allow_dispatch,
+#             warn_if_scan_fails=used_scan,
+#         )
+
+#         if in_notebook:
+#             display_markdown(markdown_text)
 
 
 # def get_ignores(model, rename_config: RenameConfig | None = None) -> list[str]:

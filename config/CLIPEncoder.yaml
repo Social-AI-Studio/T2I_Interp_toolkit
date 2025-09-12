@@ -9,3 +9,11 @@ norms:
   slots:
     pre_norm:  "layer_norm1"
     post_norm: "layer_norm2"
+
+attn:
+  discover: "**.text_model.encoder.layers.*.self_attn"
+  slots:
+    q: "q_proj"   # 768 -> 768*3
+    k: "k_proj"  # 768 -> 768   
+    v: "v_proj"  # 768 -> 768
+    out: "out_proj"  # 768 -> 768 
