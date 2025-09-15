@@ -13,6 +13,9 @@ from typing import List, Union, Sequence, Optional
 from transformers import CLIPModel, CLIPProcessor
 
 class MetricBase:
+    def __init__(self):
+        pass
+
     def compute(self, *args, **kwargs):
         pass
 
@@ -31,7 +34,7 @@ class CLIPImageDataset(torch.utils.data.Dataset):
 
 
         
-class CLIPScore:
+class CLIPScore(MetricBase):
     """
     Cosine similarity between a GT image and each candidate image using CLIP image encoder.
     Uses Hugging Face Transformers checkpoint names, e.g. 'openai/clip-vit-large-patch14'.
@@ -46,16 +49,18 @@ class CLIPScore:
     def _l2_normalize(x: torch.Tensor, dim: int = -1) -> torch.Tensor:
         return x / (x.norm(dim=dim, keepdim=True) + 1e-8)
 
-    def compute(self, images: Union[List[Image.Image], Output]) -> Output:
+    def compute(self, images: Union[List[Image.Image], Output], **kwargs) -> Output:
         # Accept Output or raw list[Image]
         if isinstance(images, Output):
-            out = images.copy()
+            out = images
+            gt_image = kwargs.get("gt", None)
+            assert gt_image is not None, "Need gt image when passing raw images"
+            cands = images.preds
+        else:
             assert len(out.preds) >= 2, "Need [gt, cand1, cand2, ...] in Output.preds"
             gt_image, cands = out.preds[0], out.preds[1:]
-        else:
-            assert len(images) >= 2, "Need [gt, cand1, cand2, ...]"
-            out = Output(preds=list(images))
-            gt_image, cands = images[0], images[1:]
+            out = Output()
+            
 
         # Ensure PIL and RGB
         gt_image = gt_image.convert("RGB")

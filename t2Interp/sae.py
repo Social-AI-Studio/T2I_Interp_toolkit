@@ -1,18 +1,24 @@
 import torch
+from sparsify import SaeConfig, Trainer, TrainConfig
+from sparsify.data import chunk_and_tokenize
 import torch.nn as nn
 from T2I import T2IModel
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class SAEManager:
     def __init__(self, model):
-        self.model = model
+        self.model: T2IModel = model
         self.saes = {}        # dict: hook_name -> SAE module
         self.handles = {}     # dict: hook_name -> hook handle
 
-    def train(self, data_loader, sites):
-        # load sae training config 
-        # minimum scafolding around sparsify
-        # save after training
-        pass
+    def train(self, dataset, modules, save_data=False):
+        
+
+        cfg = TrainConfig(SaeConfig(), batch_size=16)
+        trainer = Trainer(cfg, tokenized, gpt)
+
+        trainer.fit()
 
     def _load(self, model:T2IModel, sae_dict:dict[str,nn.module], edit=False):
         """
@@ -30,29 +36,26 @@ class SAEManager:
     def extract_activation(self,site):
         pass
         
-    def intervene(self, name, features, mode="scale", value=1.0):
-        """
-        name: which SAE site to intervene on
-        features: indices of features to manipulate
-        mode: "scale", "ablate", or "set"
-        value: scalar or tensor value
-        """
+    # def intervene(self, name, features, mode="scale", value=1.0):
+    #     """
+    #     name: which SAE site to intervene on
+    #     features: indices of features to manipulate
+    #     mode: "scale", "ablate", or "set"
+    #     value: scalar or tensor value
+    #     """
         
-        sae = self.saes[name]
-        # shape has to be managed based on the module
-        def hook_fn(mod, inp, out):
-            f = sae.encode(out)
-            if mode == "scale":
-                f[:, features] *= value
-            elif mode == "ablate":
-                f[:, features] = 0.0
-            elif mode == "set":
-                f[:, features] = value
-            return sae.decode(f)
-        
-        # 
+    #     sae = self.saes[name]
+    #     # shape has to be managed based on the module
+    #     def hook_fn(mod, inp, out):
+    #         f = sae.encode(out)
+    #         if mode == "scale":
+    #             f[:, features] *= value
+    #         elif mode == "ablate":
+    #             f[:, features] = 0.0
+    #         elif mode == "set":
+    #             f[:, features] = value
+    #         return sae.decode(f)
 
-    
     def evaluate(self, data_loader, site):
         pass
     

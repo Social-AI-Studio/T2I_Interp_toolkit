@@ -17,19 +17,26 @@ class ClipEncoder:
     """
     def __init__(self, clip_text_model: th.nn.Module):
         encoder=clip_text_model.text_model.encoder
-        self.blocks: Dict[int, TransformerBlock] = {
-            i: TransformerBlock(
+        self.blocks: List[TransformerBlock] = [
+            TransformerBlock(
                 in_=ModuleAccessor(encoder.layers[i],"clip_encoder_input",IOType.INPUT),
-                out_=ModuleAccessor(encoder.layers[i],"clip_encoder_output",IOType.OUTPUT),
+                out_=ModuleAccessor(encoder.layers[i],"clip_encoder_output",IOType.OUTPUT, returns_tuple=True),
                 attn_in=ModuleAccessor(encoder.layers[i].self_attn,"clip_encoder_attn",IOType.INPUT),
                 attn_out=ModuleAccessor(encoder.layers[i].self_attn,"clip_encoder_attn",IOType.OUTPUT),
+                WO_in=ModuleAccessor(encoder.layers[i].self_attn.out_proj,"clip_encoder_to_out",IOType.INPUT),
+                WO_out=ModuleAccessor(encoder.layers[i].self_attn.out_proj,"clip_encoder_to_out",IOType.OUTPUT, returns_tuple=True),
                 mlp_in=ModuleAccessor(encoder.layers[i].mlp,"clip_encoder_mlp_in",IOType.INPUT),
-                mlp_out=ModuleAccessor(encoder.layers[i].mlp,"clip_encoder_mlp_out",IOType.OUTPUT),
+                mlp_out=ModuleAccessor(encoder.layers[i].mlp,"clip_encoder_mlp_out",IOType.OUTPUT,returns_tuple=True),
                 ) for i in range(int(len(encoder.layers)))
-        }
+        ]
+        self.final_layer_norm_in = ModuleAccessor(clip_text_model.text_model.final_layer_norm,"clip_encoder_final_layer_norm",IOType.INPUT)
 
     def summary(self) -> str:
-        lines = [blk.summary() for blk in self]
-        return "\n".join(lines)
+        return "blocks:\n" + "".join(
+            f"{i}: {block}\n" for i, block in enumerate(self.blocks)
+        )
+    
+    def __repr__(self):
+        return self.summary()
         
         

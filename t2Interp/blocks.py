@@ -19,6 +19,8 @@ class TransformerBlock:
     out_: Optional[ModuleAccessor] = None
     attn_in: Optional[ModuleAccessor] = None  
     attn_out: Optional[ModuleAccessor] = None  
+    WO_in: Optional[ModuleAccessor] = None
+    WO_out: Optional[ModuleAccessor] = None
     q_in: Optional[ModuleAccessor] = None  
     q_out: Optional[ModuleAccessor] = None
     k_in: Optional[ModuleAccessor] = None
@@ -35,10 +37,12 @@ class TransformerBlock:
     # ---- helpers ----
     def summary(self) -> str:
         return (
-            f"[L{self.layer:02d}] "
-            f"in={bool(self.in_)} | attn={bool(self.attention)} | "
-            f"mlp_in={bool(self.mlp_in)} | mlp_out={bool(self.mlp_out)} | out={bool(self.out_)}"
+            f"in_ | attn_in | attn_out | WO_in | WO_out | mlp_in | mlp_out | out_ | "
+            f"q_in | k_in | v_in | q_out | k_out | v_out"
         )
+        
+    def __repr__(self):
+        return self.summary()    
         
 @dataclass
 class UnetTransformerBlock:
@@ -64,12 +68,16 @@ class UnetTransformerBlock:
     cross_v_out: Optional[ModuleAccessor] = None
     self_attn_in: Optional[ModuleAccessor] = None  
     self_attn_out: Optional[ModuleAccessor] = None  
-    self_q_in: Optional[ModuleAccessor] = None  
-    self_q_out: Optional[ModuleAccessor] = None
-    self_k_in: Optional[ModuleAccessor] = None
-    self_k_out: Optional[ModuleAccessor] = None
-    self_v_in: Optional[ModuleAccessor] = None
-    self_v_out: Optional[ModuleAccessor] = None
+    self_attn_q_in: Optional[ModuleAccessor] = None  
+    self_attn_q_out: Optional[ModuleAccessor] = None
+    self_attn_k_in: Optional[ModuleAccessor] = None
+    self_attn_k_out: Optional[ModuleAccessor] = None
+    self_attn_v_in: Optional[ModuleAccessor] = None
+    self_attn_v_out: Optional[ModuleAccessor] = None
+    self_attn_WO_in: Optional[ModuleAccessor] = None
+    self_attn_WO_out: Optional[ModuleAccessor] = None
+    cross_attn_WO_in: Optional[ModuleAccessor] = None
+    cross_attn_WO_out: Optional[ModuleAccessor] = None
     
     def __init__(self, **kwargs):
         for k, v in kwargs.items():

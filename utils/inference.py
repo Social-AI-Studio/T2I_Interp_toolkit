@@ -10,10 +10,10 @@ InferenceFn = Callable[[torch.nn.Module, Dict[str, Any]], Dict[str, Any]]
 
 @dataclass
 class InferenceSpec:
-    name: str
     inference_fn: InferenceFn 
     metric_fns: Optional[Sequence[MetricBase.compute]] = field(default_factory=list[MetricBase.compute])
-    callback_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])            
+    callback_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])         
+    name: Optional[str] = None
     kwargs: Dict[str, Any] = field(default_factory=dict)
     
 class Inference:
@@ -35,6 +35,6 @@ class Inference:
             )
             if len(self.inference_spec.metric_fns)>0:
                 for cb in self.inference_spec.metric_fns:
-                    cb(out)
-                    
+                    cb(out, **self.inference_spec.kwargs)
+            out.name = self.inference_spec.name        
         return out   

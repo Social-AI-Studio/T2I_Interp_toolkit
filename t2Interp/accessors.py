@@ -7,6 +7,7 @@ from typing import Callable, Union, Type
 import torch as th
 from nnsight import Envoy
 from nnsight.intervention.tracing.globals import Object
+from typing import Literal
 
 TraceTensor = Union[th.Tensor, Object]
 
@@ -22,7 +23,7 @@ class ModuleAccessor:
 
     def __init__(
         self,
-        module: th.nn.Module,
+        module: th.nn.Module | Envoy,
         attr_name: str | None,
         io_type: IOType | None,
         returns_tuple: bool = False,
@@ -32,8 +33,24 @@ class ModuleAccessor:
         self.attr_name = attr_name
         self.io_type = io_type
         self.returns_tuple = returns_tuple
-
-    def __getitem__(self, layer: int) -> TraceTensor | Envoy:
+        # self.module.io_type = io_type
+        # self.module.returns_tuple = returns_tuple
+        
+        # self.module = self.attach_io_property_to_envoy(
+        #     module,
+        #     kind=self.io_type if self.io_type else IOType.INPUT,
+        #     returns_tuple=self.returns_tuple,
+        #     prop_name="value",
+        #     overwrite=True,
+        # )
+    
+    @property
+    def value(self) -> TraceTensor | Envoy:
+        if self.io_type is None:
+            # name = self.attr_name or "layers"
+            raise ValueError(
+                f"Cannot get the value of a module accessor."
+            )
         if self.io_type.value == "input":
             target = self.module.input
         elif self.io_type.value == "output":
@@ -44,35 +61,85 @@ class ModuleAccessor:
             return target[0]
         else:
             return target
-
-    def __setitem__(self, layer: int, value: TraceTensor):
+        
+    @value.setter
+    def value(self, new):
         if self.io_type is None:
-            # name = self.attr_name or "layers"
-            raise ValueError(
-                f"Cannot set the value of a module accessor."
-            )
-        # module = self.get_module(layer)
+            raise ValueError("Cannot set the value of a module accessor.")
+        kind = getattr(self.io_type, "value", self.io_type)
 
-        if self.io_type.value == "input":
+        if kind == "input":
             if self.returns_tuple:
-                if len(self.module.input) > 1:
-                    self.module.input = (value, *self.module.input[1:])
-                else:
-                    self.module.input = (value,)
+                # keep any extra tuple elements intact
+                old = getattr(self.module, "input")
+                rest = tuple(old[1:]) if isinstance(old, tuple) and len(old) > 1 else ()
+                self.module.input = (new, *rest)
             else:
-                self.module.input = value
+                self.module.input = new
+        elif kind == "output":
+            if self.returns_tuple:
+                old = getattr(self.module, "output")
+                rest = tuple(old[1:]) if isinstance(old, tuple) and len(old) > 1 else ()
+                self.module.output = (new, *rest)
+            else:
+                self.module.output = new
         else:
-            if self.returns_tuple:
-                if len(self.module.output) > 1:
-                    self.module.output = (value, *self.module.output[1:])
-                else:
-                    self.module.output = (value,)
-            else:
-                self.module.output = value
+            raise ValueError(f"Invalid io_type: {self.io_type}")
+    
+    @property
+    def heads(self) -> int:
+        return getattr(self.module, "heads", None)
+        
+    # def __call__(self) -> TraceTensor | Envoy:
+    #     return self.value
 
-    def __call__(self, layer: int) -> TraceTensor | Envoy:
-        return self[layer]
+    # def attach_io_property_to_envoy(
+    #     self,
+    #     env,
+    #     kind: IOType,
+    #     returns_tuple: bool = False,
+    #     prop_name: str = "value",
+    #     overwrite: bool = False,
+    # ):
+    #     """
+    #     Attach a property (default name='value') to THIS envoy instance only,
+    #     with getter/setter that read/write envoy.input/envoy.output accordingly.
+    #     """
+    #     # collide safely
+    #     Base = env.__class__
+    #     if hasattr(Base, prop_name) and not overwrite:
+    #         raise AttributeError(
+    #             f"{Base.__name__} already has '{prop_name}'. "
+    #             "Pass overwrite=True or choose a different prop_name (e.g. 'mi_value')."
+    #         )
 
+    #     def fget(self):
+    #         tgt = env.input if self.io_type == IOType.INPUT else env.output
+    #         if self.returns_tuple and isinstance(tgt, tuple):
+    #             return tgt[0]
+    #         return tgt
+
+    #     def fset(self, new):
+    #         if self.io_type == IOType.INPUT:
+    #             old = env.input
+    #             if self.returns_tuple:
+    #                 rest = tuple(old[1:]) if isinstance(old, tuple) and len(old) > 1 else ()
+    #                 env.input = (new, *rest) if rest else (new,)
+    #             else:
+    #                 env.input = new
+    #         else:
+    #             old = env.output
+    #             if self.returns_tuple:
+    #                 rest = tuple(old[1:]) if isinstance(old, tuple) and len(old) > 1 else ()
+    #                 env.output = (new, *rest) if rest else (new,)
+    #             else:
+    #                 env.output = new
+
+    #     # per-instance dynamic subclass so only THIS env is affected
+    #     attrs = {prop_name: property(fget, fset)}
+    #     env.__class__ = type(Base.__name__, (Base,), attrs)
+    #     return env
+        
 class AttentionAccessor:
     def __init__(self):
         pass

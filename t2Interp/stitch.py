@@ -7,13 +7,14 @@ import inspect
 import re
 import torch as th
 import torch.nn as nn
-from T2I import T2IModel
+from t2Interp.T2I import T2IModel
+from utils.output import Output
 
 
 @dataclass
-class StitchResult:
+class StitchResult(Output):
     model: Optional[T2IModel] = None  
-    info: Dict[str, Any]
+    info: Dict[str, Any] = None
 
 
 class MaskSpec:
@@ -55,8 +56,9 @@ class Stitcher:
             module_to_skip.skip(replacement.output)
             skipped_out=model.output.save()
 
-        info = {"skipped_module": str(module_to_skip), "skipped_With": str(replacement), "skipped_output": skipped_out}
-        return StitchResult(info=info)
+        
+        info = {"skipped_module": str(module_to_skip), "skipped_With": str(replacement)}
+        return StitchResult(info=info, preds=skipped_out)
 
     
     def run_diffusion_lens(
@@ -67,6 +69,7 @@ class Stitcher:
         final_module: nn.Module,
         # masked_module: Optional[nn.Module] = None,
         masks: Optional[List[MaskSpec]] = None,
+        final_norm : Optional[nn.Module] = None,
         **kwargs,
     ) -> StitchResult:
         """
@@ -77,22 +80,26 @@ class Stitcher:
           - `model` has a __call__ that accepts `callback` and `callback_steps` (most HF diffusion pipelines).
           - For decoded collection, model.vae must be present or you pass `decode_fn(model, latents)`.
         """     
-        info=[]    
+        # info=[]  
+        preds=[]  
         for m in module_list:
-            with th.no_grad():
-                with model.generate(
-                    prompt,
-                    **kwargs,
-                ):
-                    if masks:
-                        for mask in masks:
-                            mask.module.output = mask.value
+            with model.generate(
+                prompt,
+                **kwargs,
+            ):
+                if masks:
+                    for mask in masks:
+                        mask.module.output = mask.value
+                        
+                if final_norm:
+                    final_norm.value = m.value #m.output[0]
+                else:
+                    final_module.value = m.value #m.output[0]
 
-                    final_module.input = m.output[0]
-
-                    image = model.output.images[0].save()
-                    info.append({"module": m, "image": image, "masks": masks})
-        return StitchResult(info=info)
+                output = model.output.save()
+                # info.append({"module": m, "image": image, "masks": masks})
+                preds.extend(output.images)
+        return Output(preds=preds)
 
     def graft(
         self,
