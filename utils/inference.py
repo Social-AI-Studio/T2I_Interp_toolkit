@@ -2,7 +2,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Any, Protocol, Optional, Sequence
 import torch
-from transformers import Trainer, TrainingArguments
 from utils.output import Output
 from utils. metrics import MetricBase
 

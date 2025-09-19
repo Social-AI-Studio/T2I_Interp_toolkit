@@ -10,11 +10,13 @@ from t2Interp.clip_encoder import ClipEncoder
 from t2Interp.flux_transformer2D_model import FluxTransformer
 from t2Interp.t5_encoder import T5Encoder
 from t2Interp.unet import Unet
+from t2Interp.accessors import ModuleAccessor, IOType
 from transformers import CLIPTextModel, T5EncoderModel
 from diffusers.models import UNet2DConditionModel
 from diffusers.models.transformers.transformer_flux import FluxTransformer2DModel
 from utils.config_loader import build_module_mapper
 import warnings
+from utils.utils import FunctionModule
 
 def _by_type(type_):
     def pred(m): 
@@ -229,7 +231,24 @@ class T2IModel(DiffusionModel):
     #         self.to(dtype)                
     #     return self
     
-    def run_with_cache(self, prompt, modules: List[nn.Module]):
-        with self.trace(prompt) as tracer:
-            cache = tracer.cache(modules=modules).save()
-        return cache    
+    def run_with_cache(self, prompt, accessors: List[ModuleAccessor], **kwargs) -> List[ModuleAccessor, torch.Tensor]:
+        modules = [m.module for m in accessors]
+        for mod in modules:
+            if type(mod) == FunctionModule:
+                mod.bound_kwargs.update(kwargs)
+        
+        num_inference_steps = kwargs.pop("num_inference_steps", None)
+        seed = kwargs.pop("seed", None)
+        if num_inference_steps is None or seed is None:
+            raise ValueError("num_inference_steps and seed must be provided in kwargs")
+                
+        with self.generate(prompt, num_inference_steps=num_inference_steps, seed=seed) as tracer:
+            dtype,device,detach = kwargs.get("dtype", None), kwargs.get("device", "cpu"), kwargs.get("detach", True)
+            cache = tracer.cache(modules=modules, include_output = True, include_inputs=True, dtype=dtype, detach=detach, device=device)
+
+        for mod in modules:
+            if type(mod) == FunctionModule:
+                mod.bound_kwargs.clear()
+        
+        print(cache)                    
+        return [(accessors[i], v.input if accessors[i].io_type == IOType.INPUT else v.output) for i, (k,v) in enumerate(cache.items())]    

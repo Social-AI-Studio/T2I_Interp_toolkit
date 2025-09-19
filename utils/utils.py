@@ -5,7 +5,7 @@ import io
 import json
 import os
 from nnsight import LanguageModel
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Callable, Optional
 from pydantic import BaseModel
 from enum import Enum
 import torch
@@ -141,3 +141,14 @@ class InterventionModel(BaseModel):
     num_instances: int = 0
     
     instances: List = []    
+    
+class FunctionModule(torch.nn.Module):
+    def __init__(self, func: Callable, **bound_kwargs: Any):
+        super().__init__()
+        self.func = func
+        self.bound_kwargs = bound_kwargs  # stored as plain attrs
+
+    def forward(self, *args, **kwargs):
+        # kwargs at call-time override the bound ones
+        merged = {**self.bound_kwargs, **kwargs}
+        return self.func(*args, **merged)    
