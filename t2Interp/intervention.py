@@ -83,6 +83,7 @@ class EncoderAttentionIntervention(DiffusionIntervention):
         head_idx    = to_index(head_idx, n_heads)
 
         # (B, S, H, d)
+        hs = hs.view(hs.shape[0], S, n_heads, -1)
         if hs.shape[0] ==2:
             hs[0, spatial_idx[:, None], head_idx[None, :], :] = hs[1, spatial_idx[:, None], head_idx[None, :], :]
         elif hs.shape[0] ==4:
