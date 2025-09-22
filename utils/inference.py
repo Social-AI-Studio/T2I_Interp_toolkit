@@ -35,5 +35,9 @@ class Inference:
             if len(self.inference_spec.metric_fns)>0:
                 for cb in self.inference_spec.metric_fns:
                     cb(out, **self.inference_spec.kwargs)
+                    
+            if len(self.inference_spec.callback_fns)>0:
+                for cb in self.inference_spec.callback_fns:
+                    cb(out, **self.inference_spec.kwargs)        
             out.name = self.inference_spec.name        
         return out   

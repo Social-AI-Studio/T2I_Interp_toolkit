@@ -44,47 +44,57 @@ class SAEManager:
         sae_module: nn.Module implementing encode/decode
         """
         self.saes = sae_list
-        for envoy, sae, parent_attr_name in sae_list:
+        for accessor, sae, parent_attr_name in sae_list:
             encode = FunctionModule(sae.encode)
             decode = FunctionModule(sae.decode)
-            envoy.module.ae = nn.ModuleList([encode, decode])
-            envoy.ae = SAEBlock(**{"encoder_in":ModuleAccessor(None, parent_attr_name + "_encode_in", io_type=IOType.INPUT),
+            ae = nn.ModuleList([encode, decode])
+            accessor.module.add_module("ae", ae)
+            
+            accessor.ae = SAEBlock(**{"encoder_in":ModuleAccessor(None, parent_attr_name + "_encode_in", io_type=IOType.INPUT),
                             "encoder_out":ModuleAccessor(None, parent_attr_name + "_encode_out", io_type=IOType.OUTPUT),
                             "decoder_in":ModuleAccessor(None, parent_attr_name + "_decode_in", io_type=IOType.INPUT),
-                            "decoder_out":ModuleAccessor(None, parent_attr_name + "_decode_out", io_type=IOType.OUTPUT)})  
-            
+                            "decoder_out":ModuleAccessor(None, parent_attr_name + "_decode_out", io_type=IOType.OUTPUT)}) 
             
         with self.model.edit(inplace=edit) as edited: #inplace = True returns and edited model, inplace = False returns a copy
-            for envoy, sae, _ in sae_list:
-                args,kwargs = envoy.module.inputs
+            for accessor, sae, parent_attr_name in sae_list:
+                # encode = FunctionModule(sae.encode)
+                # decode = FunctionModule(sae.decode)
+                # ae = nn.ModuleList([encode, decode])
+                # accessor.module.add_module("sae", ae)
+                # accessor.ae = SAEBlock(**{"encoder_in":ModuleAccessor(ae[0], parent_attr_name + "_encode_in", io_type=IOType.INPUT),
+                #             "encoder_out":ModuleAccessor(ae[0], parent_attr_name + "_encode_out", io_type=IOType.OUTPUT),
+                #             "decoder_in":ModuleAccessor(ae[1], parent_attr_name + "_decode_in", io_type=IOType.INPUT),
+                #             "decoder_out":ModuleAccessor(ae[1], parent_attr_name + "_decode_out", io_type=IOType.OUTPUT)})
+            
+                kwargs = accessor.module.ae[0].bound_kwargs
                 
                 diff = kwargs.get("diff",False)
                 if diff:
-                    out = envoy.module.ae[0](envoy.module.output - envoy.module.input)
+                    out = accessor.module.ae[0](accessor.module.output - accessor.module.input)
                 else:
-                    out = envoy.module.ae[0](envoy.module.output)    
+                    out = accessor.module.ae[0](accessor.module.output)    
                     
                 mask = kwargs.get("mask", False)
                 error = kwargs.get("error", False)
                 
                 if mask and error:
                     out = t.cat([out,out * mask], dim=0) 
-                out = envoy.module.ae[1](out)
+                out = accessor.module.ae[1](out)
                 
                 if diff:
-                    out = out + envoy.module.input.expand((out.shape[0], envoy.module.input.shape[1:]))
+                    out = out + accessor.module.input.expand((out.shape[0], accessor.module.input.shape[1:]))
                     
                 if error:
-                    error = envoy.module.output - out[0]
+                    error = accessor.module.output - out[0]
                     out = out[1] + error
-                envoy.module.output = out 
+                accessor.module.ae[1].output = out 
         
-        for envoy, sae, _ in sae_list:        
-            envoy.ae.encoder_in.module = envoy.module.ae[0]
-            envoy.ae.encoder_out.module = envoy.module.ae[0]
-            envoy.ae.decoder_in.module = envoy.module.ae[1]
-            envoy.ae.decoder_out.module = envoy.module.ae[1]
-                       
+        for accessor, sae, _ in sae_list:        
+            accessor.ae.encoder_in.module = accessor.module.ae[0]
+            accessor.ae.encoder_out.module = accessor.module.ae[0]
+            accessor.ae.decoder_in.module = accessor.module.ae[1]
+            accessor.ae.decoder_out.module = accessor.module.ae[1]
+                           
         return edited
     
     def extract_activation(self,site):

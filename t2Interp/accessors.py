@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import Enum
 from loguru import logger
 from packaging import version
-from typing import Callable, Union, Type
+from typing import Callable, Union, Type, Any, Optional
 import torch as th
 from nnsight import Envoy
 from nnsight.intervention.tracing.globals import Object
@@ -89,7 +89,15 @@ class ModuleAccessor:
     @property
     def heads(self) -> int:
         return getattr(self.module, "heads", None)
-        
+      
+    @property
+    def inputs(self) -> Any:
+        return self.module.inputs  
+    
+    @inputs.setter
+    def inputs(self, new):
+        self.module.inputs=new
+     
     # def __call__(self) -> TraceTensor | Envoy:
     #     return self.value
 

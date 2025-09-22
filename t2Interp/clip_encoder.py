@@ -19,14 +19,14 @@ class ClipEncoder:
         encoder=clip_text_model.text_model.encoder
         self.blocks: List[TransformerBlock] = [
             TransformerBlock(
-                in_=ModuleAccessor(encoder.layers[i],"clip_encoder_input",IOType.INPUT),
-                out_=ModuleAccessor(encoder.layers[i],"clip_encoder_output",IOType.OUTPUT, returns_tuple=True),
-                attn_in=ModuleAccessor(encoder.layers[i].self_attn,"clip_encoder_attn",IOType.INPUT),
-                attn_out=ModuleAccessor(encoder.layers[i].self_attn,"clip_encoder_attn",IOType.OUTPUT),
-                WO_in=ModuleAccessor(encoder.layers[i].self_attn.out_proj,"clip_encoder_to_out",IOType.INPUT),
-                WO_out=ModuleAccessor(encoder.layers[i].self_attn.out_proj,"clip_encoder_to_out",IOType.OUTPUT, returns_tuple=True),
-                mlp_in=ModuleAccessor(encoder.layers[i].mlp,"clip_encoder_mlp_in",IOType.INPUT),
-                mlp_out=ModuleAccessor(encoder.layers[i].mlp,"clip_encoder_mlp_out",IOType.OUTPUT,returns_tuple=True),
+                in_=ModuleAccessor(encoder.layers[i],f"clip_encoder_block_{i}_input",IOType.INPUT),
+                out_=ModuleAccessor(encoder.layers[i],f"clip_encoder_block_{i}_output",IOType.OUTPUT, returns_tuple=True),
+                attn_in=ModuleAccessor(encoder.layers[i].self_attn,f"clip_encoder_block_{i}_self_attn_in",IOType.INPUT),
+                attn_out=ModuleAccessor(encoder.layers[i].self_attn,f"clip_encoder_block_{i}_self_attn_out",IOType.OUTPUT),
+                WO_in=ModuleAccessor(encoder.layers[i].self_attn.out_proj,f"clip_encoder_block_{i}_WO_in",IOType.INPUT),
+                WO_out=ModuleAccessor(encoder.layers[i].self_attn.out_proj,f"clip_encoder_block_{i}_WO_out",IOType.OUTPUT, returns_tuple=True),
+                mlp_in=ModuleAccessor(encoder.layers[i].mlp,f"clip_encoder_block_{i}_mlp_in",IOType.INPUT),
+                mlp_out=ModuleAccessor(encoder.layers[i].mlp,f"clip_encoder_block_{i}_mlp_out",IOType.OUTPUT,returns_tuple=True),
                 ) for i in range(int(len(encoder.layers)))
         ]
         self.final_layer_norm_in = ModuleAccessor(clip_text_model.text_model.final_layer_norm,"clip_encoder_final_layer_norm",IOType.INPUT)

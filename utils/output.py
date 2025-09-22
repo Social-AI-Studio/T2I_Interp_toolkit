@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 # @dataclass
 # class IO:
@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 class Output:
     preds: Any
     labels: Optional[Any] = None
-    metrics: Optional[Dict[str, float]] = None
+    metrics: Optional[List[Dict[str, float]]] = None
     name: Optional[str] = None
     
     def copy(self):
