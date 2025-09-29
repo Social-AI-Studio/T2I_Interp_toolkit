@@ -14,6 +14,7 @@ from utils.buffer import t2IActivationBuffer
 from tqdm import tqdm
 from contextlib import nullcontext
 from utils.runningstats import TrainUpdate
+from itertools import tee
 
 @dataclass
 class StitchResult(Output):
@@ -165,24 +166,22 @@ class Stitcher:
         mapper: nn.Module,
         optimizers: List[th.optim.Optimizer],
         model_b: Optional[T2IModel] = None,
-        device:str="cuda",
+        training_device:str="cuda",
+        data_device:str="cpu",
         autocast_dtype: th.dtype = th.float32,
         loss_fn: Optional[Callable] = None,
         **kwargs,
         ) -> Generator[TrainUpdate, None, nn.Module]:
 
-        generator = hf_dataset_to_generator(hf_dataset)
-        buffer_a = t2IActivationBuffer(generator, model_a, module_a, **kwargs)
-        if model_b is not None:
-            buffer_b = t2IActivationBuffer(generator, model_b, module_b, **kwargs)
-        else:
-            buffer_b = t2IActivationBuffer(generator, model_a, module_b, **kwargs)
+        generator = hf_dataset_to_generator(hf_dataset,**kwargs)
+        gen_a, gen_b = tee(generator)
+        buffer_a = t2IActivationBuffer(gen_a, model_a, module_a, **kwargs)
+        buffer_b = t2IActivationBuffer(gen_b, model_b if model_b is not None else model_a, module_b, **kwargs)
         
         log_steps = kwargs.get("log_steps", 100)  
-        autocast_context = nullcontext() if device == "cpu" else th.autocast(device_type=device, dtype=autocast_dtype)
+        autocast_context = nullcontext() if training_device == "cpu" else th.autocast(device_type=training_device, dtype=autocast_dtype)
         
-        for step, (act_a, act_b) in enumerate(tqdm((buffer_a,buffer_b), total=steps)):
-            
+        for step, (act_a, act_b) in enumerate(zip(buffer_a,buffer_b)):
             with autocast_context:
                 if loss_fn:
                     mapped,loss = mapper(act_a,loss_fn=loss_fn)

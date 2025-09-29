@@ -8,24 +8,47 @@ from fractions import Fraction
 import random
 from transformers import AutoTokenizer
 import torch as t
+from typing import Optional, List, Generator, Callable, Tuple
 
-from .trainers.top_k import AutoEncoderTopK
-from .trainers.batch_top_k import BatchTopKSAE
-from .trainers.matryoshka_batch_top_k import MatryoshkaBatchTopKSAE
-from .dictionary import (
+from dictionary_learning.trainers.top_k import AutoEncoderTopK
+from dictionary_learning.trainers.batch_top_k import BatchTopKSAE
+from dictionary_learning.trainers.matryoshka_batch_top_k import MatryoshkaBatchTopKSAE
+from dictionary_learning.dictionary import (
     AutoEncoder,
     GatedAutoEncoder,
     AutoEncoderNew,
     JumpReluAutoEncoder,
 )
+from itertools import islice
 
-
-def hf_dataset_to_generator(dataset_name, split="train", streaming=True):
+def hf_dataset_to_generator(dataset_name, split="train", streaming=True, **kwargs):
     dataset = load_dataset(dataset_name, split=split, streaming=streaming)
-
+    dataset_column = kwargs.get("dataset_column", "text")
+    subset = kwargs.get("subset", None)
+    base_iter = iter(dataset)
+    # Build an iterator over the requested subset
+    if subset is None:
+        iter_sub = base_iter
+    elif isinstance(subset, int):
+        iter_sub = islice(base_iter, subset)
+    else:
+        raise ValueError("subset must be None or an int")    
+        
+    def stringify(ex):
+        out = {}
+        for k, v in ex.items():
+            # keep strings as-is; stringify everything else (incl. lists/dicts)
+            if isinstance(v, (str, bytes)):
+                out[k] = v if isinstance(v, str) else v.decode("utf-8", "ignore")
+            else:
+                out[k] = json.dumps(v, ensure_ascii=False)
+        return out
+    
+    dataset = dataset.map(stringify)
+    dataset = dataset.with_format("python")
     def gen():
-        for x in iter(dataset):
-            yield x["text"]
+        for x in iter_sub:
+            yield x[dataset_column]
 
     return gen()
 

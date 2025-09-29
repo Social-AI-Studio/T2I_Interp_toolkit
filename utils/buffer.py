@@ -26,16 +26,16 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         d_submodule=None,  # submodule dimension; if None, try to detect automatically
         # io="out",  # can be 'in' or 'out'; whether to extract input or output activations, "in_and_out" for transcoders
         n_ctxs=3e4,  # approximate number of contexts to store in the buffer
-        ctx_len=128,  # length of each context
+        ctx_len=77,  # length of each context
         refresh_batch_size=512,  # size of batches in which to process the data when adding to buffer
         out_batch_size=512,  # size of batches in which to yield activations
-        device="cpu",  # device on which to store the activations
-        steps=(0,1),  # steps to trace over
+        data_device="cpu",  # device on which to store the activations
+        denoising_step=0,  # steps to trace over
         **kwargs,
     ):
         super().__init__(data=data,model=model,submodule=submodule,d_submodule=d_submodule,n_ctxs=n_ctxs,ctx_len=ctx_len,
-                         refresh_batch_size=refresh_batch_size,out_batch_size=out_batch_size,device=device)
-        self.activations = t.empty(0, d_submodule, device=device)
+                         refresh_batch_size=refresh_batch_size,out_batch_size=out_batch_size,device=data_device)
+        self.activations = t.empty(0, d_submodule, device=data_device)
         self.read = t.zeros(0).bool()
         self.data = data
         self.model = model
@@ -45,8 +45,8 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         self.ctx_len = ctx_len
         self.refresh_batch_size = refresh_batch_size
         self.out_batch_size = out_batch_size
-        self.device = device
-        self.steps = steps
+        self.device = data_device
+        self.steps = (denoising_step, denoising_step + 1) if isinstance(denoising_step, int) else denoising_step
 
     def __iter__(self):
         return self
@@ -76,16 +76,16 @@ class t2IActivationBuffer(NNsightActivationBuffer):
     #         texts, return_tensors="pt", max_length=self.ctx_len, padding=True, truncation=True
     #     )
 
-    # def token_batch(self, batch_size=None):
-    #     """
-    #     Return a list of text
-    #     """
-    #     if batch_size is None:
-    #         batch_size = self.refresh_batch_size
-    #     try:
-    #         return t.tensor([next(self.data) for _ in range(batch_size)], device=self.device)
-    #     except StopIteration:
-    #         raise StopIteration("End of data stream reached")
+    def token_batch(self, batch_size=None):
+        """
+        Return a list of text
+        """
+        if batch_size is None:
+            batch_size = self.refresh_batch_size
+        try:
+            return [next(self.data) for _ in range(batch_size)]
+        except StopIteration:
+            raise StopIteration("End of data stream reached")
         
     # def text_batch(self, batch_size=None):
     #     """
@@ -94,26 +94,40 @@ class t2IActivationBuffer(NNsightActivationBuffer):
     #     return self.token_batch(batch_size)
 
     def _reshaped_activations(self, hidden_states):
-        hidden_states = hidden_states.value
+        # hidden_states = hidden_states.value
         if isinstance(hidden_states, tuple):
             hidden_states = hidden_states[0]
-        hidden_states = hidden_states.view(-1)
+        hidden_states = hidden_states.view((hidden_states.shape[0],-1))
         return hidden_states
 
+    def __next__(self):
+        """
+        Return a batch of activations
+        """
+        with t.no_grad():
+            # if buffer is less than half full, refresh
+            if (~self.read).sum() < self.refresh_batch_size:
+                self.refresh()
+
+            # return a batch
+            unreads = (~self.read).nonzero().squeeze()
+            idxs = unreads[t.randperm(len(unreads), device=unreads.device)[: self.out_batch_size]]
+            self.read[idxs] = True
+            return self.activations[idxs]
+        
     def refresh(self):
         self.activations = self.activations[~self.read]
 
-        while len(self.activations) < self.n_ctxs * self.ctx_len:
+        while len(self.activations) < self.refresh_batch_size:
 
-            with t.no_grad(), self.model.trace(
-                self.token_batch(),
-                **tracer_kwargs,
-                invoker_args={"truncation": True, "max_length": self.ctx_len},
+            with t.no_grad(), self.model.generate(
+                self.token_batch(),tokenizer_kwargs={"truncation": True, "max_length": self.ctx_len,},
             ) as tracer:
                 with tracer.iter[self.steps[0]: self.steps[1]]:
                     hidden_states = self.submodule.value.save()
                     hidden_states = self._reshaped_activations(hidden_states)
                     self.activations = t.cat([self.activations, hidden_states.to(self.device)], dim=0)
+                    tracer.stop()
             self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
 
     @property

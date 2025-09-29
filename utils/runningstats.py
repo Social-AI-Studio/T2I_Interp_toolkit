@@ -37,6 +37,6 @@ class WandbUpdater(Updater):
         # if u.step % self.log_every == 0:
         data = {"step": u.step, **{k: v for k,v in u.parts.items()}}
         if u.extras: data.update(u.extras)
-        self.wandb.log(data, step=u.step)
+        self.wandb.log(data)
     def done(self):
         if self.run: self.run.finish()    

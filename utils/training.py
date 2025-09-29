@@ -30,14 +30,17 @@ class Training:
         gen = self.training_spec.fn(
             **self.training_spec.kwargs
         )
-        
-        try:
-            for update in gen:
+        while True:
+            try:
+                update = next(gen)
                 assert isinstance(update, TrainUpdate)
                 for su in self.training_spec.stats_updaters:
                     su.log(update)
-        except StopIteration as e:  
-            out = e.value                    
+            except StopIteration as e:  
+                out = e.value
+                for su in self.training_spec.stats_updaters:
+                    su.done()
+                break                    
         
         if len(self.training_spec.callback_fns)>0:
             for cb in self.training_spec.callback_fns:
