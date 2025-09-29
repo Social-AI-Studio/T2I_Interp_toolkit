@@ -23,7 +23,7 @@ class SAEManager:
 
     def train(self, hf_dataset, module:ModuleAccessor, **kwargs):
         generator = hf_dataset_to_generator(hf_dataset)
-        buffer = t2IActivationBuffer(generator, self.model, **kwargs)
+        buffer = t2IActivationBuffer(generator, self.model, module, **kwargs)
         trainer_config = sae_trainer_config(**kwargs)
         
         save_dir=kwargs.pop("save_dir", None)

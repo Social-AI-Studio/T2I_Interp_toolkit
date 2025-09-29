@@ -28,8 +28,10 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         n_ctxs=3e4,  # approximate number of contexts to store in the buffer
         ctx_len=128,  # length of each context
         refresh_batch_size=512,  # size of batches in which to process the data when adding to buffer
-        out_batch_size=8192,  # size of batches in which to yield activations
+        out_batch_size=512,  # size of batches in which to yield activations
         device="cpu",  # device on which to store the activations
+        steps=(0,1),  # steps to trace over
+        **kwargs,
     ):
         super().__init__(data=data,model=model,submodule=submodule,d_submodule=d_submodule,n_ctxs=n_ctxs,ctx_len=ctx_len,
                          refresh_batch_size=refresh_batch_size,out_batch_size=out_batch_size,device=device)
@@ -44,6 +46,7 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         self.refresh_batch_size = refresh_batch_size
         self.out_batch_size = out_batch_size
         self.device = device
+        self.steps = steps
 
     def __iter__(self):
         return self
@@ -90,13 +93,12 @@ class t2IActivationBuffer(NNsightActivationBuffer):
     #     """
     #     return self.token_batch(batch_size)
 
-    # def _reshaped_activations(self, hidden_states):
-    #     hidden_states = hidden_states.value
-    #     if isinstance(hidden_states, tuple):
-    #         hidden_states = hidden_states[0]
-    #     batch_size, seq_len, d_model = hidden_states.shape
-    #     hidden_states = hidden_states.view(batch_size * seq_len, d_model)
-    #     return hidden_states
+    def _reshaped_activations(self, hidden_states):
+        hidden_states = hidden_states.value
+        if isinstance(hidden_states, tuple):
+            hidden_states = hidden_states[0]
+        hidden_states = hidden_states.view(-1)
+        return hidden_states
 
     def refresh(self):
         self.activations = self.activations[~self.read]
@@ -107,11 +109,11 @@ class t2IActivationBuffer(NNsightActivationBuffer):
                 self.token_batch(),
                 **tracer_kwargs,
                 invoker_args={"truncation": True, "max_length": self.ctx_len},
-            ):
-                hidden_states = self.submodule.value.save()
-                hidden_states = self._reshaped_activations(hidden_states)
-
-            self.activations = t.cat([self.activations, hidden_states.to(self.device)], dim=0)
+            ) as tracer:
+                with tracer.iter[self.steps[0]: self.steps[1]]:
+                    hidden_states = self.submodule.value.save()
+                    hidden_states = self._reshaped_activations(hidden_states)
+                    self.activations = t.cat([self.activations, hidden_states.to(self.device)], dim=0)
             self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
 
     @property

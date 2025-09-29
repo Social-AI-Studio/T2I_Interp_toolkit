@@ -4,13 +4,14 @@ from typing import Callable, Dict, Any, Protocol, Optional, Sequence
 import torch
 from utils.output import Output
 from utils. metrics import MetricBase
+from utils.runningstats import TrainUpdate, Updater, WandbUpdater
 
 TrainingFn = Callable[[torch.nn.Module, Dict[str, Any]], Dict[str, Any]]
 
 @dataclass
 class TrainingSpec:
     fn: TrainingFn 
-    metric_fns: Optional[Sequence[MetricBase.compute]] = field(default_factory=list[MetricBase.compute])
+    stats_updaters: Optional[Sequence[Updater]] = field(default_factory=list[WandbUpdater])
     callback_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])         
     name: Optional[str] = None
     kwargs: Dict[str, Any] = field(default_factory=dict)
@@ -25,12 +26,21 @@ class Training:
         super().__init__(*args, **kw)
         self.training_spec = spec
 
-    def process(self) -> tuple:
-        out: Output = self.training_spec.fn(
+    def run_trainer(self) -> tuple:
+        gen = self.training_spec.fn(
             **self.training_spec.kwargs
         )
-        if len(self.training_spec.metric_fns)>0:
-            for cb in self.training_spec.metric_fns:
+        
+        try:
+            for update in gen:
+                assert isinstance(update, TrainUpdate)
+                for su in self.training_spec.stats_updaters:
+                    su.log(update)
+        except StopIteration as e:  
+            out = e.value                    
+        
+        if len(self.training_spec.callback_fns)>0:
+            for cb in self.training_spec.callback_fns:
                 cb(out, **self.training_spec.kwargs)
-        out.name = self.training_spec.name        
+                      
         return out   

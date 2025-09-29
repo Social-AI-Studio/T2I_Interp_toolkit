@@ -36,6 +36,11 @@ class Unet:
         setattr(self, "down_attn_blocks", [])
         setattr(self, "mid_attn_block", None)
         setattr(self, "up_attn_blocks", [])
+
+        in_=ModuleAccessor(unet.conv_in,f"unet_in",IOType.INPUT)
+        out_=ModuleAccessor(unet.conv_out,f"unet_out",IOType.OUTPUT)
+        setattr(self, "in_", in_)
+        setattr(self, "out_", out_)
         
         for i,down_block in enumerate(unet.down_blocks):
             if down_block._get_name()=='CrossAttnDownBlock2D':

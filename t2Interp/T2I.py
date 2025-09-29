@@ -17,6 +17,7 @@ from diffusers.models.transformers.transformer_flux import FluxTransformer2DMode
 from utils.config_loader import build_module_mapper
 import warnings
 from utils.utils import FunctionModule
+from diffusers import DiffusionPipeline
 
 def _by_type(type_):
     def pred(m): 
@@ -84,7 +85,7 @@ def _parse_device(x):
 class T2IModel(DiffusionModel):
     def __init__(
         self,
-        model: str | nn.Module,
+        model: str | DiffusionPipeline,
         device: Optional[Union[str, Dict[str, int]]] = "cuda:0",
         dtype: Optional[torch.dtype] = torch.float16,
         trust_remote_code: bool = False,
@@ -112,26 +113,29 @@ class T2IModel(DiffusionModel):
         # #         f"Updating default rename with user-provided rename: {user_rename}"
         # #     )
         # #     rename_config.update(user_rename)
-        self.init_kwargs={
-            "model": model,
-            "device": device,
-            "dtype": dtype,
-            "trust_remote_code": trust_remote_code,
-            "check_renaming": check_renaming,
-            "allow_dispatch": allow_dispatch,
-            "rename_config": rename_config,
-            **kwargs,
-        }
         
-        super().__init__(
-            model,
-            dispatch=True,
-            attn_implementation=impl,
-            tokenizer_kwargs=tokenizer_kwargs,
-            trust_remote_code=trust_remote_code,
-            rename=rename_config,
-            **kwargs,
-        )
+        # self.init_kwargs={
+        #     "model": model,
+        #     "device": device,
+        #     "dtype": dtype,
+        #     "trust_remote_code": trust_remote_code,
+        #     "check_renaming": check_renaming,
+        #     "allow_dispatch": allow_dispatch,
+        #     "rename_config": rename_config,
+        #     **kwargs,
+        # }
+        if type(model) == str:
+            super().__init__(
+                model,
+                dispatch=True,
+                attn_implementation=impl,
+                tokenizer_kwargs=tokenizer_kwargs,
+                trust_remote_code=trust_remote_code,
+                rename=rename_config,
+                **kwargs,
+            )
+        else:
+            raise NotImplementedError("Only model path is supported for T2IModel")
         
         device= _parse_device(device)
         dtype = _parse_dtype(dtype)
@@ -140,7 +144,7 @@ class T2IModel(DiffusionModel):
             self.to(device)
         if dtype:
             self.to(dtype)                
-    
+
         self.map_properties()
         
         # if isinstance(model, str):
@@ -178,25 +182,21 @@ class T2IModel(DiffusionModel):
               
                     
         # renaming modules for consistency
-        if isinstance(comps, dict):
-            for k, v in comps.items():
-                # v can be nn.Module, tokenizer, scheduler, etc.
-                is_mod = isinstance(v, nn.Module)
-                if is_mod:
-                    config_applicable = [cfg for pred, cfg  in CONFIG_MAP if pred(v)]
-                    # rename_config= {k:v for cfg in config_applicable for k,v in build_module_mapper(self,cfg).items()}
-                    for cfg in config_applicable:
-                        rename_config.update(build_module_mapper(self,cfg))
+        # if isinstance(comps, dict):
+        #     for k, v in comps.items():
+        #         # v can be nn.Module, tokenizer, scheduler, etc.
+        #         is_mod = isinstance(v, nn.Module)
+        #         if is_mod:
+        #             config_applicable = [cfg for pred, cfg  in CONFIG_MAP if pred(v)]
+        #             # rename_config= {k:v for cfg in config_applicable for k,v in build_module_mapper(self,cfg).items()}
+        #             for cfg in config_applicable:
+        #                 rename_config.update(build_module_mapper(self,cfg))
             
-            self.init_kwargs["rename_config"]=rename_config
-            # super().__init__(
-            #     self.init_kwargs.pop("model"),
-            #     **self.init_kwargs
-            # )  
-            super().__init__(
-                self._model,
-                rename=rename_config,
-            )    
+        #     self.init_kwargs["rename_config"]=rename_config
+        #     super().__init__(
+        #         self._model,
+        #         rename=rename_config,
+        #     )    
         
         
         # creating properties dynamically based on what classes exist in the model            
@@ -237,18 +237,17 @@ class T2IModel(DiffusionModel):
             if type(mod) == FunctionModule:
                 mod.bound_kwargs.update(kwargs)
         
-        num_inference_steps = kwargs.pop("num_inference_steps", None)
-        seed = kwargs.pop("seed", None)
+        num_inference_steps = kwargs.get("num_inference_steps", None)
+        seed = kwargs.get("seed", None)
         if num_inference_steps is None or seed is None:
             raise ValueError("num_inference_steps and seed must be provided in kwargs")
                 
         with self.generate(prompt, num_inference_steps=num_inference_steps, seed=seed) as tracer:
             dtype,device,detach = kwargs.get("dtype", None), kwargs.get("device", "cpu"), kwargs.get("detach", True)
-            cache = tracer.cache(modules=modules, include_output = True, include_inputs=True, dtype=dtype, detach=detach, device=device)
+            cache = tracer.cache(modules=modules, include_output = True, include_inputs=False, dtype=dtype, detach=detach, device=device)
 
         for mod in modules:
             if type(mod) == FunctionModule:
                 mod.bound_kwargs.clear()
-        
-        print(cache)                    
-        return [(accessors[i], v.input if accessors[i].io_type == IOType.INPUT else v.output) for i, (k,v) in enumerate(cache.items())]    
+                      
+        return [(accessors[i], [cache_entry.output for cache_entry in v]) for i, (k,v) in enumerate(cache.items())]    

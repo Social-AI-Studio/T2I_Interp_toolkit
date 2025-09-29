@@ -7,18 +7,18 @@ import inspect
 import re
 import torch as th
 import torch.nn as nn
-from T2I import T2IModel
+from t2Interp.T2I import T2IModel
 
-class Mapper(nn.Module):
-    """
-    Tools for:
-      Training a mapper network to map between the outputs of two modules
-    """
-    # mapper training
-    def train():
-        pass
+# class Mapper(nn.Module):
+#     """
+#     Tools for:
+#       Training a mapper network to map between the outputs of two modules
+#     """
+#     # mapper training
+#     def train():
+#         pass
     
-class AffineMapper(Mapper):
+class AffineMapper(nn.Module):
     def __init__(self, input_dim: int):
         super().__init__()
         self.scale = nn.Parameter(th.ones(input_dim))
@@ -27,7 +27,7 @@ class AffineMapper(Mapper):
     def forward(self, x: th.Tensor) -> th.Tensor:
         return x * self.scale + self.shift
     
-class MLPMapper(Mapper):
+class MLPMapper(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int = 512, num_layers: int = 2):
         super().__init__()
         layers = []
@@ -39,5 +39,8 @@ class MLPMapper(Mapper):
                 layers.append(nn.ReLU())
         self.network = nn.Sequential(*layers)
 
-    def forward(self, x: th.Tensor) -> th.Tensor:
-        return self.network(x)
+    def forward(self, x: th.Tensor, loss_fn:Optional[Callable]) -> th.Tensor:
+        predicted = self.network(x)
+        if loss_fn is not None:
+            return predicted, loss_fn(predicted, x)
+        return predicted

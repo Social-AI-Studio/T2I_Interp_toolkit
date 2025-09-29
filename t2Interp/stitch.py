@@ -1,7 +1,7 @@
 # stitcher.py
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union, Generator
 import copy
 import inspect
 import re
@@ -9,7 +9,11 @@ import torch as th
 import torch.nn as nn
 from t2Interp.T2I import T2IModel
 from utils.output import Output
-
+from dictionary_learning.utils import hf_dataset_to_generator
+from utils.buffer import t2IActivationBuffer
+from tqdm import tqdm
+from contextlib import nullcontext
+from utils.runningstats import TrainUpdate
 
 @dataclass
 class StitchResult(Output):
@@ -151,7 +155,56 @@ class Stitcher:
             
         return StitchResult(info={"mapped_output": model_out})
 
+    def train_mapper(
+        self,
+        hf_dataset,
+        steps: int,
+        model_a: T2IModel,
+        module_a: str,
+        module_b: str,
+        mapper: nn.Module,
+        optimizers: List[th.optim.Optimizer],
+        model_b: Optional[T2IModel] = None,
+        device:str="cuda",
+        autocast_dtype: th.dtype = th.float32,
+        loss_fn: Optional[Callable] = None,
+        **kwargs,
+        ) -> Generator[TrainUpdate, None, nn.Module]:
 
+        generator = hf_dataset_to_generator(hf_dataset)
+        buffer_a = t2IActivationBuffer(generator, model_a, module_a, **kwargs)
+        if model_b is not None:
+            buffer_b = t2IActivationBuffer(generator, model_b, module_b, **kwargs)
+        else:
+            buffer_b = t2IActivationBuffer(generator, model_a, module_b, **kwargs)
+        
+        log_steps = kwargs.get("log_steps", 100)  
+        autocast_context = nullcontext() if device == "cpu" else th.autocast(device_type=device, dtype=autocast_dtype)
+        
+        for step, (act_a, act_b) in enumerate(tqdm((buffer_a,buffer_b), total=steps)):
+            
+            with autocast_context:
+                if loss_fn:
+                    mapped,loss = mapper(act_a,loss_fn=loss_fn)
+                else:
+                    mapped = mapper(act_a)    
+                    loss = th.nn.functional.mse_loss(mapped, act_b)
+                loss.backward()
+                        
+                for opt in optimizers:
+                    opt.step()
+                    opt.zero_grad()
+
+                if log_steps and step % log_steps == 0:
+                    update = TrainUpdate(step=step, parts={"loss": loss.item()})
+                    yield update
+                
+            if step >= steps:
+                break
+        return mapper    
+                
+                
+    
 
 # if __name__ == "__main__":
 #     # Minimal smoke test on toy modules (no diffusers dependency).
