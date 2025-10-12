@@ -1,6 +1,5 @@
 diffusers==0.34.0
 transformers==4.55.0
 nnsight==0.5.3
-torch==Version: 2.8.0
-python==3.11
+torch==2.8.0
 accelerate==1.10.0
