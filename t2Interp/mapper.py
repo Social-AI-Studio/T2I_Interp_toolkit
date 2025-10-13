@@ -28,19 +28,19 @@ class AffineMapper(nn.Module):
         return x * self.scale + self.shift
     
 class MLPMapper(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int = 512, num_layers: int = 2):
+    def __init__(self, input_dim: int,output_dim: int, hidden_dim: int = 512, num_layers: int = 2):
         super().__init__()
         layers = []
         for i in range(num_layers):
             in_dim = input_dim if i == 0 else hidden_dim
-            out_dim = input_dim if i == num_layers - 1 else hidden_dim
+            out_dim = output_dim if i == num_layers - 1 else hidden_dim
             layers.append(nn.Linear(in_dim, out_dim))
             if i < num_layers - 1:
                 layers.append(nn.ReLU())
         self.network = nn.Sequential(*layers)
 
-    def forward(self, x: th.Tensor, loss_fn:Optional[Callable]) -> th.Tensor:
+    def forward(self, x: th.Tensor) -> th.Tensor:
         predicted = self.network(x)
-        if loss_fn is not None:
-            return predicted, loss_fn(predicted, x)
+        # if loss_fn is not None:
+        #     return predicted, loss_fn(predicted, x)
         return predicted

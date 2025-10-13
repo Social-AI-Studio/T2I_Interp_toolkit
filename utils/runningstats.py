@@ -6,7 +6,7 @@ from torch import nn
 from contextlib import nullcontext
 from tqdm import tqdm
 from abc import ABC, abstractmethod
-
+from loguru import logger
     
 @dataclass
 class TrainUpdate:
@@ -40,3 +40,17 @@ class WandbUpdater(Updater):
         self.wandb.log(data)
     def done(self):
         if self.run: self.run.finish()    
+        
+class Simplelogger(Updater):
+    def __init__(self):
+        self.start()
+    def start(self, run_name: Optional[str] = None, config: Optional[Dict[str, Any]] = None) -> None:
+        self.pbar = tqdm()
+    def log(self, u: TrainUpdate) -> None:
+        # if u.step % self.log_every == 0:
+        data = {"step": u.step, **{k: v for k,v in u.parts.items()}}
+        if u.extras: data.update(u.extras)
+        self.pbar.set_postfix(data)
+        self.pbar.update(1)
+    def done(self) -> None:
+        self.pbar.close()        

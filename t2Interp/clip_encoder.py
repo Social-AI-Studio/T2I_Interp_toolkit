@@ -30,6 +30,7 @@ class ClipEncoder:
                 ) for i in range(int(len(encoder.layers)))
         ]
         self.final_layer_norm_in = ModuleAccessor(clip_text_model.text_model.final_layer_norm,"clip_encoder_final_layer_norm",IOType.INPUT)
+        self.out_ = ModuleAccessor(clip_text_model.text_model.encoder.layers[-1],"clip_encoder_out",IOType.OUTPUT)
 
     def summary(self) -> str:
         return "blocks:\n" + "".join(

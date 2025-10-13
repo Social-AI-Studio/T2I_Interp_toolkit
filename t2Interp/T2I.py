@@ -233,21 +233,24 @@ class T2IModel(DiffusionModel):
     
     def run_with_cache(self, prompt, accessors: List[ModuleAccessor], **kwargs) -> List[ModuleAccessor, torch.Tensor]:
         modules = [m.module for m in accessors]
-        for mod in modules:
-            if type(mod) == FunctionModule:
-                mod.bound_kwargs.update(kwargs)
+        # for mod in modules:
+        #     if type(mod) == FunctionModule:
+        #         mod.bound_kwargs.update(kwargs)
+        
         
         num_inference_steps = kwargs.get("num_inference_steps", None)
         seed = kwargs.get("seed", None)
         if num_inference_steps is None or seed is None:
             raise ValueError("num_inference_steps and seed must be provided in kwargs")
-                
-        with self.generate(prompt, num_inference_steps=num_inference_steps, seed=seed) as tracer:
+        
+        generate_kwargs = {}
+        if "guidance_scale" in kwargs:
+            generate_kwargs["guidance_scale"] = kwargs["guidance_scale"]        
+        with self.generate(prompt, num_inference_steps=num_inference_steps, seed=seed, **generate_kwargs) as tracer:
             dtype,device,detach = kwargs.get("dtype", None), kwargs.get("device", "cpu"), kwargs.get("detach", True)
             cache = tracer.cache(modules=modules, include_output = True, include_inputs=False, dtype=dtype, detach=detach, device=device)
 
-        for mod in modules:
-            if type(mod) == FunctionModule:
-                mod.bound_kwargs.clear()
-                      
-        return [(accessors[i], [cache_entry.output for cache_entry in v]) for i, (k,v) in enumerate(cache.items())]    
+        # for mod in modules:
+        #     if type(mod) == FunctionModule:
+        #         mod.bound_kwargs.clear()          
+        return {accessors[i].attr_name:v for i,(k,v) in enumerate(cache.items())}  

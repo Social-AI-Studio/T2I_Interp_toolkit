@@ -175,18 +175,23 @@ class Stitcher:
 
         generator = hf_dataset_to_generator(hf_dataset,**kwargs)
         gen_a, gen_b = tee(generator)
-        buffer_a = t2IActivationBuffer(gen_a, model_a, module_a, **kwargs)
-        buffer_b = t2IActivationBuffer(gen_b, model_b if model_b is not None else model_a, module_b, **kwargs)
+        d_sub = kwargs.pop("d_submodule_a", kwargs.pop("d_submodule", None))
+        buffer_a = t2IActivationBuffer(gen_a, model_a, module_a,d_submodule=d_sub, **kwargs)
+        d_sub = kwargs.pop("d_submodule_b", d_sub)
+        buffer_b = t2IActivationBuffer(gen_b, model_b if model_b is not None else model_a, module_b,d_submodule=d_sub, **kwargs)
         
         log_steps = kwargs.get("log_steps", 100)  
         autocast_context = nullcontext() if training_device == "cpu" else th.autocast(device_type=training_device, dtype=autocast_dtype)
         
         for step, (act_a, act_b) in enumerate(zip(buffer_a,buffer_b)):
             with autocast_context:
+                # if loss_fn:
+                #     mapped,loss = mapper(act_a,loss_fn=loss_fn)
+                # else:
+                mapped = mapper(act_a) 
                 if loss_fn:
-                    mapped,loss = mapper(act_a,loss_fn=loss_fn)
-                else:
-                    mapped = mapper(act_a)    
+                    loss = loss_fn(mapped, act_b)
+                else:   
                     loss = th.nn.functional.mse_loss(mapped, act_b)
                 loss.backward()
                         
