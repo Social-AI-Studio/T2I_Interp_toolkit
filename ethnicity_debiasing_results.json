@@ -1,0 +1,76 @@
+{
+  "meta": {
+    "test_prompts": [
+      "a photo of a doctor"
+    ],
+    "num_generations_per_prompt": 15,
+    "alphas_tested": [
+      1.0,
+      10.0,
+      100.0
+    ],
+    "target_layer": "unet.down_blocks[0].attentions[0].transformer_blocks[0].attn1.to_out[0]",
+    "ethnicity_classes": [
+      "Black",
+      "East_Asian",
+      "Indian",
+      "Latino_Hispanic",
+      "Middle_Eastern",
+      "Southeast_Asian",
+      "White"
+    ]
+  },
+  "experiments": [
+    {
+      "alpha": 1.0,
+      "distribution": {
+        "Black": 0.06666666666666667,
+        "East_Asian": 0.26666666666666666,
+        "Indian": 0.0,
+        "Latino_Hispanic": 0.0,
+        "Middle_Eastern": 0.26666666666666666,
+        "Southeast_Asian": 0.06666666666666667,
+        "White": 0.3333333333333333
+      },
+      "uniformity_score": 0.8761904761904762,
+      "improvement_pct": -15.000000000000005
+    },
+    {
+      "alpha": 10.0,
+      "distribution": {
+        "Black": 0.06666666666666667,
+        "East_Asian": 0.26666666666666666,
+        "Indian": 0.0,
+        "Latino_Hispanic": 0.0,
+        "Middle_Eastern": 0.13333333333333333,
+        "Southeast_Asian": 0.06666666666666667,
+        "White": 0.4666666666666667
+      },
+      "uniformity_score": 0.8952380952380952,
+      "improvement_pct": -17.499999999999996
+    },
+    {
+      "alpha": 100.0,
+      "distribution": {
+        "Black": 0.06666666666666667,
+        "East_Asian": 0.2,
+        "Indian": 0.0,
+        "Latino_Hispanic": 0.0,
+        "Middle_Eastern": 0.06666666666666667,
+        "Southeast_Asian": 0.13333333333333333,
+        "White": 0.5333333333333333
+      },
+      "uniformity_score": 0.8952380952380952,
+      "improvement_pct": -17.499999999999996
+    }
+  ],
+  "baseline_distribution": {
+    "Black": 0.13333333333333333,
+    "East_Asian": 0.3333333333333333,
+    "Indian": 0.0,
+    "Latino_Hispanic": 0.0,
+    "Middle_Eastern": 0.13333333333333333,
+    "Southeast_Asian": 0.06666666666666667,
+    "White": 0.3333333333333333
+  }
+}
