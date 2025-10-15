@@ -20,35 +20,53 @@ from dictionary_learning.dictionary import (
     JumpReluAutoEncoder,
 )
 from itertools import islice
+from PIL import Image as PILImage
 
-def hf_dataset_to_generator(dataset_name, split="train", streaming=True, **kwargs):
-    dataset = load_dataset(dataset_name, split=split, streaming=streaming)
-    dataset_column = kwargs.get("dataset_column", "text")
+def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
+    if isinstance(dataset, str):
+        dataset = load_dataset(dataset, split=split, streaming=streaming)
+
+    preprocess_fn = kwargs.get("preprocess_fn", None)
+    cols = kwargs.get("dataset_column", None)
+    if not isinstance(cols, (list, tuple, str)) or len(cols) == 0:
+        raise TypeError("`dataset_column` must be a non-empty list/tuple of column names.")
+    if isinstance(cols, str):
+        cols = [cols]
+    
     subset = kwargs.get("subset", None)
+
+    def stringify(ex):
+        out = {}
+        for k, v in ex.items():
+            if isinstance(v, PILImage.Image):
+                out[k] = v 
+            elif isinstance(v, (str, bytes)):
+                out[k] = v if isinstance(v, str) else v.decode("utf-8", "ignore")
+            else:
+                out[k] = json.dumps(v, ensure_ascii=False)
+        return out
+
+    # Apply before building iterator
+    dataset = dataset.map(stringify)
+    dataset = dataset.with_format("python")
+
     base_iter = iter(dataset)
-    # Build an iterator over the requested subset
     if subset is None:
         iter_sub = base_iter
     elif isinstance(subset, int):
         iter_sub = islice(base_iter, subset)
     else:
-        raise ValueError("subset must be None or an int")    
-        
-    def stringify(ex):
-        out = {}
-        for k, v in ex.items():
-            # keep strings as-is; stringify everything else (incl. lists/dicts)
-            if isinstance(v, (str, bytes)):
-                out[k] = v if isinstance(v, str) else v.decode("utf-8", "ignore")
-            else:
-                out[k] = json.dumps(v, ensure_ascii=False)
-        return out
-    
-    dataset = dataset.map(stringify)
-    dataset = dataset.with_format("python")
+        raise ValueError("subset must be None or an int")
+
     def gen():
-        for x in iter_sub:
-            yield x[dataset_column]
+        for ex in iter_sub:
+            missing = [c for c in cols if c not in ex]
+            if missing:
+                raise KeyError(f"Missing columns {missing}.")
+            if len(cols) == 1:
+                yield preprocess_fn(ex[cols[0]]) if preprocess_fn else ex[cols[0]]  # single value
+            else:
+                yield (preprocess_fn(ex[c]) if preprocess_fn else ex[c] for c in cols)        # tuple of values
 
     return gen()
 
