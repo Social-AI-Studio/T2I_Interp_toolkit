@@ -2,7 +2,7 @@ from __future__ import annotations
 from loguru import logger
 import torch.nn as nn
 import torch
-from nnsight.modeling.diffusion import DiffusionModel, Diffuser
+from nnsight.modeling.diffusion import DiffusionModel
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from typing import Dict, List, Optional, Union
@@ -18,7 +18,6 @@ from utils.config_loader import build_module_mapper
 import warnings
 from utils.utils import FunctionModule
 from diffusers import DiffusionPipeline
-from nnsight.modeling.mixins import RemoteableMixin
 
 
 def _by_type(type_):
@@ -84,7 +83,7 @@ def _parse_device(x):
             return None
     return None
 
-class T2IModel(RemoteableMixin):
+class T2IModel(DiffusionModel):
     __methods__ = {"generate": "_generate"}
     def __init__(
         self,
@@ -133,26 +132,6 @@ class T2IModel(RemoteableMixin):
             self.to(dtype)                
 
         self.map_properties()
-    
-    def _load_meta(self, repo_id:str, **kwargs):
-        model = Diffuser(
-            repo_id,
-            device_map=None,
-            low_cpu_mem_usage=False,
-            **kwargs,
-        )
-        return model
-    
-    def _execute(self, prepared_inputs: Any, *args, **kwargs):
-        return self._model.unet(
-            prepared_inputs,
-            *args,
-            **kwargs,
-        )
-        
-    def _load(self, repo_id: str, device_map=None, **kwargs) -> Diffuser:
-        model = Diffuser(repo_id, device_map=device_map, **kwargs)
-        return model
        
     def map_properties(self):
         comps = getattr(self.pipeline, "components", None)
@@ -208,99 +187,3 @@ class T2IModel(RemoteableMixin):
         #     if type(mod) == FunctionModule:
         #         mod.bound_kwargs.clear()          
         return {accessors[i].attr_name:v for i,(k,v) in enumerate(cache.items())}  
-    
-    def _prepare_input(self, inputs: Union[str, List[str], Dict[str, Any]]
-                   ) -> Tuple[Tuple[Tuple, Dict], int]:
-        """
-        Returns ((args_tuple,), kwargs_dict), batch_size.
-        - str | list[str]: treats as prompts (positional)
-        - dict: expects optional 'prompt', plus other kwargs (e.g., image, mask_image, strength)
-                If 'prompt' missing, creates empty prompts of inferred batch size.
-        """
-        def _is_listlike(x):
-            return hasattr(x, "__len__") and not isinstance(x, (str, bytes))
-
-        def _infer_bs_from_kwargs(kw: Dict[str, Any]) -> int:
-            for v in kw.values():
-                if _is_listlike(v) and len(v) > 0:
-                    return len(v)
-            return 1
-
-        def _broadcast_to_bs(x, bs: int):
-            # Broadcast a singleton (PIL/tensor/str) to a list of length bs.
-            if _is_listlike(x):
-                return x
-            return [x for _ in range(bs)]
-        
-        # Back-compat: pure prompts
-        if isinstance(inputs, str):
-            inputs = [inputs]
-        if isinstance(inputs, list) and (len(inputs) == 0 or isinstance(inputs[0], str)):
-            prompts: List[str] = inputs
-            return ((tuple([prompts]),), {}), len(prompts)
-
-        if isinstance(inputs, dict):
-            kw = dict(inputs)  # shallow copy
-            prompts = kw.pop("prompt", None)
-
-            if prompts is None:
-                bs = _infer_bs_from_kwargs(kw)
-                prompts = [""] * bs  # empty prompts keep text channel valid
-            else:
-                if isinstance(prompts, str):
-                    prompts = [prompts]
-                elif not isinstance(prompts, list):
-                    raise TypeError("`prompt` must be str or list[str]")
-
-                bs = len(prompts) if len(prompts) > 0 else 1
-
-            # Broadcast singleton conditionals to match batch size
-            for key in ("image", "mask_image", "control_image"):
-                if key in kw and not _is_listlike(kw[key]):
-                    kw[key] = _broadcast_to_bs(kw[key], bs)
-
-            return ((tuple([prompts]),), kw), bs
-
-        raise TypeError("inputs must be str | list[str] | dict(prompt=..., image=..., ...)")
-
-    def _batch(self,
-           batched_inputs: Tuple[Tuple, Dict] | None,
-           prepared_inputs: Tuple[Tuple, Dict]) -> Tuple[Tuple, Dict]:
-        """
-        Merge ((args,), kwargs) pairs for batching.
-        """
-        if batched_inputs is None:
-            return prepared_inputs
-        (args_a,), kwargs_a = batched_inputs
-        (args_b,), kwargs_b = prepared_inputs
-        return ((args_a + args_b,), {**kwargs_a, **kwargs_b})
-    
-    def _generate(self, prepared_inputs: Tuple[Tuple, Dict], *args,
-              seed: int | None = None, **kwargs):
-        """
-        Unpack prepared args/kwargs, handle seed per-batch, and call the pipeline.
-        """
-        if self._scanning():
-            kwargs["num_inference_steps"] = 1
-
-        (call_args,), call_kwargs = prepared_inputs  # call_args: (prompts,), call_kwargs: others
-        prompts: List[str] = call_args[0] if len(call_args) > 0 else [""]
-        bs = len(prompts) if isinstance(prompts, list) else 1
-
-        # Seed handling
-        generator: Any = torch.Generator(self.device)
-        if seed is not None:
-            # if multiple prompts or num_images_per_prompt > 1, make per-sample generators
-            nip = call_kwargs.get("num_images_per_prompt", kwargs.get("num_images_per_prompt", 1))
-            if bs * nip > 1:
-                generator = [
-                    torch.Generator(self.device).manual_seed(seed + i)
-                    for i in range(bs * nip)
-                ]
-            else:
-                generator = generator.manual_seed(seed)
-
-        # Call underlying DiffusionPipeline: prompts are positional; others are kwargs
-        output = self._model.pipeline(*call_args, generator=generator, **call_kwargs, **kwargs)
-        return self._model(output)
-

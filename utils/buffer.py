@@ -42,7 +42,6 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         self.submodule = submodule
         self.d_submodule = d_submodule
         self.n_ctxs = n_ctxs
-        # self.ctx_len = ctx_len
         self.refresh_batch_size = refresh_batch_size
         self.out_batch_size = out_batch_size
         self.device = data_device
@@ -51,31 +50,6 @@ class t2IActivationBuffer(NNsightActivationBuffer):
     def __iter__(self):
         return self
 
-    # def __next__(self):
-    #     """
-    #     Return a batch of activations
-    #     """
-    #     with t.no_grad():
-    #         # if buffer is less than half full, refresh
-    #         if (~self.read).sum() < self.n_ctxs * self.ctx_len // 2:
-    #             self.refresh()
-
-    #         # return a batch
-    #         unreads = (~self.read).nonzero().squeeze()
-    #         idxs = unreads[t.randperm(len(unreads), device=unreads.device)[: self.out_batch_size]]
-    #         self.read[idxs] = True
-    #         return self.activations[idxs]
-
-
-    # def tokenized_batch(self, batch_size=None):
-    #     """
-    #     Return a batch of tokenized inputs.
-    #     """
-    #     texts = self.text_batch(batch_size=batch_size)
-    #     return self.model.tokenizer(
-    #         texts, return_tensors="pt", max_length=self.ctx_len, padding=True, truncation=True
-    #     )
-
     def token_batch(self, batch_size=None):
         """
         Return a list of text
@@ -83,61 +57,11 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         if batch_size is None:
             batch_size = self.refresh_batch_size
         try:
-            data = [next(self.data) for _ in range(batch_size)]
-            data = {"prompt":[sample if isinstance(sample, str) else "" for sample in data ]}#,
-                    # "image": [sample for sample in data if isinstance(sample, t.Tensor)]}
-            data = {k:v for k,v in data.items() if len(v)>0}
-            return data
+            return [next(self.data) for _ in range(batch_size)]
         except StopIteration:
             raise StopIteration("End of data stream reached")
-    
-    # def token_batch(self, batch_size=None):
-    #     if batch_size is None:
-    #         batch_size = self.refresh_batch_size
-    #     texts = [next(self.data) for _ in range(batch_size)]
-        
-    #     if getattr(self.model, 'tokenizer', None) is None:
-    #         raise ValueError("T2I instance does not have a tokenizer")
-        
-    #     tokenizer = self.model.tokenizer
-    #     enc = tokenizer(
-    #         texts,
-    #         add_special_tokens=True,
-    #         padding=True,
-    #         truncation=True,
-    #         return_tensors="pt",
-    #         return_length=True,
-    #     )
-
-    #     input_ids_list = []
-    #     # attn_list = []
-    #     # was_truncated = []
-
-    #     for ids in enc["input_ids"]:
-    #         input_ids_list.append(ids)
-
-    #     # pad to a batch (left- or right-pad matches tokenizer’s padding_side)
-    #     batch = tokenizer.pad(
-    #         {"input_ids": input_ids_list},
-    #         padding=True,
-    #         max_length=tokenizer.model_max_length,
-    #         return_tensors="pt"
-    #     )
-    #     # # attention mask: 1 for tokens, 0 for pad
-    #     # if "attention_mask" not in batch:
-    #     #     batch["attention_mask"] = (batch["input_ids"] != tokenizer.pad_token_id).long()
-
-    #     # return {k: v.to(self.device) for k, v in batch.items()}
-    #     return tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
-
-    # def text_batch(self, batch_size=None):
-    #     """
-    #     Return a list of text
-    #     """
-    #     return self.token_batch(batch_size)
 
     def _reshaped_activations(self, hidden_states):
-        # hidden_states = hidden_states.value
         if isinstance(hidden_states, tuple):
             hidden_states = hidden_states[0]
         hidden_states = hidden_states.view((hidden_states.shape[0],-1))
@@ -162,12 +86,10 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         self.activations = self.activations[~self.read]
 
         while len(self.activations) < self.refresh_batch_size:
-            inputs = self.token_batch()
             with t.no_grad(), self.model.generate(
-                **inputs
+                self.token_batch()
             ) as tracer:
                 with tracer.iter[self.steps[0]: self.steps[1]]:
-                    # _ = self.model.pipeline(**self.token_batch())
                     hidden_states = self.submodule.value.save()
                     hidden_states = self._reshaped_activations(hidden_states)
                     self.activations = t.cat([self.activations, hidden_states.to(self.device)], dim=0)
@@ -184,9 +106,3 @@ class t2IActivationBuffer(NNsightActivationBuffer):
             "out_batch_size": self.out_batch_size,
             "device": self.device,
         }
-
-    # def close(self):
-    #     """
-    #     Close the text stream and the underlying compressed file.
-    #     """
-    #     self.text_stream.close()

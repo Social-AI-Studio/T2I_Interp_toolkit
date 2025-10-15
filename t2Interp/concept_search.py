@@ -9,6 +9,7 @@ import torch as th
 from utils.output import Output 
 from t2Interp.intervention import run_intervention, SteeringIntervention
 from utils.buffer import t2IActivationBuffer
+from utils.text_image_buffer import TextImageActivationBuffer
 from contextlib import nullcontext
 from utils.runningstats import TrainUpdate
 import numpy as np
@@ -39,26 +40,31 @@ class KSteer(Steer):
             gt_val = hf_dataset_to_generator(dataset,split=kwargs.get("val_split","validation"),
                                              **{**kwargs,"dataset_column": kwargs.get("ground_truth_column", "ground_truth"),
                                                "preprocess_fn" : kwargs.get("gt_processing_fn", None)})
-            buffer_val_gt = batchify(gt_val,kwargs.get("batch_size", 1))
+            buffer_val_gt = batchify(gt_val,kwargs.get("out_batch_size", 1))
             
         d_sub = kwargs.pop("d_submodule", kwargs.pop("d_submodule", None))
         training_device = kwargs.get("training_device", "cpu")
         autocast_dtype = kwargs.get("autocast_dtype", th.float32)
-        buffer_train = t2IActivationBuffer(generator_train, self.model, accessor,d_submodule=d_sub, **kwargs) 
-        buffer_val = t2IActivationBuffer(generator_val, self.model, accessor,d_submodule=d_sub, **kwargs) 
-        buffer_train_gt  = batchify(gt_train,kwargs.get("batch_size", 1))
+        buffer_train = TextImageActivationBuffer(generator_train, self.model, accessor,d_submodule=d_sub, **kwargs) 
+        buffer_val = TextImageActivationBuffer(generator_val, self.model, accessor,d_submodule=d_sub, **kwargs) 
+        buffer_train_gt  = batchify(gt_train,kwargs.get("out_batch_size", 1))
          
         log_steps = kwargs.get("log_steps", 1) 
         steps = kwargs.get("steps", 1) 
         autocast_context = nullcontext() if training_device == "cpu" else th.autocast(device_type=training_device, dtype=autocast_dtype)
         if optimizers is None:
             optimizers = [th.optim.Adam(mapper.parameters(), lr=kwargs.get("lr",1e-5))]
-        mapper = mapper.to(self.model.device) 
+        mapper = mapper.to(self.model.device, dtype=autocast_dtype) 
         val_losses = []   
-        for step, act,gt in enumerate(zip(buffer_train,buffer_train_gt)):
+        for step, (act,gt) in enumerate(zip(buffer_train,buffer_train_gt)):
+            act = act.to(self.model.device, dtype=autocast_dtype)
+            if type(gt) is list:
+                gt = th.stack(gt, dim=0)
+            gt = gt.to(self.model.device, dtype=autocast_dtype)
             with autocast_context:
                 mapped = mapper(act) 
                 if loss_fn:
+                    print(mapped.shape, gt.shape)
                     loss = loss_fn(mapped, gt)
                 else:   
                     loss = th.nn.functional.mse_loss(mapped, gt)
@@ -73,6 +79,8 @@ class KSteer(Steer):
                     val_loss=0
                     if kwargs.get("use_val", False):
                         for val_act,gt_val in zip(buffer_val,buffer_val_gt):
+                            if type(gt_val) is list:
+                                gt_val = th.stack(gt_val, dim=0)
                             with th.no_grad():
                                 mapped_val = mapper(val_act)
                                 if loss_fn:
