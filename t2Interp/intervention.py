@@ -6,6 +6,7 @@ from nnsight import Envoy, trace
 from t2Interp.T2I import T2IModel
 from utils.utils import encode_prompt, FieldModel
 from utils.output import Output
+from t2Interp.accessors import ModuleAccessor
 # from ray_runner import RayWorker
 # import ray
 
@@ -37,7 +38,17 @@ class DiffusionIntervention:
     @classmethod
     def fields(cls):
         return []
+
+class SteeringIntervention(DiffusionIntervention):
+    def __init__(self, steering_vec:torch.Tensor, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.steering_vec = steering_vec
+        
+    def intervene(self, accessor: ModuleAccessor, **kwargs):
+        alpha = kwargs.get("alpha", 1.0)
+        accessor.value = accessor.value + alpha * self.steering_vec
     
+      
 class EncoderAttentionIntervention(DiffusionIntervention):
 
     def __init__(self, *args, **kwargs) -> None:

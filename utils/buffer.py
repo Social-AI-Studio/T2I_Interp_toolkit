@@ -83,7 +83,11 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         if batch_size is None:
             batch_size = self.refresh_batch_size
         try:
-            return [next(self.data) for _ in range(batch_size)]
+            data = [next(self.data) for _ in range(batch_size)]
+            data = {"prompt":[sample if isinstance(sample, str) else "" for sample in data ]}#,
+                    # "image": [sample for sample in data if isinstance(sample, t.Tensor)]}
+            data = {k:v for k,v in data.items() if len(v)>0}
+            return data
         except StopIteration:
             raise StopIteration("End of data stream reached")
     
@@ -158,8 +162,9 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         self.activations = self.activations[~self.read]
 
         while len(self.activations) < self.refresh_batch_size:
+            inputs = self.token_batch()
             with t.no_grad(), self.model.generate(
-                self.token_batch()
+                **inputs
             ) as tracer:
                 with tracer.iter[self.steps[0]: self.steps[1]]:
                     # _ = self.model.pipeline(**self.token_batch())

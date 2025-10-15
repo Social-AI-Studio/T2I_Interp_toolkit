@@ -10,6 +10,11 @@ from pydantic import BaseModel
 from enum import Enum
 import torch
 from nnsight.modeling.diffusion import DiffusionModel
+from itertools import islice
+from typing import Iterable, Iterator, List, TypeVar
+from torchvision import transforms
+
+T = TypeVar("T")
 
 # from .trainers.top_k import AutoEncoderTopK
 # from .trainers.batch_top_k import BatchTopKSAE
@@ -152,3 +157,36 @@ class FunctionModule(torch.nn.Module):
         # kwargs at call-time override the bound ones
         merged = {**self.bound_kwargs, **kwargs}
         return self.func(*args, **merged)    
+    
+def batchify(source: Iterable[T], batch_size: int, *, drop_last: bool = False) -> Iterator[List[T]]:
+    it = iter(source)
+    while True:
+        batch = list(islice(it, batch_size))
+        if not batch:
+            break
+        if len(batch) < batch_size and drop_last:
+            break
+        yield batch
+        
+def preprocess_image(image, target_size=512):
+    """
+    Preprocess PIL image for VAE encoder.
+    
+    Parameters:
+    -----------
+    image : PIL.Image
+        Input image
+    target_size : int
+        Target size (will resize to target_size x target_size)
+    
+    Returns:
+    --------
+    torch.Tensor : Preprocessed image tensor [1, 3, H, W] in range [-1, 1]
+    """
+    transform = transforms.Compose([
+        transforms.Resize((target_size, target_size)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5], [0.5])  # Scale to [-1, 1]
+    ])
+    return transform(image) #.unsqueeze(0)       
+    

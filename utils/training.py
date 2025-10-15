@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Any, Protocol, Optional, Sequence
+from typing import Callable, Dict, Any, Protocol, Optional, Sequence, Tuple, List
 import torch
 from utils.output import Output
 from utils. metrics import MetricBase
@@ -14,6 +14,7 @@ class TrainingSpec:
     stats_updaters: Optional[Sequence[Updater]] = field(default_factory=list[WandbUpdater])
     callback_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])         
     name: Optional[str] = None
+    args: Tuple[Any, ...] = ()
     kwargs: Dict[str, Any] = field(default_factory=dict)
     
 class Training:
@@ -28,6 +29,7 @@ class Training:
 
     def run_trainer(self) -> tuple:
         gen = self.training_spec.fn(
+            *self.training_spec.args,
             **self.training_spec.kwargs
         )
         while True:
