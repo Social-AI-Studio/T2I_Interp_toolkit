@@ -77,7 +77,7 @@ class TextImageActivationBuffer(t2IActivationBuffer):
                 if isinstance(val, (tuple, list)):
                     val = val[0]
                 if isinstance(val, t.Tensor):
-                    self._last_captured = val.detach()
+                    self._last_captured = val.detach().to(self.device)
             return hook
 
         else:
@@ -97,7 +97,7 @@ class TextImageActivationBuffer(t2IActivationBuffer):
                     if isinstance(val, (tuple, list)):
                         val = val[0]
                 if isinstance(val, t.Tensor):
-                    self._last_captured = val.detach()
+                    self._last_captured = val.detach().to(self.device)
             return hook
 
 
@@ -171,7 +171,8 @@ class TextImageActivationBuffer(t2IActivationBuffer):
         """
         # Keep only unread activations
         self.activations = self.activations[~self.read]
-
+        self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
+        
         while len(self.activations) < self.refresh_batch_size:
             batch_raw = self.token_batch()
             io = self._prep_prompts_images(batch_raw)

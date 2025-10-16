@@ -73,7 +73,7 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         """
         with t.no_grad():
             # if buffer is less than half full, refresh
-            if (~self.read).sum() < self.refresh_batch_size:
+            if (~self.read).sum().item() < self.refresh_batch_size // 2:
                 self.refresh()
 
             # return a batch
@@ -84,7 +84,7 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         
     def refresh(self):
         self.activations = self.activations[~self.read]
-
+        self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
         while len(self.activations) < self.refresh_batch_size:
             with t.no_grad(), self.model.generate(
                 self.token_batch()
@@ -95,7 +95,7 @@ class t2IActivationBuffer(NNsightActivationBuffer):
                     self.activations = t.cat([self.activations, hidden_states.to(self.device)], dim=0)
                     tracer.stop()
             self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
-
+            
     @property
     def config(self):
         return {

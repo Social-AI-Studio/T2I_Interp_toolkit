@@ -84,7 +84,6 @@ def _parse_device(x):
     return None
 
 class T2IModel(DiffusionModel):
-    __methods__ = {"generate": "_generate"}
     def __init__(
         self,
         model: str | DiffusionPipeline,
@@ -93,10 +92,11 @@ class T2IModel(DiffusionModel):
         trust_remote_code: bool = False,
         check_renaming: bool = True,
         allow_dispatch: bool = True,
+        safety_checker=None,
         rename_config: Dict[str, str] | None = None,
         **kwargs,
     ):
-        self._model: Diffuser = None
+
         # Check if attention implementation is supported for attention pattern tracing
         if "attn_implementation" in kwargs:
             impl = kwargs.pop("attn_implementation", None)
@@ -118,6 +118,7 @@ class T2IModel(DiffusionModel):
                 tokenizer_kwargs=tokenizer_kwargs,
                 trust_remote_code=trust_remote_code,
                 rename=rename_config,
+                safety_checker=safety_checker,
                 **kwargs,
             )
         else:

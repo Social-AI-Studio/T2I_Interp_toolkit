@@ -51,48 +51,50 @@ class KSteer(Steer):
          
         log_steps = kwargs.get("log_steps", 1) 
         steps = kwargs.get("steps", 1) 
-        autocast_context = nullcontext() if training_device == "cpu" else th.autocast(device_type=training_device, dtype=autocast_dtype)
+        # autocast_context = th.autocast(device_type=training_device, dtype=autocast_dtype) if autocast_dtype is not None else nullcontext()
         if optimizers is None:
             optimizers = [th.optim.Adam(mapper.parameters(), lr=kwargs.get("lr",1e-5))]
-        mapper = mapper.to(self.model.device, dtype=autocast_dtype) 
-        val_losses = []   
+        mapper = mapper.to(device=training_device, dtype=autocast_dtype) 
+        
+        self.model.eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)  
+        
+        val_losses = [] 
         for step, (act,gt) in enumerate(zip(buffer_train,buffer_train_gt)):
-            act = act.to(self.model.device, dtype=autocast_dtype)
+            act = act.to(training_device, dtype=autocast_dtype)
             if type(gt) is list:
                 gt = th.stack(gt, dim=0)
-            gt = gt.to(self.model.device, dtype=autocast_dtype)
-            with autocast_context:
-                mapped = mapper(act) 
-                if loss_fn:
-                    print(mapped.shape, gt.shape)
-                    loss = loss_fn(mapped, gt)
-                else:   
-                    loss = th.nn.functional.mse_loss(mapped, gt)
-                loss.backward()
-                        
-                for opt in optimizers:
-                    opt.step()
-                    opt.zero_grad()
+            gt = gt.to(training_device)
+            
+            mapped = mapper(act) 
+            loss = loss_fn(mapped, gt)
+            loss.backward()
+                    
+            for opt in optimizers:
+                opt.step()
+                opt.zero_grad()
 
-                if log_steps and step % log_steps == 0:
-                    # eval
-                    val_loss=0
-                    if kwargs.get("use_val", False):
+            if log_steps and step % log_steps == 0:
+                # eval
+                val_loss=0
+                if kwargs.get("use_val", False):
+                    with th.no_grad():                            
                         for val_act,gt_val in zip(buffer_val,buffer_val_gt):
+                            val_act = val_act.to(device=training_device, dtype=autocast_dtype)
+                            # gt_val = gt_val.to(training_device)
                             if type(gt_val) is list:
-                                gt_val = th.stack(gt_val, dim=0)
-                            with th.no_grad():
+                                gt_val = th.stack(gt_val, dim=0).to(training_device)
                                 mapped_val = mapper(val_act)
-                                if loss_fn:
-                                    val_loss += loss_fn(mapped_val, gt_val)
-                                else:   
-                                    val_loss += th.nn.functional.mse_loss(mapped_val, gt_val)
-                        if val_loss < min(val_loss, default=float('inf')):
-                            best_mapper = mapper.state_dict()    
-                        val_losses.append(val_loss.item())
-                    else:
-                        update = TrainUpdate(step=step, parts={"loss": loss.item()})
-                    yield update
+                                val_loss += loss_fn(mapped_val, gt_val)
+                        val_loss = val_loss.mean(dim=0).item() 
+                        if val_loss < min(val_losses, default=float('inf')):
+                            best_mapper = mapper.state_dict()
+                        val_losses.append(val_loss)
+                    update = TrainUpdate(step=step, parts={"loss": loss.item(), "val_loss": val_loss.item()})    
+                else:
+                    update = TrainUpdate(step=step, parts={"loss": loss.item()})
+                yield update
                 
             if step >= steps:
                 break
