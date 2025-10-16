@@ -1,8 +1,36 @@
 *for brainstorming; replace with README later*
 
-Current task: add prompts folder from UCEand give instructions on how to convert to text
+# Running UCE
 
-In UCE, the eval script `generate-images-sd.py` just reads from the "prompt" column. UCE mostly contains unlearning artist style prompts, so did not upload these now. Read usuing the following command:
+For now, create separate env to run UCE to prevent package vers conflicts with T2I-Interp.
+
+This is an example for gender; later align with current experiments on race for T2I-Interp. Use the same model (CompVis/stable-diffusion-v1-4)
+
+```
+git clone https://github.com/rohitgandikota/unified-concept-editing.git
+cd unified-concept-editing
+mkdir models
+pip install -r requirements.txt
+
+python3 trainscripts/uce_sd_debias.py --edit_concepts 'Doctor; Nurse; Carpenter' --debias_concepts 'male; female' --device 'cuda:0' --desired_ratios 0.5 0.5 --exp_name 'debias_sdxl' --model_id 'CompVis/stable-diffusion-v1-4'
+
+python3 evalscripts/generate-images-sd.py \
+  --model_id 'CompVis/stable-diffusion-v1-4' \
+  --uce_model_path 'uce_models/debias_sdxl.safetensors' \
+  --prompts_path 'data/profession_prompts.csv' \  # placeholder; use better prompts
+  --save_path 'runs/uce_outputs' \
+  --exp_name 'debias_sdxl_eval' \
+  --num_images_per_prompt 1 \
+  --num_inference_steps 50 \
+  --device 'cuda:0'
+
+```
+
+---
+
+# add prompts folder from UCE
+
+In UCE, the eval script `generate-images-sd.py` just reads from the "prompt" column. UCE mostly contains unlearning artist style prompts, so did not upload these now. Read using the following command:
 ```
 prompts_path = 'data/race_prompts.csv' # should take in cmd line arg
 
