@@ -4,7 +4,7 @@
 
 For now, create separate env to run UCE to prevent package vers conflicts with T2I-Interp.
 
-Use the same model (CompVis/stable-diffusion-v1-4)
+Use the same model (CompVis/stable-diffusion-v1-4). Results of following commands: most images, on qualitative inspection, look mixed race rather than distinctly Black, White, or Asian. This is probably why UCE paper used qualitative assessment instead of quantitative measurement of frequencies using an AI classifier, as shown in their Figure 6. May talk with paper authors on these ideas.
 
 ```
 git clone https://github.com/rohitgandikota/unified-concept-editing.git
@@ -12,21 +12,27 @@ cd unified-concept-editing
 mkdir models
 pip install -r requirements.txt
 
-python trainscripts/uce_sd_debias.py \
+python3 trainscripts/uce_sd_debias.py \
 --model_id 'CompVis/stable-diffusion-v1-4' \
---edit_concepts 'Doctor, Nurse, Carpenter' \
---debias_concepts 'Black; East_Asian; Indian; Latino_Hispanic; Middle_Eastern; Southeast_Asian; White' \
---desired_ratios 0.142857 0.142857 0.142857 0.142857 0.142857 0.142857 0.142857 \
+--edit_concepts 'Doctor' \
+--debias_concepts 'Black; White; Asian' \
+--desired_ratios 0.3333 0.3333 0.3334 \
+--num_images_per_prompt 24 \
+--num_inference_steps 40 \
+--max_diff 0.02 \
+--max_iterations 60 \
+--step_size 0.2 \
+--edit_scale 1.5 \
 --device 'cuda:0' \
---exp_name 'debias_sd14'
+--exp_name 'debias_race_14_v2'
 
 python3 evalscripts/generate-images-sd.py \
   --model_id 'CompVis/stable-diffusion-v1-4' \
-  --uce_model_path 'uce_models/debias_sd14.safetensors' \
-  --prompts_path 'data/profession10_prompts.csv' \
-  --save_path 'runs/uce_outputs' \
-  --exp_name 'debias_sd14_eval' \
-  --num_images_per_prompt 1 \
+  --uce_model_path 'uce_models/debias_race_14_v2.safetensors' \
+  --prompts_path 'data/profession1_prompts.csv' \
+  --save_path 'uce_results' \
+  --exp_name 'debias_race_14_v2_imgs' \
+  --num_images_per_prompt 10 \
   --num_inference_steps 50 \
   --device 'cuda:0'
 
