@@ -4,7 +4,7 @@
 
 For now, create separate env to run UCE to prevent package vers conflicts with T2I-Interp.
 
-This is an example for gender; later align with current experiments on race for T2I-Interp. Use the same model (CompVis/stable-diffusion-v1-4)
+Use the same model (CompVis/stable-diffusion-v1-4)
 
 ```
 git clone https://github.com/rohitgandikota/unified-concept-editing.git
@@ -22,8 +22,8 @@ python trainscripts/uce_sd_debias.py \
 
 python3 evalscripts/generate-images-sd.py \
   --model_id 'CompVis/stable-diffusion-v1-4' \
-  --uce_model_path 'uce_models/debias_sdxl.safetensors' \
-  --prompts_path 'data/profession_prompts.csv' \  # placeholder; use better prompts
+  --uce_model_path 'uce_models/debias_sd14.safetensors' \
+  --prompts_path 'data/profession10_prompts.csv' \
   --save_path 'runs/uce_outputs' \
   --exp_name 'debias_sd14_eval' \
   --num_images_per_prompt 1 \
