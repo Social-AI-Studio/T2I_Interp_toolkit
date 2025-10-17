@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from loguru import logger
 from typing import Any, Dict, Optional, List, Callable, Union
 from dictionary_learning.utils import hf_dataset_to_generator
-from utils.utils import batchify
+from utils.utils import BatchIterator
 from utils.metrics import MetricBase
 import torch as th
 from utils.output import Output 
@@ -13,7 +13,10 @@ from utils.text_image_buffer import TextImageActivationBuffer
 from contextlib import nullcontext
 from utils.runningstats import TrainUpdate
 import numpy as np
-    
+from utils.utils import convert_buffer_to_memap, ShardedActivationMemmapDataset
+import os
+from pathlib import Path
+
 class Steer(ABC):
     @abstractmethod
     def fit(self, dataset:dict, accessors:ModuleAccessor,**kwargs) -> None:
@@ -32,6 +35,11 @@ class KSteer(Steer):
         self.model = model
         
     def fit(self,dataset, accessor, mapper:th.nn.Module,loss_fn: Optional[Callable] = None,optimizers: List[th.optim.Optimizer]=None, **kwargs):
+        
+        def cache_path(dataset,split,subset):
+            base = Path("data") / dataset / "train"
+            return str(base / str(subset) if subset is not None else base)
+        
         generator_train = hf_dataset_to_generator(dataset,**kwargs) 
         gt_train = hf_dataset_to_generator(dataset,**{**kwargs,"dataset_column": kwargs.get("ground_truth_column", "ground_truth"),
                                                       "preprocess_fn" : kwargs.get("gt_processing_fn", None)}) 
@@ -40,14 +48,31 @@ class KSteer(Steer):
             gt_val = hf_dataset_to_generator(dataset,split=kwargs.get("val_split","validation"),
                                              **{**kwargs,"dataset_column": kwargs.get("ground_truth_column", "ground_truth"),
                                                "preprocess_fn" : kwargs.get("gt_processing_fn", None)})
-            buffer_val_gt = batchify(gt_val,kwargs.get("out_batch_size", 1))
+            buffer_val_gt = BatchIterator(gt_val,kwargs.get("out_batch_size", 1))
             
         d_sub = kwargs.pop("d_submodule", kwargs.pop("d_submodule", None))
         training_device = kwargs.get("training_device", "cpu")
         autocast_dtype = kwargs.get("autocast_dtype", th.float32)
-        buffer_train = TextImageActivationBuffer(generator_train, self.model, accessor,d_submodule=d_sub, **kwargs) 
-        buffer_val = TextImageActivationBuffer(generator_val, self.model, accessor,d_submodule=d_sub, **kwargs) 
-        buffer_train_gt  = batchify(gt_train,kwargs.get("out_batch_size", 1))
+        
+        use_cache = kwargs.get("cache_activations", False)
+        
+        if use_cache and os.path.exists(cache_path(dataset,"train",kwargs.get('subset',None))):
+            buffer_train = ShardedActivationMemmapDataset(cache_path(dataset,"train",kwargs.get('subset',None)),**kwargs)
+        elif use_cache:
+            buffer_train = TextImageActivationBuffer(generator_train, self.model, accessor,d_submodule=d_sub, **kwargs) 
+            buffer_train = convert_buffer_to_memap(buffer_train,memmap_dir=cache_path(dataset,"train",kwargs.get('subset',None)), **kwargs)
+        else:
+            buffer_train = TextImageActivationBuffer(generator_train, self.model, accessor,d_submodule=d_sub, **kwargs)
+        
+        if use_cache and os.path.exists(cache_path(dataset,"val",kwargs.get('subset',None))) and kwargs.get("use_val", False):
+            buffer_val = ShardedActivationMemmapDataset(cache_path(dataset,"val",kwargs.get('subset',None)),**kwargs)
+        elif use_cache and kwargs.get("use_val", False):
+            buffer_val = TextImageActivationBuffer(generator_val, self.model, accessor,d_submodule=d_sub, **kwargs)
+            buffer_val = convert_buffer_to_memap(buffer_val,memmap_dir=cache_path(dataset,"val",kwargs.get('subset',None)),**kwargs)
+        elif kwargs.get("use_val", False):
+            buffer_val = TextImageActivationBuffer(generator_val, self.model, accessor,d_submodule=d_sub, **kwargs)
+            
+        buffer_train_gt  = BatchIterator(gt_train,kwargs.get("out_batch_size", 1))
          
         log_steps = kwargs.get("log_steps", 1) 
         steps = kwargs.get("steps", 1) 
@@ -61,43 +86,52 @@ class KSteer(Steer):
             p.requires_grad_(False)  
         
         val_losses = [] 
-        for step, (act,gt) in enumerate(zip(buffer_train,buffer_train_gt)):
-            act = act.to(training_device, dtype=autocast_dtype)
-            if type(gt) is list:
-                gt = th.stack(gt, dim=0)
-            gt = gt.to(training_device)
+        step = 0
+        while True:
+            for act,gt in zip(iter(buffer_train),iter(buffer_train_gt)):
+                act = act.to(training_device, dtype=autocast_dtype)
+                if type(gt) is list:
+                    gt = th.stack(gt, dim=0)
+                gt = gt.to(training_device)
+                
+                mapped = mapper(act) 
+                loss = loss_fn(mapped, gt)
+                loss.backward()
             
-            mapped = mapper(act) 
-            loss = loss_fn(mapped, gt)
-            loss.backward()
-                    
-            for opt in optimizers:
-                opt.step()
-                opt.zero_grad()
+                for opt in optimizers:
+                    opt.step()
+                    opt.zero_grad()
 
-            if log_steps and step % log_steps == 0:
-                # eval
-                val_loss=0
-                if kwargs.get("use_val", False):
-                    with th.no_grad():                            
-                        for val_act,gt_val in zip(buffer_val,buffer_val_gt):
-                            val_act = val_act.to(device=training_device, dtype=autocast_dtype)
-                            # gt_val = gt_val.to(training_device)
-                            if type(gt_val) is list:
-                                gt_val = th.stack(gt_val, dim=0).to(training_device)
+                if log_steps and step % log_steps == 0:
+                    # eval
+                    val_loss=0
+                    n_samples=0
+                    if kwargs.get("use_val", False):
+                        with th.no_grad():                   
+                            for val_act,gt_val in zip(iter(buffer_val),iter(buffer_val_gt)):
+                                val_act = val_act.to(device=training_device, dtype=autocast_dtype)
+                                # gt_val = gt_val.to(training_device)
+                                if type(gt_val) is list:
+                                    gt_val = th.stack(gt_val, dim=0).to(training_device)
+                         
                                 mapped_val = mapper(val_act)
                                 val_loss += loss_fn(mapped_val, gt_val)
-                        val_loss = val_loss.mean(dim=0).item() 
-                        if val_loss < min(val_losses, default=float('inf')):
-                            best_mapper = mapper.state_dict()
-                        val_losses.append(val_loss)
-                    update = TrainUpdate(step=step, parts={"loss": loss.item(), "val_loss": val_loss.item()})    
-                else:
-                    update = TrainUpdate(step=step, parts={"loss": loss.item()})
-                yield update
-                
+                                n_samples += 1
+      
+                            val_loss = val_loss / n_samples
+                            if val_loss < min(val_losses, default=float('inf')):
+                                best_mapper = mapper.state_dict()
+                            val_losses.append(val_loss)
+                        update = TrainUpdate(step=step, parts={"loss": loss.item(), "val_loss": val_loss.item()})    
+                    else:
+                        update = TrainUpdate(step=step, parts={"loss": loss.item()})
+                    yield update
+                step += 1    
+                if step >= steps:
+                    break
             if step >= steps:
-                break
+                    break
+            
         if kwargs.get("use_val", False):
            assert "best_mapper" in locals(), "No best mapper found during validation"
            mapper = mapper.load_state_dict(best_mapper)     
@@ -189,7 +223,7 @@ class CAA(Steer):
         # get positive activations   
         pos_activations = {accessor.attr_name:[] for accessor in accessors}  
         gen = hf_dataset_to_generator(dataset,**{"dataset_column": "positive_prompt"})
-        for b in batchify(gen,batch_size):          
+        for b in BatchIterator(gen,batch_size):          
             with self.model.generate(b, num_inference_steps=num_inference_steps, seed=seed, **generate_kwargs) as tracer:
                 for accessor in accessors:
                     act = accessor.value
@@ -199,7 +233,7 @@ class CAA(Steer):
         # get negative activations
         neg_activations = {accessor.attr_name:[] for accessor in accessors}
         gen = hf_dataset_to_generator(dataset,**{"dataset_column": "negative_prompt"})
-        for b in batchify(gen,batch_size):          
+        for b in BatchIterator(gen,batch_size):          
             with self.model.generate(b, num_inference_steps=num_inference_steps, seed=seed, **generate_kwargs) as tracer:
                 for accessor in accessors:
                     act = accessor.value

@@ -8,7 +8,7 @@ from fractions import Fraction
 import random
 from transformers import AutoTokenizer
 import torch as t
-from typing import Optional, List, Generator, Callable, Tuple
+from typing import Optional, List, Generator, Callable, Tuple, Iterator
 
 from dictionary_learning.trainers.top_k import AutoEncoderTopK
 from dictionary_learning.trainers.batch_top_k import BatchTopKSAE
@@ -22,53 +22,131 @@ from dictionary_learning.dictionary import (
 from itertools import islice
 from PIL import Image as PILImage
 
-def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
-    if isinstance(dataset, str):
-        dataset = load_dataset(dataset, split=split, streaming=streaming)
+# def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
+#     if isinstance(dataset, str):
+#         dataset = load_dataset(dataset, split=split, streaming=streaming)
 
-    preprocess_fn = kwargs.get("preprocess_fn", None)
+#     preprocess_fn = kwargs.get("preprocess_fn", None)
+#     cols = kwargs.get("dataset_column", None)
+#     if not isinstance(cols, (list, tuple, str)) or len(cols) == 0:
+#         raise TypeError("`dataset_column` must be a non-empty list/tuple of column names.")
+#     if isinstance(cols, str):
+#         cols = [cols]
+    
+#     subset = kwargs.get("subset", None)
+
+#     def stringify(ex):
+#         out = {}
+#         for k, v in ex.items():
+#             if isinstance(v, PILImage.Image):
+#                 out[k] = v 
+#             elif isinstance(v, (str, bytes)):
+#                 out[k] = v if isinstance(v, str) else v.decode("utf-8", "ignore")
+#             else:
+#                 out[k] = json.dumps(v, ensure_ascii=False)
+#         return out
+
+#     # Apply before building iterator
+#     dataset = dataset.map(stringify)
+#     dataset = dataset.with_format("python")
+
+#     base_iter = iter(dataset)
+#     if subset is None:
+#         iter_sub = base_iter
+#     elif isinstance(subset, int):
+#         iter_sub = islice(base_iter, subset)
+#     else:
+#         raise ValueError("subset must be None or an int")
+
+#     def gen():
+#         for ex in iter_sub:
+#             missing = [c for c in cols if c not in ex]
+#             if missing:
+#                 raise KeyError(f"Missing columns {missing}.")
+#             if len(cols) == 1:
+#                 yield preprocess_fn(ex[cols[0]]) if preprocess_fn else ex[cols[0]]  # single value
+#             else:
+#                 yield (preprocess_fn(ex[c]) if preprocess_fn else ex[c] for c in cols)        # tuple of values
+
+#     return gen()
+
+def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
+    preprocess_fn: Optional[Callable] = kwargs.get("preprocess_fn", None)
     cols = kwargs.get("dataset_column", None)
-    if not isinstance(cols, (list, tuple, str)) or len(cols) == 0:
-        raise TypeError("`dataset_column` must be a non-empty list/tuple of column names.")
+    if not isinstance(cols, (list, tuple, str)) or (isinstance(cols, (list, tuple)) and len(cols) == 0):
+        raise TypeError("`dataset_column` must be a non-empty list/tuple/str.")
     if isinstance(cols, str):
         cols = [cols]
-    
+
     subset = kwargs.get("subset", None)
+    shuffle = kwargs.get("shuffle", False)
+    seed = kwargs.get("seed", 0)
+    shuffle_buffer_size = kwargs.get("shuffle_buffer_size", 10_000)
 
-    def stringify(ex):
-        out = {}
-        for k, v in ex.items():
-            if isinstance(v, PILImage.Image):
-                out[k] = v 
-            elif isinstance(v, (str, bytes)):
-                out[k] = v if isinstance(v, str) else v.decode("utf-8", "ignore")
-            else:
-                out[k] = json.dumps(v, ensure_ascii=False)
-        return out
+    class _HFStreamingEpochs:
+        """Re-iterable AND iterator; supports for-loops and next(obj)."""
+        def __init__(self):
+            self._epoch = 0
+            self._it: Optional[Iterator] = None  # current epoch iterator
 
-    # Apply before building iterator
-    dataset = dataset.map(stringify)
-    dataset = dataset.with_format("python")
+        def _stringify(self, ex):
+            out = {}
+            for k, v in ex.items():
+                if isinstance(v, PILImage.Image):
+                    out[k] = v
+                elif isinstance(v, (str, bytes)):
+                    out[k] = v if isinstance(v, str) else v.decode("utf-8", "ignore")
+                else:
+                    out[k] = json.dumps(v, ensure_ascii=False)
+            return out
 
-    base_iter = iter(dataset)
-    if subset is None:
-        iter_sub = base_iter
-    elif isinstance(subset, int):
-        iter_sub = islice(base_iter, subset)
-    else:
-        raise ValueError("subset must be None or an int")
+        def _build_iter(self) -> Iterator:
+            ds = load_dataset(dataset, split=split, streaming=streaming) if isinstance(dataset, str) else dataset
+            if shuffle:
+                ds = ds.shuffle(seed=seed + self._epoch, buffer_size=shuffle_buffer_size)
+            ds = ds.map(self._stringify).with_format("python")
+            it = iter(ds)
+            if subset is not None:
+                it = islice(it, subset)
+            return it
 
-    def gen():
-        for ex in iter_sub:
+        def _postprocess(self, ex):
             missing = [c for c in cols if c not in ex]
             if missing:
                 raise KeyError(f"Missing columns {missing}.")
             if len(cols) == 1:
-                yield preprocess_fn(ex[cols[0]]) if preprocess_fn else ex[cols[0]]  # single value
+                v = ex[cols[0]]
+                return preprocess_fn(v) if preprocess_fn else v
             else:
-                yield (preprocess_fn(ex[c]) if preprocess_fn else ex[c] for c in cols)        # tuple of values
+                vals = [ex[c] for c in cols]
+                if preprocess_fn:
+                    vals = [preprocess_fn(v) for v in vals]
+                return tuple(vals)
 
-    return gen()
+        # Iterator protocol
+        def __iter__(self):
+            # start a fresh epoch each time
+            self._it = self._build_iter()
+            self._epoch += 1
+            return self
+
+        def __next__(self):
+            if self._it is None:
+                # allow next(obj) before calling iter(obj)
+                self.__iter__()
+            try:
+                ex = next(self._it)
+            except StopIteration:
+                # end of this epoch
+                raise
+            return self._postprocess(ex)
+
+        # Optional manual reset to start epoch counting over
+        def reset(self):
+            self._epoch = 0
+            self._it = None
+
+    return _HFStreamingEpochs()
 
 
 def zst_to_generator(data_path):

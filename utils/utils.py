@@ -13,6 +13,7 @@ from nnsight.modeling.diffusion import DiffusionModel
 from itertools import islice
 from typing import Iterable, Iterator, List, TypeVar
 from torchvision import transforms
+import numpy as np
 
 T = TypeVar("T")
 
@@ -158,15 +159,80 @@ class FunctionModule(torch.nn.Module):
         merged = {**self.bound_kwargs, **kwargs}
         return self.func(*args, **merged)    
     
-def batchify(source: Iterable[T], batch_size: int, *, drop_last: bool = False) -> Iterator[List[T]]:
-    it = iter(source)
-    while True:
-        batch = list(islice(it, batch_size))
+# def batchify(source: Iterable[T], batch_size: int, *, drop_last: bool = False) -> Iterator[List[T]]:
+#     it = iter(source)
+#     while True:
+#         batch = list(islice(it, batch_size))
+#         if not batch:
+#             break
+#         if len(batch) < batch_size and drop_last:
+#             break
+#         yield batch
+
+from typing import Iterable, Iterator, List, TypeVar, Optional, Callable
+from itertools import islice
+
+T = TypeVar("T")
+
+from typing import Iterable, Iterator, List, TypeVar, Optional, Callable
+from itertools import islice
+
+T = TypeVar("T")
+
+class BatchIterator(Iterator[List[T]]):
+    """
+    Batches items from a (re-iterable) source. Each __iter__ starts a fresh pass.
+    If your source is a one-shot iterator, pass source_factory to recreate it.
+    """
+    def __init__(
+        self,
+        source: Iterable[T] | Iterator[T],
+        batch_size: int,
+        drop_last: bool = False,
+        *,
+        source_factory: Optional[Callable[[], Iterable[T] | Iterator[T]]] = None,
+    ):
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        self._src = source
+        self._batch_size = int(batch_size)
+        self._drop_last = bool(drop_last)
+        self._factory = source_factory
+        self._it: Optional[Iterator[T]] = None
+        self.reset()  # ready for first pass
+
+    def __iter__(self) -> "BatchIterator[T]":
+        self.reset()
+        return self
+
+    def __next__(self) -> List[T]:
+        it = self._it
+        if it is None:
+            raise StopIteration
+        batch = list(islice(it, self._batch_size))
         if not batch:
-            break
-        if len(batch) < batch_size and drop_last:
-            break
-        yield batch
+            raise StopIteration
+        if self._drop_last and len(batch) < self._batch_size:
+            # drop the tail batch and signal end
+            raise StopIteration
+        return batch
+
+    def reset(self) -> None:
+        """
+        Restart iteration from the beginning.
+        - If source is re-iterable, make a fresh iterator over it.
+        - If source is one-shot, use source_factory to rebuild it.
+        """
+        if self._factory is not None:
+            self._it = iter(self._factory())
+        else:
+            # If _src is a one-shot iterator and no factory is provided,
+            # reset() cannot rewind it.
+            if hasattr(self._src, "reset"):
+                self._src.reset() 
+            self._it = iter(self._src)
+
+
         
 def preprocess_image(image, target_size=512):
     """
@@ -188,5 +254,328 @@ def preprocess_image(image, target_size=512):
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5])  # Scale to [-1, 1]
     ])
-    return transform(image) #.unsqueeze(0)       
+    return transform(image) #.unsqueeze(0)   
+
+
+class ActivationMemmapWriter:
+    def __init__(self, path, N, D, dtype=np.float16):
+        self.path = path
+        self.N, self.D = int(N), int(D)
+        self.dtype = dtype
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        # create/overwrite
+        self.mm = np.memmap(path, dtype=dtype, mode="w+", shape=(self.N, self.D))
+        self.pos = 0  # next write row
+
+    def append_batch(self, acts: torch.Tensor):
+        """
+        acts: (B, D) float tensor on any device
+        """
+        B, D = acts.shape
+        assert D == self.D, f"D mismatch: got {D}, expected {self.D}"
+        end = self.pos + B
+        if end > self.N:
+            raise RuntimeError(f"Memmap capacity exceeded ({end} > {self.N})")
+        # move to CPU numpy
+        arr = acts.detach().to("cpu").to(torch.float16 if self.dtype == np.float16 else torch.float32).numpy()
+        self.mm[self.pos:end, :] = arr
+        self.pos = end
+
+    def flush(self):
+        self.mm.flush()
+
+    def close(self):
+        self.flush()
+        del self.mm
+
+import os, json
+import numpy as np
+import torch as t
+from typing import List, Tuple, Optional
+
+class ShardedActivationMemmapDataset:
+    """
+    Stateful, batch-yielding iterator over sharded activation memmaps.
+    Uses a shuffled index list to avoid re-reading. Not thread-safe.
+    """
+    def __init__(
+        self,
+        memmap_dir: str,
+        # batch_size: int = 1024,
+        # device: Optional[str] = None,      # e.g., "cuda" or "cpu"; None -> leave on CPU
+        # dtype: t.dtype = t.float32,        # dtype returned to the caller
+        pin_memory: bool = False,          # pin only if device is CUDA and you'll H2D copy later
+        shuffle: bool = True,
+        keep_open_shard: bool = True,       # keep one shard mapped to reduce reopen overhead
+        **kwargs,
+    ):
+        man_p = os.path.join(memmap_dir, "manifest.json")
+        with open(man_p, "r") as f:
+            man = json.load(f)
+
+        self.memmap_dir = memmap_dir
+        # self.batch_size = int(batch_size)
+        # self.return_device = device
+        # self.return_dtype = dtype
+        self.batch_size = int(kwargs.get("out_batch_size", 1))
+        self.device = kwargs.get("data_device", None)
+        self.dtype = kwargs.get("autocast_dtype", t.float32)
+        
+        self.pin_memory = bool(pin_memory)
+        self.shuffle = bool(shuffle)
+        self.keep_open_shard = bool(keep_open_shard)
+
+        self.feature_dim = int(man["feature_dim"])
+        self.shards_meta: List[Tuple[str,int]] = [
+            (os.path.join(memmap_dir, sh["path"]), int(sh["rows_written"]))
+            for sh in man["shards"]
+            if int(sh["rows_written"]) > 0
+        ]
+        self.total_rows = int(man["total_rows"])
+        self._dtype_np = np.dtype(man["dtype"])       # storage dtype
+        self._prefix = np.cumsum([0] + [n for _, n in self.shards_meta])  # row offsets
+
+        # iteration state
+        self._order = np.arange(self.total_rows, dtype=np.int64)
+        if self.shuffle:
+            rng = np.random.default_rng()
+            rng.shuffle(self._order)
+        self._cursor = 0
+
+        # keep-one-open shard state
+        self._open_shard_id = None
+        self._open_mm = None
+
+    # -------------------- public API --------------------
+    def __len__(self):
+        return self.total_rows
+
+    def __iter__(self):
+        # reset cursor; reshuffle for a fresh pass
+        self._cursor = 0
+        if self.shuffle:
+            rng = np.random.default_rng()
+            rng.shuffle(self._order)
+        return self
+
+    def __next__(self) -> t.Tensor:
+        if self._cursor >= self.total_rows:
+            # cleanup any open handle
+            self._close_open_shard()
+            raise StopIteration
+
+        end = min(self._cursor + self.batch_size, self.total_rows)
+        idxs = self._order[self._cursor:end]
+        self._cursor = end
+
+        batch = self._load_indices(idxs)  # torch float32 by default (configurable)
+        # optional device move
+        if self.device is not None:
+            batch = batch.to(self.device, non_blocking=self.pin_memory)
+        return batch
+
+    def reset(self):
+        """Manually reset iteration (reshuffles if shuffle=True)."""
+        self.__iter__()
+
+    # -------------------- internals --------------------
+    def _close_open_shard(self):
+        if self._open_mm is not None:
+            # explicitly drop ref; memmap closes when GC'd
+            del self._open_mm
+            self._open_mm = None
+            self._open_shard_id = None
+
+    def _open_shard(self, shard_id: int):
+        """Open (or reuse) the given shard memmap for reading."""
+        if self.keep_open_shard and self._open_shard_id == shard_id and self._open_mm is not None:
+            return self._open_mm
+
+        # open fresh
+        path, valid = self.shards_meta[shard_id]
+        mm = np.memmap(path, dtype=self._dtype_np, mode="r", shape=(valid, self.feature_dim))
+
+        if self.keep_open_shard:
+            self._close_open_shard()
+            self._open_shard_id = shard_id
+            self._open_mm = mm
+        return mm
+
+    def _row_to_shard(self, global_idx: int) -> Tuple[int, int]:
+        """Map a global row index -> (shard_id, row_in_shard)."""
+        # prefix is [0, n0, n0+n1, ...]; find rightmost prefix <= idx
+        s = int(np.searchsorted(self._prefix, global_idx, side="right") - 1)
+        row = int(global_idx - self._prefix[s])
+        return s, row
+
+    def _load_indices(self, idxs: np.ndarray) -> t.Tensor:
+        """
+        Load a set of global row indices, grouping by shard to minimize opens.
+        Returns a torch tensor of shape [B, D] on CPU (optionally pinned),
+        with final dtype = self.dtype.
+        """
+        # group indices by shard
+        by_shard = {}
+        for g in idxs:
+            s, r = self._row_to_shard(int(g))
+            by_shard.setdefault(s, []).append(r)
+
+        parts = []
+        for s, rows in by_shard.items():
+            mm = self._open_shard(s)
+            rows = np.asarray(rows, dtype=np.int64)
+            # fancy index into memmap -> NumPy array (copy)
+            arr = mm[rows, :]                             # shape [k, D], dtype storage
+            # to torch
+            tens = t.from_numpy(arr.copy())               # avoid view aliasing on memmap
+            tens = tens.to(self.dtype)             # cast to requested dtype
+            if self.pin_memory:
+                tens = tens.pin_memory()
+            parts.append(tens)
+
+        batch = t.cat(parts, dim=0) if len(parts) > 1 else parts[0]
+        return batch
+
     
+def convert_buffer_to_memap(
+    buffer,                      # your TextImageActivationBuffer-like object
+    memmap_dir: str = "./data",             # directory to put shards + manifest
+    D: Optional[int] = None,     # feature dimension; if None inferred from first batch
+    shard_rows: int = 1_000_000, # rows per shard (tune to your RAM/IO)
+    dtype=np.float16             # stored dtype,
+    , **kwargs                   # passed to ShardedActivationMemmapDataset
+):
+    """
+    Stream all unread activations from `buffer` into sharded numpy.memmap files on disk.
+    Each shard is shape (shard_rows, D). The last shard may be partially filled; the
+    manifest records how many rows are valid.
+
+    The buffer's `__next__()` must return a 2D tensor [B, D] (or [B, ...] which we flatten].
+    """
+    os.makedirs(memmap_dir, exist_ok=True)
+
+    # Helper to open a new shard memmap
+    def _open_shard(shard_id: int, rows: int, D: int):
+        path = os.path.join(memmap_dir, f"acts_shard_{shard_id:05d}.memmap")
+        mm = np.memmap(path, dtype=dtype, mode="w+", shape=(rows, D))
+        return path, mm
+
+    total_rows = 0
+    shard_id   = 0
+    shard_pos  = 0
+    shard_path = None
+    shard_mm   = None
+    inferred_D = D
+    manifest = {
+        "dtype": str(np.dtype(dtype)),
+        "shard_rows": shard_rows,
+        "shards": [],   # list of {"path": str, "rows_written": int, "shape": [rows, D]}
+        "total_rows": 0,
+        "feature_dim": None,
+    }
+
+    # open first shard lazily after first batch (so we can infer D)
+    def _ensure_shard():
+        nonlocal shard_id, shard_pos, shard_path, shard_mm, inferred_D
+        if shard_mm is None:
+            shard_path, shard_mm = _open_shard(shard_id, shard_rows, inferred_D)
+            shard_pos = 0
+
+    # write a (CPU numpy) batch into current shard, rolling to next as needed
+    def _write_batch(arr_np: np.ndarray):
+        nonlocal shard_id, shard_pos, shard_mm, shard_path, total_rows
+        start = 0
+        N = arr_np.shape[0]
+        while start < N:
+            _ensure_shard()
+            capacity = shard_rows - shard_pos
+            take = min(capacity, N - start)
+            shard_mm[shard_pos:shard_pos+take, :] = arr_np[start:start+take]
+            shard_pos += take
+            total_rows += take
+            start += take
+            # if shard filled, flush & record and open a new one on next write
+            if shard_pos >= shard_rows:
+                shard_mm.flush()
+                manifest["shards"].append({
+                    "path": os.path.basename(shard_path),
+                    "rows_written": shard_rows,
+                    "shape": [shard_rows, inferred_D],
+                })
+                shard_id += 1
+                shard_mm = None
+                shard_path = None
+                shard_pos = 0
+
+    # Iterate until buffer is exhausted
+    while True:
+        try:
+            batch = next(buffer)              # expects [B, D] (or [B, ...])
+        except StopIteration:
+            break
+
+        if not isinstance(batch, t.Tensor):
+            # support dicts like {"features": tensor} or {"activations": tensor}
+            if isinstance(batch, dict):
+                # pick first tensor-like item
+                for v in batch.values():
+                    if isinstance(v, t.Tensor):
+                        batch = v
+                        break
+            else:
+                raise TypeError("Expected tensor or dict with a tensor value from buffer.__next__().")
+
+        # Flatten to [B, D] if needed
+        if batch.dim() > 2:
+            batch = batch.flatten(1)
+        elif batch.dim() == 1:
+            batch = batch.unsqueeze(0)
+
+        B, Dnow = batch.shape
+        if B == 0:
+            continue
+
+        if inferred_D is None:
+            inferred_D = int(Dnow)
+
+        # Sanity: check consistent feature dim
+        if Dnow != inferred_D:
+            raise ValueError(f"Inconsistent feature dim: got {Dnow}, expected {inferred_D}")
+
+        # Move to CPU fp16 numpy
+        batch_np = batch.detach().to("cpu")
+        if dtype == np.float16:
+            batch_np = batch_np.to(t.float16)
+        elif dtype == np.float32:
+            batch_np = batch_np.to(t.float32)
+        else:
+            # for other dtypes, convert via float32 then astype
+            batch_np = batch_np.to(t.float32)
+
+        batch_np = batch_np.numpy().astype(dtype, copy=False)
+
+        # Write
+        _write_batch(batch_np)
+
+        # Optional: free GPU memory sooner
+        del batch, batch_np
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+
+    # Flush last (possibly partial) shard
+    if shard_mm is not None:
+        shard_mm.flush()
+        manifest["shards"].append({
+            "path": os.path.basename(shard_path),
+            "rows_written": shard_pos,                  # may be < shard_rows
+            "shape": [shard_rows, inferred_D],          # file shape; only first rows_written valid
+        })
+
+    manifest["total_rows"] = total_rows
+    manifest["feature_dim"] = inferred_D
+
+    # Save manifest
+    with open(os.path.join(memmap_dir, "manifest.json"), "w") as f:
+        json.dump(manifest, f, indent=2)
+
+    memap_buffer = ShardedActivationMemmapDataset(memmap_dir,**kwargs)
+    return memap_buffer
