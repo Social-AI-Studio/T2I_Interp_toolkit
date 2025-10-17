@@ -12,14 +12,20 @@ cd unified-concept-editing
 mkdir models
 pip install -r requirements.txt
 
-python3 trainscripts/uce_sd_debias.py --edit_concepts 'Doctor; Nurse; Carpenter' --debias_concepts 'male; female' --device 'cuda:0' --desired_ratios 0.5 0.5 --exp_name 'debias_sdxl' --model_id 'CompVis/stable-diffusion-v1-4'
+python trainscripts/uce_sd_debias.py \
+--model_id 'CompVis/stable-diffusion-v1-4' \
+--edit_concepts 'Doctor, Nurse, Carpenter' \
+--debias_concepts 'Black; East_Asian; Indian; Latino_Hispanic; Middle_Eastern; Southeast_Asian; White' \
+--desired_ratios 0.142857 0.142857 0.142857 0.142857 0.142857 0.142857 0.142857 \
+--device 'cuda:0' \
+--exp_name 'debias_sd14'
 
 python3 evalscripts/generate-images-sd.py \
   --model_id 'CompVis/stable-diffusion-v1-4' \
   --uce_model_path 'uce_models/debias_sdxl.safetensors' \
   --prompts_path 'data/profession_prompts.csv' \  # placeholder; use better prompts
   --save_path 'runs/uce_outputs' \
-  --exp_name 'debias_sdxl_eval' \
+  --exp_name 'debias_sd14_eval' \
   --num_images_per_prompt 1 \
   --num_inference_steps 50 \
   --device 'cuda:0'
