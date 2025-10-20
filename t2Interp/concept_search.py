@@ -1,9 +1,9 @@
 from t2Interp.accessors import ModuleAccessor
 from abc import ABC, abstractmethod
 from loguru import logger
-from typing import Any, Dict, Optional, List, Callable, Union
+from typing import Any, Dict, Optional, List, Callable, Union, Generator
 from dictionary_learning.utils import hf_dataset_to_generator
-from utils.utils import BatchIterator
+from utils.utils import BatchIterator, CachedActivationIterator
 from utils.metrics import MetricBase
 import torch as th
 from utils.output import Output 
@@ -11,7 +11,7 @@ from t2Interp.intervention import run_intervention, SteeringIntervention
 from utils.buffer import t2IActivationBuffer
 from utils.text_image_buffer import TextImageActivationBuffer
 from contextlib import nullcontext
-from utils.runningstats import TrainUpdate
+from utils.runningstats import TrainUpdate, Update
 import numpy as np
 from utils.utils import convert_buffer_to_memap, ShardedActivationMemmapDataset
 import os
@@ -34,12 +34,20 @@ class KSteer(Steer):
     def __init__(self, model):
         self.model = model
         
-    def fit(self,dataset, accessor, mapper:th.nn.Module,loss_fn: Optional[Callable] = None,optimizers: List[th.optim.Optimizer]=None, **kwargs):
-        
+    def fit(self,dataset, accessor, mapper:th.nn.Module,loss_fn: Optional[Callable] = None,
+            optimizers: List[th.optim.Optimizer]=None,out:Output=None, **kwargs) -> Generator[Update, None, Output]:
+        if out is not None:
+            self.out=out
+            
+        def log(msg:str):
+            update = Update(info=msg)
+            yield update
+                
         def cache_path(dataset,split,subset):
-            base = Path("data") / dataset / "train"
+            base = Path("data") / dataset / accessor.attr_name / split
             return str(base / str(subset) if subset is not None else base)
         
+        log(f"Starting KSteer training on dataset {dataset} with accessor {accessor.attr_name}")
         generator_train = hf_dataset_to_generator(dataset,**kwargs) 
         gt_train = hf_dataset_to_generator(dataset,**{**kwargs,"dataset_column": kwargs.get("ground_truth_column", "ground_truth"),
                                                       "preprocess_fn" : kwargs.get("gt_processing_fn", None)}) 
@@ -54,23 +62,33 @@ class KSteer(Steer):
         training_device = kwargs.get("training_device", "cpu")
         autocast_dtype = kwargs.get("autocast_dtype", th.float32)
         
-        use_cache = kwargs.get("cache_activations", False)
+        use_memmap = kwargs.get("use_memmap", False)
         
-        if use_cache and os.path.exists(cache_path(dataset,"train",kwargs.get('subset',None))):
+        if use_memmap and os.path.exists(cache_path(dataset,"train",kwargs.get('subset',None))):
+            log(f"Using existing memmap at {cache_path(dataset,'train',kwargs.get('subset',None))} for training activations")
             buffer_train = ShardedActivationMemmapDataset(cache_path(dataset,"train",kwargs.get('subset',None)),**kwargs)
-        elif use_cache:
+        elif use_memmap:
             buffer_train = TextImageActivationBuffer(generator_train, self.model, accessor,d_submodule=d_sub, **kwargs) 
+            log(f"Creating memmap at {cache_path(dataset,'train',kwargs.get('subset',None))} for training activations")
             buffer_train = convert_buffer_to_memap(buffer_train,memmap_dir=cache_path(dataset,"train",kwargs.get('subset',None)), **kwargs)
         else:
             buffer_train = TextImageActivationBuffer(generator_train, self.model, accessor,d_submodule=d_sub, **kwargs)
         
-        if use_cache and os.path.exists(cache_path(dataset,"val",kwargs.get('subset',None))) and kwargs.get("use_val", False):
+        if use_memmap and os.path.exists(cache_path(dataset,"val",kwargs.get('subset',None))) and kwargs.get("use_val", False):
+            log(f"Using existing memmap at {cache_path(dataset,'val',kwargs.get('subset',None))} for validation activations")
             buffer_val = ShardedActivationMemmapDataset(cache_path(dataset,"val",kwargs.get('subset',None)),**kwargs)
-        elif use_cache and kwargs.get("use_val", False):
+        elif use_memmap and kwargs.get("use_val", False):
             buffer_val = TextImageActivationBuffer(generator_val, self.model, accessor,d_submodule=d_sub, **kwargs)
+            log(f"Creating memmap at {cache_path(dataset,'val',kwargs.get('subset',None))} for validation activations")
             buffer_val = convert_buffer_to_memap(buffer_val,memmap_dir=cache_path(dataset,"val",kwargs.get('subset',None)),**kwargs)
         elif kwargs.get("use_val", False):
             buffer_val = TextImageActivationBuffer(generator_val, self.model, accessor,d_submodule=d_sub, **kwargs)
+        
+        use_cache = kwargs.get("cache_activations", False)
+        if use_cache:
+            buffer_train = CachedActivationIterator(buffer_train, **kwargs)
+            if kwargs.get("use_val", False):    
+                buffer_val = CachedActivationIterator(buffer_val, **kwargs)
             
         buffer_train_gt  = BatchIterator(gt_train,kwargs.get("out_batch_size", 1))
          
@@ -87,6 +105,7 @@ class KSteer(Steer):
         
         val_losses = [] 
         step = 0
+        log(f"Beginning training for {steps} steps")
         while True:
             for act,gt in zip(iter(buffer_train),iter(buffer_train_gt)):
                 act = act.to(training_device, dtype=autocast_dtype)
@@ -134,8 +153,14 @@ class KSteer(Steer):
             
         if kwargs.get("use_val", False):
            assert "best_mapper" in locals(), "No best mapper found during validation"
-           mapper = mapper.load_state_dict(best_mapper)     
+           mapper = mapper.load_state_dict(best_mapper) 
+        log("Finished training KSteer mapper")       
         self.classifier = mapper 
+        if not hasattr(self, "out"):
+            self.out = Output()
+        self.out.run_metadata = {**kwargs}
+        self.out.best_ckpt = self.classifier.state_dict()
+        return self.out
 
     @th.no_grad()
     def predict_proba(self, X: th.Tensor) -> np.ndarray:

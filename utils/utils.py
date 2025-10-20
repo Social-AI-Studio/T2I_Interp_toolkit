@@ -5,15 +5,15 @@ import io
 import json
 import os
 from nnsight import LanguageModel
-from typing import Any, List, Dict, Callable, Optional
 from pydantic import BaseModel
 from enum import Enum
 import torch
 from nnsight.modeling.diffusion import DiffusionModel
 from itertools import islice
-from typing import Iterable, Iterator, List, TypeVar
+from typing import Iterable, Iterator, List, TypeVar, Tuple, Any, Mapping
 from torchvision import transforms
 import numpy as np
+from typing import Iterable, Iterator, List, TypeVar, Optional, Callable
 
 T = TypeVar("T")
 
@@ -28,6 +28,18 @@ T = TypeVar("T")
 #     JumpReluAutoEncoder,
 # )
 
+def _to_jsonable(x: Any) -> Any:
+    if callable(x):
+        # Just the function name:
+        return getattr(x, "__name__", str(x))
+        # Or, for module-qualified:
+        # return f"{getattr(x, '__module__', '')}.{getattr(x, '__name__', type(x).__name__)}"
+    if isinstance(x, Mapping):
+        return {k: _to_jsonable(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_to_jsonable(v) for v in x]
+    # primitives (str, int, float, bool, None) pass through fine
+    return x
 
 def hf_dataset_to_generator(dataset_name, split="train", streaming=True):
     dataset = load_dataset(dataset_name, split=split, streaming=streaming)
@@ -169,15 +181,7 @@ class FunctionModule(torch.nn.Module):
 #             break
 #         yield batch
 
-from typing import Iterable, Iterator, List, TypeVar, Optional, Callable
-from itertools import islice
 
-T = TypeVar("T")
-
-from typing import Iterable, Iterator, List, TypeVar, Optional, Callable
-from itertools import islice
-
-T = TypeVar("T")
 
 class BatchIterator(Iterator[List[T]]):
     """
@@ -257,41 +261,36 @@ def preprocess_image(image, target_size=512):
     return transform(image) #.unsqueeze(0)   
 
 
-class ActivationMemmapWriter:
-    def __init__(self, path, N, D, dtype=np.float16):
-        self.path = path
-        self.N, self.D = int(N), int(D)
-        self.dtype = dtype
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        # create/overwrite
-        self.mm = np.memmap(path, dtype=dtype, mode="w+", shape=(self.N, self.D))
-        self.pos = 0  # next write row
+# class ActivationMemmapWriter:
+#     def __init__(self, path, N, D, dtype=np.float16):
+#         self.path = path
+#         self.N, self.D = int(N), int(D)
+#         self.dtype = dtype
+#         os.makedirs(os.path.dirname(path), exist_ok=True)
+#         # create/overwrite
+#         self.mm = np.memmap(path, dtype=dtype, mode="w+", shape=(self.N, self.D))
+#         self.pos = 0  # next write row
 
-    def append_batch(self, acts: torch.Tensor):
-        """
-        acts: (B, D) float tensor on any device
-        """
-        B, D = acts.shape
-        assert D == self.D, f"D mismatch: got {D}, expected {self.D}"
-        end = self.pos + B
-        if end > self.N:
-            raise RuntimeError(f"Memmap capacity exceeded ({end} > {self.N})")
-        # move to CPU numpy
-        arr = acts.detach().to("cpu").to(torch.float16 if self.dtype == np.float16 else torch.float32).numpy()
-        self.mm[self.pos:end, :] = arr
-        self.pos = end
+#     def append_batch(self, acts: torch.Tensor):
+#         """
+#         acts: (B, D) float tensor on any device
+#         """
+#         B, D = acts.shape
+#         assert D == self.D, f"D mismatch: got {D}, expected {self.D}"
+#         end = self.pos + B
+#         if end > self.N:
+#             raise RuntimeError(f"Memmap capacity exceeded ({end} > {self.N})")
+#         # move to CPU numpy
+#         arr = acts.detach().to("cpu").to(torch.float16 if self.dtype == np.float16 else torch.float32).numpy()
+#         self.mm[self.pos:end, :] = arr
+#         self.pos = end
 
-    def flush(self):
-        self.mm.flush()
+#     def flush(self):
+#         self.mm.flush()
 
-    def close(self):
-        self.flush()
-        del self.mm
-
-import os, json
-import numpy as np
-import torch as t
-from typing import List, Tuple, Optional
+#     def close(self):
+#         self.flush()
+#         del self.mm
 
 class ShardedActivationMemmapDataset:
     """
@@ -319,7 +318,7 @@ class ShardedActivationMemmapDataset:
         # self.return_dtype = dtype
         self.batch_size = int(kwargs.get("out_batch_size", 1))
         self.device = kwargs.get("data_device", None)
-        self.dtype = kwargs.get("autocast_dtype", t.float32)
+        self.dtype = kwargs.get("autocast_dtype", torch.float32)
         
         self.pin_memory = bool(pin_memory)
         self.shuffle = bool(shuffle)
@@ -358,7 +357,7 @@ class ShardedActivationMemmapDataset:
             rng.shuffle(self._order)
         return self
 
-    def __next__(self) -> t.Tensor:
+    def __next__(self) -> torch.Tensor:
         if self._cursor >= self.total_rows:
             # cleanup any open handle
             self._close_open_shard()
@@ -427,13 +426,13 @@ class ShardedActivationMemmapDataset:
             # fancy index into memmap -> NumPy array (copy)
             arr = mm[rows, :]                             # shape [k, D], dtype storage
             # to torch
-            tens = t.from_numpy(arr.copy())               # avoid view aliasing on memmap
+            tens = torch.from_numpy(arr.copy())               # avoid view aliasing on memmap
             tens = tens.to(self.dtype)             # cast to requested dtype
             if self.pin_memory:
                 tens = tens.pin_memory()
             parts.append(tens)
 
-        batch = t.cat(parts, dim=0) if len(parts) > 1 else parts[0]
+        batch = torch.cat(parts, dim=0) if len(parts) > 1 else parts[0]
         return batch
 
     
@@ -441,7 +440,7 @@ def convert_buffer_to_memap(
     buffer,                      # your TextImageActivationBuffer-like object
     memmap_dir: str = "./data",             # directory to put shards + manifest
     D: Optional[int] = None,     # feature dimension; if None inferred from first batch
-    shard_rows: int = 1_000_000, # rows per shard (tune to your RAM/IO)
+    shard_rows: int = 100,     # rows per shard (tune to your RAM/IO)
     dtype=np.float16             # stored dtype,
     , **kwargs                   # passed to ShardedActivationMemmapDataset
 ):
@@ -514,12 +513,12 @@ def convert_buffer_to_memap(
         except StopIteration:
             break
 
-        if not isinstance(batch, t.Tensor):
+        if not isinstance(batch, torch.Tensor):
             # support dicts like {"features": tensor} or {"activations": tensor}
             if isinstance(batch, dict):
                 # pick first tensor-like item
                 for v in batch.values():
-                    if isinstance(v, t.Tensor):
+                    if isinstance(v, torch.Tensor):
                         batch = v
                         break
             else:
@@ -545,12 +544,12 @@ def convert_buffer_to_memap(
         # Move to CPU fp16 numpy
         batch_np = batch.detach().to("cpu")
         if dtype == np.float16:
-            batch_np = batch_np.to(t.float16)
+            batch_np = batch_np.to(torch.float16)
         elif dtype == np.float32:
-            batch_np = batch_np.to(t.float32)
+            batch_np = batch_np.to(torch.float32)
         else:
             # for other dtypes, convert via float32 then astype
-            batch_np = batch_np.to(t.float32)
+            batch_np = batch_np.to(torch.float32)
 
         batch_np = batch_np.numpy().astype(dtype, copy=False)
 
@@ -579,3 +578,97 @@ def convert_buffer_to_memap(
 
     memap_buffer = ShardedActivationMemmapDataset(memmap_dir,**kwargs)
     return memap_buffer
+
+class CachedActivationIterator:
+    """
+    Consume an iterator of activations ((D,) or (B,D) tensors),
+    cache them on CPU (single torch.cat), then iterate batches.
+
+    Usage:
+        it = CachedActivationIterator(src_iter, out_batch_size=1024, gpu_device="cuda")
+        for xb in it:            # xb is on cuda if gpu_device is set
+            ...
+        it.reset()               # iterate again
+        for xb in it:
+            ...
+        buf = it.buffer          # CPU cache (N, D), dtype=cpu_dtype
+    """
+    def __init__(self, it: Iterable[torch.Tensor], **kwargs) -> None:
+        # config (all via kwargs)
+        self.out_batch_size: int = kwargs.get("out_batch_size", 1024)
+        self.cpu_dtype: torch.dtype = kwargs.get("cpu_dtype", torch.float16)
+        self.cpu_device: str = kwargs.get("cpu_device", "cpu")
+        self.gpu_device: Optional[str] = kwargs.get("gpu_device", None)  # e.g., "cuda" or None to keep on CPU
+        self.pin_memory: bool = kwargs.get("pin_memory", True)
+        self.non_blocking: bool = kwargs.get("non_blocking", True)
+
+        # build cache immediately
+        self._build_cache(it)
+        self._i = 0  # iteration cursor
+
+    # -------- public API --------
+    def __iter__(self) -> "CachedActivationIterator":
+        self._i = 0
+        return self
+
+    def __next__(self) -> torch.Tensor:
+        if self._i >= self.N:
+            raise StopIteration
+        j = min(self._i + self.out_batch_size, self.N)
+        batch = self.buffer[self._i:j]
+        if self.pin_memory:
+            batch = batch.pin_memory()
+        if self.gpu_device is not None:
+            batch = batch.to(self.gpu_device, non_blocking=self.non_blocking)
+        self._i = j
+        return batch
+
+    def reset(self) -> None:
+        """Reset internal cursor so you can iterate again."""
+        self._i = 0
+
+    def __len__(self) -> int:
+        """Number of items (rows) in the cache."""
+        return self.N
+
+    # Expose the CPU cache in case you want random access
+    @property
+    def buffer(self) -> torch.Tensor:
+        return self._buffer
+
+    @property
+    def shape(self):
+        return tuple(self._buffer.shape)
+
+    # -------- internals --------
+    def _build_cache(self, it: Iterable[torch.Tensor]) -> None:
+        chunks: List[torch.Tensor] = []
+        D: Optional[int] = None
+
+        for x in it:
+            x = x.detach()
+            if x.dim() == 1:
+                x = x.unsqueeze(0)  # (D,) -> (1,D)
+            if x.dim() != 2:
+                raise ValueError(f"Expected (*, D), got {tuple(x.shape)}")
+            if D is None:
+                D = x.size(1)
+            elif x.size(1) != D:
+                raise ValueError(f"Inconsistent feature dim: {x.size(1)} vs expected {D}")
+            # keep intermediate on CPU; avoid extra copies
+            chunks.append(x.to("cpu", copy=False))
+
+        if not chunks:
+            # empty cache
+            self._buffer = torch.empty((0, 0), dtype=self.cpu_dtype, device=self.cpu_device)
+            self.N = 0
+            self.D = 0
+            return
+
+        cpu_cat = torch.cat(chunks, dim=0)                # (N, D) CPU
+        self._buffer = cpu_cat.to(self.cpu_device, dtype=self.cpu_dtype)
+        self.N, self.D = self._buffer.size(0), self._buffer.size(1)
+        self._i = 0
+
+
+
