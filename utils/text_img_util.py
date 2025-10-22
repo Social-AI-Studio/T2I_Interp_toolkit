@@ -32,6 +32,7 @@ class OutputAlterHook:
     - tuple/list of tensors (modifies the first tensor)
     - objects with `.sample` (e.g., diffusers' UNet2DConditionOutput)
     Supports optional step gating with an external call_counter.
+    If `guidance=True`, applies policy only to the second half of batch (CFG cond branch).
     """
     def __init__(
         self,
@@ -39,11 +40,13 @@ class OutputAlterHook:
         call_counter: Optional[dict] = None,
         step_index: Optional[int] = None,     # apply only on the Nth call (0-index)
         device: Optional[str] = None,
+        guidance: bool = True,               # NEW: apply only to latter half if CFG duplication is used
     ):
         self.policy = policy
         self.call_counter = call_counter if call_counter is not None else {"n": 0}
         self.step_index = step_index
         self.device = device
+        self.guidance = guidance
         self._handle = None
 
     def _take_it(self) -> bool:
@@ -51,31 +54,50 @@ class OutputAlterHook:
         self.call_counter["n"] += 1
         return (self.step_index is None) or (n == self.step_index)
 
+    def _apply(self, x: Tensor, module: t.nn.Module) -> Tensor:
+        """Apply policy either to entire batch or only to the CFG conditional half."""
+        if self.guidance and x.dim() >= 1 and x.size(0) % 2 == 0 and x.size(0) > 1:
+            B2 = x.size(0)
+            B = B2 // 2
+            uncond = x[:B]
+            cond   = x[B:]
+            cond_new = self.policy(cond, module)
+            out = t.cat([uncond, cond_new], dim=0)
+        else:
+            out = self.policy(x, module)
+
+        if self.device is not None and out.device != t.device(self.device):
+            out = out.to(self.device)
+        return out
+
     def hook(self, module: t.nn.Module, inputs, output):
         if not self._take_it():
             return None  # no modification
+
         out = output
 
         # Case A: output is a Tensor
         if isinstance(out, t.Tensor):
-            new = self.policy(out, module)
-            if self.device is not None:
-                new = new.to(self.device)
-            return new
+            return self._apply(out, module)
 
         # Case B: output is a (tuple/list); alter first tensor-like and rebuild the container
         if isinstance(out, (tuple, list)) and len(out) > 0:
             head = out[0]
             if isinstance(head, t.Tensor):
-                new_head = self.policy(head, module)
-                if self.device is not None:
-                    new_head = new_head.to(self.device)
+                new_head = self._apply(head, module)
                 if isinstance(out, tuple):
-                    return (new_head,) + out[1:]
+                    return (new_head,) + tuple(out[1:])
                 else:
+                    out = list(out)
                     out[0] = new_head
                     return out
             return None
+
+        # # Case C: diffusers object with `.sample` tensor (e.g., UNet2DConditionOutput)
+        # if hasattr(out, "sample") and isinstance(out.sample, t.Tensor):
+        #     new_sample = self._apply(out.sample, module)
+        #     # Recreate same type, preserving other attrs
+        #     return type(out)(sample=new_sample, **{k: v for k, v in out.__dict__.items() if k != "sample"})
 
         # Unknown output type
         return None
@@ -189,7 +211,6 @@ def replace_policy(
     """
     def _f(x: Tensor, module: t.nn.Module) -> Tensor:
         new = value(x, module) if callable(value) else value
-        print(new.shape, x.shape)
         new = reshape_like(new, x)
         return new
     return _f
