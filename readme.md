@@ -59,9 +59,9 @@ Pass callables by **import path** (`module:func`). In your setup you export them
 
 ---
 
-## Run with `workflow.sh` (recommended)
+## Run with `train_pipeline.sh` (recommended)
 
-Use the provided `scripts/workflow.sh` to loop over multiple **accessors**:
+Use the provided `scripts/train_pipeline.sh` to loop over multiple **accessors**:
 
 ```bash
 #!/usr/bin/env bash
@@ -81,8 +81,8 @@ lr=1e-5
 autocast_dtype='bfloat16'
 
 for ACCESSOR in "${ACCESSORS[@]}"; do
-  python -m scripts.run_workflow \
-    --workflow steering \
+  python -m scripts.train_pipeline \
+    --training_fn KSteer.fit \
     --dataset "$DATASET" \
     --accessor_path "$ACCESSOR" \
     --run_name "$run_name" \
@@ -98,15 +98,15 @@ for ACCESSOR in "${ACCESSORS[@]}"; do
     --autocast_dtype "${autocast_dtype}" \
     --outputs_root runs \
     --wandb_config reporting/config.yaml \
-    --preprocess_fn scripts.run_workflow:preprocess_fn \
-    --gt_processing_fn scripts.run_workflow:race_processing_fn
+    --preprocess_fn scripts.train_pipeline:preprocess_fn \
+    --gt_processing_fn scripts.train_pipeline:race_processing_fn
 done
 ```
 
 ### Launch (with logging)
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 nohup bash scripts/workflow.sh > run.log 2>&1 &
+CUDA_VISIBLE_DEVICES=0 nohup bash scripts/train_pipeline.sh > run.log 2>&1 &
 ```
 
 * `nohup … &` runs it in the background.
@@ -119,7 +119,7 @@ Right now every accessor uses the same `--run_name`. To distinguish them, append
 
 ```bash
 slug=$(echo "$ACCESSOR" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-|-$//g')
-python -m scripts.run_workflow \
+python -m scripts.train_pipeline \
   --run_name "${run_name}-${slug}" \
   ...
 ```
@@ -133,16 +133,16 @@ That gives you separate output folders (and W&B runs) per accessor.
 You can also call the runner directly once:
 
 ```bash
-python -m scripts.run_workflow \
-  --workflow steering \
+python -m scripts.train_pipeline \
+  --training_fn KSteer.fit \
   --run_name steer_fairface_sd14 \
   --dataset nirmalendu01/fairface-trainval-race-balanced-200 \
   --accessor_path 'model.unet_2.down_attn_blocks[0].self_attn_out' \
   --input_dim $((4096*320)) --hidden_dim 4096 --output_dim 7 \
   --steps 200 --refresh_batch_size 64 --out_batch_size 16 \
   --training_device cuda:0 --data_device cpu --autocast_dtype bfloat16 \
-  --preprocess_fn scripts.run_workflow:preprocess_fn \
-  --gt_processing_fn scripts.run_workflow:race_processing_fn \
+  --preprocess_fn scripts.train_pipeline:preprocess_fn \
+  --gt_processing_fn scripts.train_pipeline:race_processing_fn \
   --wandb_config reporting/config.yaml
 ```
 
@@ -191,16 +191,16 @@ Callbacks (e.g., `save_best_ckpt`) can persist your best model to `artifacts/`.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 \
-python -m scripts.run_workflow \
-  --workflow steering \
+python -m scripts.train_pipeline \
+  --training_fn KSteer.fit \
   --run_name test_run \
   --dataset nirmalendu01/fairface-trainval-race-balanced-200 \
   --accessor_path 'model.unet_2.down_attn_blocks[0].self_attn_out' \
   --input_dim $((4096*320)) --hidden_dim 1024 --output_dim 7 \
   --steps 20 --refresh_batch_size 32 --out_batch_size 16 \
   --training_device cuda:0 --data_device cpu --autocast_dtype bfloat16 \
-  --preprocess_fn scripts.run_workflow:preprocess_fn \
-  --gt_processing_fn scripts.run_workflow:race_processing_fn
+  --preprocess_fn scripts.train_pipeline:preprocess_fn \
+  --gt_processing_fn scripts.train_pipeline:race_processing_fn
 ```
 
 You should see:
