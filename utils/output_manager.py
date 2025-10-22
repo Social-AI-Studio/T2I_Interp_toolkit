@@ -48,40 +48,21 @@ class OutputManager:
         }
         for p in [self.run_dir, *self.paths.values()]:
             p.mkdir(parents=True, exist_ok=True)
-        
-    # def __post_init__(self,**kwargs):
-    #     assert kwargs.get("workflow") is not None, "OutputManager requires a workflow argument"
-    #     assert kwargs.get("run_name") is not None, "OutputManager requires a run_name argument"
-            
-    #     root = Path(self.cfg.root_dir)
-    #     run_name = f"{kwargs.get('run_name')}_{self.cfg.workflow}_{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    #     self.workflow = kwargs.get("workflow")
-    #     self.run_dir = root / run_name
-    #     # create dirs
-    #     self.paths = {
-    #         "viz": self.run_dir / "viz",
-    #         "report": self.run_dir / "report",
-    #         "artifacts": self.run_dir / "artifacts",
-    #         "logs": self.run_dir / "logs",
-    #     }
-    #     for p in [self.run_dir, *self.paths.values()]:
-    #         p.mkdir(parents=True, exist_ok=True)
 
     # ---------- metadata ----------
-    def write_metadata(self,out:Output):
-        # meta = {
-        #     "run_name": self.run_dir.name,
-        #     "workflow": self.workflow,
-        #     "created_at": _ts(),
-        #     "seed": seed,
-        #     "dataset": dataset,
-        #     "model": model,
-        #     "accessor": accessor,
-        #     "hyperparams": hyperparams,
-        # }
-        # if extra: meta.update(extra)
-        (self.run_dir / "run_metadata.json").write_text(_to_jsonable(out.run_metadata), encoding="utf-8")
-        return
+    def write_metadata(self, out: Output, **kwargs):
+        path = self.run_dir / "run_metadata.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        meta = dict(getattr(out, "run_metadata", {}) or {})
+        if kwargs:
+            meta.update(kwargs)
+
+        # If meta may contain non-JSON types, run through your helper first:
+        meta = _to_jsonable(meta)
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
 
     # ---------- convenience writers ----------
     def save_json(self, relpath: str, obj: Any):
@@ -92,7 +73,7 @@ class OutputManager:
         tmp.replace(p)
         return p
 
-    def save_best_ckpt(self,out: Output):
+    def save_best_ckpt(self,out: Output, **kwargs):
         torch.save(out.best_ckpt, self.paths["artifacts"] / "best_ckpt.pt")
         return
 

@@ -16,10 +16,11 @@ import numpy as np
 from utils.utils import convert_buffer_to_memap, ShardedActivationMemmapDataset
 import os
 from pathlib import Path
+from t2Interp.T2I import T2IModel
 
 class Steer(ABC):
     @abstractmethod
-    def fit(self, dataset:dict, accessors:ModuleAccessor,**kwargs) -> None:
+    def fit(self, model:T2IModel, dataset:dict, accessors:ModuleAccessor,**kwargs) -> None:
         pass
     
     @abstractmethod
@@ -31,11 +32,17 @@ class Steer(ABC):
         pass
     
 class KSteer(Steer):
-    def __init__(self, model):
+    def __init__(self, model:T2IModel=None):
         self.model = model
         
     def fit(self,dataset, accessor, mapper:th.nn.Module,loss_fn: Optional[Callable] = None,
-            optimizers: List[th.optim.Optimizer]=None,out:Output=None, **kwargs) -> Generator[Update, None, Output]:
+            optimizers: List[th.optim.Optimizer]=None,out:Output=None, 
+            model:T2IModel=None, **kwargs) -> Generator[Update, None, Output]:
+        
+        if self.model is None and model is not None:
+            self.model = model
+        assert self.model is not None, "Model must be provided either at initialization or in fit()"
+        
         if out is not None:
             self.out=out
             
@@ -159,7 +166,7 @@ class KSteer(Steer):
         if not hasattr(self, "out"):
             self.out = Output()
         self.out.run_metadata = {**kwargs}
-        self.out.best_ckpt = self.classifier.state_dict()
+        self.out.best_ckpt = best_mapper
         return self.out
 
     @th.no_grad()
@@ -171,6 +178,7 @@ class KSteer(Steer):
         return probs.cpu().numpy()
     
     def compute_steering_loss(
+        self,
         logits: th.Tensor,
         *,
         target_idx: List[int] | th.Tensor,
@@ -196,7 +204,6 @@ class KSteer(Steer):
                 target_term = th.zeros(B, device=logits.device)
             return avoid_term - target_term
     
-    @th.no_grad()
     def steer(
         self,
         acts: Union[np.ndarray, th.Tensor],
@@ -206,13 +213,20 @@ class KSteer(Steer):
         alpha: float = 1.0,
         steps: int = 1,
         step_size_decay: float = 1.0,
+        mapper: Optional[str] = None,
+        **kwargs,
     ) -> th.Tensor:
+        if not hasattr(self, "classifier") and mapper is not None:
+            self.classifier = mapper
+            
+        assert hasattr(self, "classifier"), "Classifier not found. Please fit the model or provide a classifier_path."    
+        
         if avoid_idx is None:
             avoid_idx = []
         if isinstance(acts, np.ndarray):
-            acts_t = th.as_tensor(acts, dtype=th.float32, device=self.device)
+            acts_t = th.as_tensor(acts, dtype=th.float32, device=self.classifier.device)
         else:
-            acts_t = acts.to(self.device, dtype=th.float32)
+            acts_t = acts.to(self.classifier.device, dtype=th.float32)
 
         steered = acts_t.detach().clone()
         for step in range(steps):
@@ -229,6 +243,7 @@ class KSteer(Steer):
     
     def eval(self, *args,**kwargs) -> None:
         pass
+    
 class CAA(Steer):
     def __init__(self, model):
         self.model = model

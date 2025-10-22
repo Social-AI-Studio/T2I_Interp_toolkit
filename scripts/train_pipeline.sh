@@ -12,7 +12,7 @@ declare -a ACCESSORS=(
 )
 run_name='steer_mlp_train'
 hidden_dim=4096
-steps=1000
+steps=100
 lr=1e-5
 autocast_dtype='bfloat16'
 
@@ -20,8 +20,8 @@ for ACCESSOR in "${ACCESSORS[@]}"; do
   # Parse key=val pairs into vars
 #   eval "$cfg"
 
-  python -m scripts.run_workflow \
-    --workflow steering \
+  python -m scripts.train_pipeline \
+    --training_fn KSteer.fit \
     --dataset "$DATASET" \
     --accessor_path "$ACCESSOR" \
     --run_name "$run_name" \
@@ -37,6 +37,6 @@ for ACCESSOR in "${ACCESSORS[@]}"; do
     --autocast_dtype "${autocast_dtype}" \
     --outputs_root runs \
     --wandb_config reporting/config.yaml \
-    --preprocess_fn scripts.run_workflow:preprocess_fn \
-    --gt_processing_fn scripts.run_workflow:race_processing_fn
+    --preprocess_fn scripts.train_pipeline:preprocess_fn \
+    --gt_processing_fn scripts.train_pipeline:race_processing_fn
 done

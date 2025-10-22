@@ -36,5 +36,13 @@ class MLPMapper(nn.Module):
             nn.Linear(hidden_dim, output_dim),
         )
 
+    @property
+    def device(self) -> th.device:
+        # works after .to(device) or .cuda()
+        try:
+            return next(self.parameters()).device
+        except StopIteration:  # no params? fall back to CPU or a buffer (if you add one)
+            return th.device("cpu")
+        
     def forward(self, x: th.Tensor) -> th.Tensor:
         return self.network(x)

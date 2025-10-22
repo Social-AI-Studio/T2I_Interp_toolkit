@@ -41,20 +41,22 @@ def import_callable(path: Optional[str]) -> Optional[Callable]:
     return fn
 
 
-def build_workflow(workflow: str, model) -> Any:
-    """Return the workflow object based on name."""
-    wf = workflow.lower()
-    if wf == "steering":
-        return KSteer(model)
-    # wrappers for other workflows - to be implemented
-    else:
-        raise ValueError(f"Unknown workflow '{workflow}'")
+# def build_workflow(workflow: str, model) -> Any:
+#     """Return the workflow object based on name."""
+#     wf = workflow.lower()
+#     if wf == "steering":
+#         return KSteer(model)
+#     # wrappers for other workflows - to be implemented
+#     else:
+#         raise ValueError(f"Unknown workflow '{workflow}'")
     
 def main():
     p = argparse.ArgumentParser(description="Run T2I workflows with standard outputs.")
     # Core run config
-    p.add_argument("--workflow", type=str, default="steering",
-                   choices=["steering", "localisation", "stitching", "sae"])
+    # p.add_argument("--workflow", type=str, default="steering",
+    #                choices=["steering", "localisation", "stitching", "sae"])
+    p.add_argument("--training_fn", type=str, default=None,
+                   help="training function to run.")
     p.add_argument("--run_name", type=str, default="training_race_steering_mlp")
     p.add_argument("--dataset", type=str, required=True,
                    help="HF dataset repo or local path (expects train/val splits).")
@@ -126,6 +128,7 @@ def main():
     # ---- Pre/Post processing callables ----
     preprocess_fn = import_callable(args.preprocess_fn)
     gt_processing_fn = import_callable(args.gt_processing_fn)
+    training_fn = import_callable(args.training_fn)
 
     # ---- kwargs passed to workflow.fit ----
     autocast_dtype = {"float16": th.float16, "bfloat16": th.bfloat16, "float32": th.float32}[args.autocast_dtype]
@@ -177,14 +180,14 @@ def main():
         callbacks.append(out_manager.save_best_ckpt)
 
     # ---- Choose workflow and run ----
-    workflow = build_workflow(args.workflow, model)
+    # workflow = build_workflow(args.workflow, model)
 
     spec = TrainingSpec(
         name=args.run_name,
-        fn=workflow.fit,
+        fn = training_fn,
         stats_updaters=stats_updaters,
         callback_fns=callbacks,
-        args=(args.dataset, accessor, mapper, loss_fn, optimizers),
+        args=(args.dataset, accessor, mapper, loss_fn, optimizers, model),
         kwargs=workflow_kwargs,
     )
 

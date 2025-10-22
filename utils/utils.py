@@ -28,18 +28,55 @@ T = TypeVar("T")
 #     JumpReluAutoEncoder,
 # )
 
+from typing import Any, Mapping, Sequence
+from pathlib import Path
+
 def _to_jsonable(x: Any) -> Any:
+    # Fast path for JSON primitives
+    if isinstance(x, (str, int, float, bool)) or x is None:
+        return x
+    if isinstance(x, bytes):
+        return x.decode("utf-8", "replace")
+
+    # Callables → function name
     if callable(x):
-        # Just the function name:
-        return getattr(x, "__name__", str(x))
-        # Or, for module-qualified:
-        # return f"{getattr(x, '__module__', '')}.{getattr(x, '__name__', type(x).__name__)}"
+        return getattr(x, "__name__", repr(x))
+
+    # Paths
+    if isinstance(x, Path):
+        return str(x)
+
+    # Mappings: JSON needs string keys
     if isinstance(x, Mapping):
-        return {k: _to_jsonable(v) for k, v in x.items()}
-    if isinstance(x, (list, tuple)):
+        return {str(k): _to_jsonable(v) for k, v in x.items()}
+
+    # Sequences (incl. sets/tuples) → lists
+    if isinstance(x, (list, tuple, set)):
         return [_to_jsonable(v) for v in x]
-    # primitives (str, int, float, bool, None) pass through fine
-    return x
+
+    # NumPy scalars / arrays
+    try:
+        import numpy as np
+        if isinstance(x, np.generic):
+            return x.item()
+        if isinstance(x, np.ndarray):
+            return {"__ndarray__": True, "shape": list(x.shape), "dtype": str(x.dtype)}
+    except Exception:
+        pass
+
+    # PyTorch tensors / dtypes / devices
+    try:
+        import torch as th
+        if isinstance(x, th.Tensor):
+            return {"__tensor__": True, "shape": list(x.shape), "dtype": str(x.dtype), "device": str(x.device)}
+        if isinstance(x, (th.dtype, th.device)):
+            return str(x)
+    except Exception:
+        pass
+
+    # Fallback: string repr
+    return str(x)
+
 
 def hf_dataset_to_generator(dataset_name, split="train", streaming=True):
     dataset = load_dataset(dataset_name, split=split, streaming=streaming)
