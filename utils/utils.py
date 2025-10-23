@@ -31,6 +31,17 @@ T = TypeVar("T")
 from typing import Any, Mapping, Sequence
 from pathlib import Path
 
+def reshape_like(vec, x):
+    """
+    vec: tensor with total elements == x.numel()
+    x:   target tensor (e.g., (B, C, H, W))
+    """
+    v = vec.to(dtype=x.dtype, device=x.device)
+    if v.numel() != x.numel():
+        raise ValueError(f"vec.numel()={v.numel()} != x.numel()={x.numel()}")
+    # .reshape handles non-contiguous; .view requires contiguity
+    return v.reshape(x.shape)
+
 def _to_jsonable(x: Any) -> Any:
     # Fast path for JSON primitives
     if isinstance(x, (str, int, float, bool)) or x is None:

@@ -25,7 +25,7 @@ class Inference:
         super().__init__(*args, **kw)
         self.inference_spec = inference_spec
 
-    def predict(self) -> tuple:
+    def run_inference(self) -> tuple:
         # Move inputs to the right device the Trainer way
         # inputs = self._prepare_inputs(inputs)
         with torch.no_grad():

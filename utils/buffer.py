@@ -57,7 +57,10 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         if batch_size is None:
             batch_size = self.refresh_batch_size
         try:
-            return [next(self.data) for _ in range(batch_size)]
+            batch = [next(self.data) for _ in range(batch_size)]
+            if type(batch[0]) == list:
+                batch = [item for sublist in batch for item in sublist]
+            return batch    
         except StopIteration:
             raise StopIteration("End of data stream reached")
 

@@ -7,7 +7,7 @@ from utils.utils import BatchIterator, CachedActivationIterator
 from utils.metrics import MetricBase
 import torch as th
 from utils.output import Output 
-from t2Interp.intervention import run_intervention, SteeringIntervention
+from t2Interp.intervention import run_intervention, ReplaceIntervention
 from utils.buffer import t2IActivationBuffer
 from utils.text_image_buffer import TextImageActivationBuffer
 from contextlib import nullcontext
@@ -210,7 +210,7 @@ class KSteer(Steer):
         target_idx: List[int],
         avoid_idx: List[int] | None = None,
         *,
-        alpha: float = 1.0,
+        alpha: float = 1,
         steps: int = 1,
         step_size_decay: float = 1.0,
         mapper: Optional[str] = None,
@@ -224,9 +224,9 @@ class KSteer(Steer):
         if avoid_idx is None:
             avoid_idx = []
         if isinstance(acts, np.ndarray):
-            acts_t = th.as_tensor(acts, dtype=th.float32, device=self.classifier.device)
+            acts_t = th.as_tensor(acts, dtype=th.bfloat16, device=self.classifier.device)
         else:
-            acts_t = acts.to(self.classifier.device, dtype=th.float32)
+            acts_t = acts.to(self.classifier.device, dtype=th.bfloat16)
 
         steered = acts_t.detach().clone()
         for step in range(steps):

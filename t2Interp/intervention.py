@@ -4,7 +4,7 @@ from t2Interp.T2I import T2IModel
 from nnsight import NNsight
 from nnsight import Envoy, trace
 from t2Interp.T2I import T2IModel
-from utils.utils import encode_prompt, FieldModel
+from utils.utils import encode_prompt, FieldModel, reshape_like
 from utils.output import Output
 from t2Interp.accessors import ModuleAccessor
 # from ray_runner import RayWorker
@@ -39,7 +39,7 @@ class DiffusionIntervention:
     def fields(cls):
         return []
 
-class SteeringIntervention(DiffusionIntervention):
+class AddVectorIntervention(DiffusionIntervention):
     def __init__(self, steering_vec:torch.Tensor, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.steering_vec = steering_vec
@@ -48,7 +48,29 @@ class SteeringIntervention(DiffusionIntervention):
         alpha = kwargs.get("alpha", 1.0)
         accessor.value = accessor.value + alpha * self.steering_vec
     
-      
+class ReplaceIntervention(DiffusionIntervention):
+    def __init__(self, steering_vec:torch.Tensor, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.steering_vec = steering_vec
+        self.guidance = kwargs.get("guidance", True)
+        
+    def intervene(self, accessor: ModuleAccessor, **kwargs):
+        print(accessor.value.shape, self.steering_vec.shape)
+        if self.guidance and accessor.value.dim() >= 1 and accessor.value.size(0) % 2 == 0 and accessor.value.size(0) > 1:
+            B2 = accessor.value.size(0)
+            B = B2 // 2
+            uncond = accessor.value[:B]
+            cond   = accessor.value[B:]
+            cond_new = reshape_like(self.steering_vec,cond)
+            out = torch.cat([uncond, cond_new], dim=0)
+        else:
+            out = reshape_like(self.steering_vec,accessor.value)
+
+        if accessor.module.device is not None:
+            out = out.to(accessor.module.device)
+            
+        accessor.value = out
+             
 class EncoderAttentionIntervention(DiffusionIntervention):
 
     def __init__(self, *args, **kwargs) -> None:
@@ -199,9 +221,15 @@ class ScalingAttentionIntervention(DiffusionIntervention):
     # def fields(cls):
     #     return [FieldModel(name="Factor", type=FieldModel.FieldType.float)]
 
-def run_intervention(model:T2IModel, prompts:List[str], n_steps:int = 50, start_step:int=0, end_step:int=50, seed:int=40, interventions: List[DiffusionIntervention] = [], **kwargs) -> Output:
-    with model.generate(prompts, num_inference_steps=n_steps, seed=seed, validate=False, scan=False, **kwargs) as tracer:
+def run_intervention(model:T2IModel, prompts:List[str], interventions: List[DiffusionIntervention] = [], **kwargs) -> Output:
+    num_inference_steps = kwargs.get("num_inference_steps", 50)
+    # seed    = kwargs.get("seed", 40)
+    start_step = kwargs.get("start_step", 0)
+    end_step   = kwargs.get("end_step", num_inference_steps)
+    
+    with model.generate(prompts, validate=False, scan=False, **kwargs) as tracer:
         with tracer.iter[start_step:end_step]:
+            print(start_step,end_step)
             for intervention in interventions:
                 intervention(**kwargs)    
             output = model.output.save()

@@ -2,6 +2,7 @@ from typing import Callable, Optional, Union, Tuple, List, Any, Dict
 import torch as t
 from t2Interp.accessors import ModuleAccessor, IOType
 from t2Interp.T2I import T2IModel
+from utils.utils import reshape_like
 
 Tensor = t.Tensor
 
@@ -13,16 +14,16 @@ def _to_dtype_device(x: Tensor, ref: Tensor) -> Tensor:
         x = x.to(ref.device)
     return x
 
-def reshape_like(vec, x):
-    """
-    vec: tensor with total elements == x.numel()
-    x:   target tensor (e.g., (B, C, H, W))
-    """
-    v = vec.to(dtype=x.dtype, device=x.device)
-    if v.numel() != x.numel():
-        raise ValueError(f"vec.numel()={v.numel()} != x.numel()={x.numel()}")
-    # .reshape handles non-contiguous; .view requires contiguity
-    return v.reshape(x.shape)
+# def reshape_like(vec, x):
+#     """
+#     vec: tensor with total elements == x.numel()
+#     x:   target tensor (e.g., (B, C, H, W))
+#     """
+#     v = vec.to(dtype=x.dtype, device=x.device)
+#     if v.numel() != x.numel():
+#         raise ValueError(f"vec.numel()={v.numel()} != x.numel()={x.numel()}")
+#     # .reshape handles non-contiguous; .view requires contiguity
+#     return v.reshape(x.shape)
 
 
 class OutputAlterHook:
@@ -73,7 +74,6 @@ class OutputAlterHook:
     def hook(self, module: t.nn.Module, inputs, output):
         if not self._take_it():
             return None  # no modification
-
         out = output
 
         # Case A: output is a Tensor
