@@ -221,16 +221,15 @@ class ScalingAttentionIntervention(DiffusionIntervention):
     #     return [FieldModel(name="Factor", type=FieldModel.FieldType.float)]
 
 def run_intervention(model:T2IModel, prompts:List[str], interventions: List[DiffusionIntervention] = [], **kwargs) -> Output:
-    num_inference_steps = kwargs.get("num_inference_steps", 50)
-    # seed    = kwargs.get("seed", 40)
-    start_step = kwargs.get("start_step", 0)
-    end_step   = kwargs.get("end_step", num_inference_steps)
-    
+    start_step = kwargs.get("denoiser_step", 0)
+    start_step = 0
+    end_step   = start_step + 1
     with model.generate(prompts, validate=False, scan=False, **kwargs) as tracer:
         with tracer.iter[start_step:end_step]:
             for intervention in interventions:
                 intervention(**kwargs)    
             output = model.output.save()
+            print(output)
     return Output(preds=output.images) 
 
 # @ray.remote(num_gpus=1)

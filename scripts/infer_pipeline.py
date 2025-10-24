@@ -5,16 +5,27 @@ from dataclasses import asdict
 from typing import Optional, Callable, List, Any, Dict
 
 import torch as th
-
+from dictionary_learning.utils import hf_dataset_to_generator
+from utils.utils import BatchIterator, CachedActivationIterator, gen_images_from_prompts
+from utils.utils import convert_buffer_to_memap, ShardedActivationMemmapDataset
+from utils.buffer import t2IActivationBuffer
+from utils.output import Output 
 from t2Interp.T2I import T2IModel
-from t2Interp.concept_search import KSteer 
+from t2Interp.concept_search import KSteer, CAA 
 from t2Interp.mapper import MLPMapper
+from t2Interp.intervention import run_intervention, ReplaceIntervention
+from utils.text_img_util import run_with_hook, OutputAlterHook, replace_policy
+from t2Interp.accessors import ModuleAccessor
 from reporting.config_loader import load_config, wandb_init_kwargs
 from utils.runningstats import WandbUpdater, SimpleFileLogger
 from utils.inference import InferenceSpec, Inference
 from utils.output_manager import OutputManager
 from utils.utils import preprocess_image
 import json
+from itertools import tee
+from pathlib import Path
+from utils.runningstats import Update
+
 
 RACE_LABELS={"East Asian":"East Asian","Indian":"Indian","Black":"Black","White":"White","Middle Eastern":"Middle Eastern","Latino_Hispanic": "Latino Hispanic","Southeast Asian":"Southeast Asian"}
 race_preprocess_fn = lambda x: f"A photo of a {RACE_LABELS[x]} person."
@@ -35,6 +46,64 @@ def build_mapper(spec: str, mapper_kwargs: Dict[str, Any]):
     # Don’t pass dims from bash; infer here:
     return cls(**mapper_kwargs)
 
+def run_steering(model:T2IModel,dataset,accessor:ModuleAccessor,mapper:th.nn.Module,**kwargs):
+    def cache_path(dataset,split,subset):
+        base = Path("data") / dataset / accessor.attr_name / split
+        return str(base / str(subset) if subset is not None else base)
+    
+    def log(msg:str):
+        update = Update(info=msg)
+        # yield update
+        print(update.info)
+            
+    # prompts, buffer = tee(BatchIterator(hf_dataset_to_generator(dataset,**kwargs),batch_size=kwargs.get("out_batch_size",1)))
+    d_sub = kwargs.pop("d_submodule", kwargs.get("d_submodule", None))
+    target_idx = kwargs.pop("target_idx", None)
+    assert target_idx is not None, "target_idx must be provided in kwargs"
+    
+    dataset_split = kwargs.get("dataset_split","val")
+    use_memmap = kwargs.get("use_memmap", False)
+    if use_memmap and os.path.exists(cache_path(dataset,dataset_split,kwargs.get('subset',None))):
+        log(f"Using existing memmap at {cache_path(dataset,'train',kwargs.get('subset',None))} for steering activations")
+        buffer = ShardedActivationMemmapDataset(cache_path(dataset,"train",kwargs.get('subset',None)),**kwargs)
+    elif use_memmap:
+        buffer = t2IActivationBuffer(hf_dataset_to_generator(dataset,**kwargs), model, accessor,d_submodule=d_sub, **kwargs) 
+        log(f"Creating memmap at {cache_path(dataset,'train',kwargs.get('subset',None))} for steering activations")
+        buffer = convert_buffer_to_memap(buffer,memmap_dir=cache_path(dataset,"train",kwargs.get('subset',None)), **kwargs)
+    else:
+        buffer = t2IActivationBuffer(hf_dataset_to_generator(dataset,**kwargs), model, accessor,d_submodule=d_sub, **kwargs)    
+
+    prompts = BatchIterator(hf_dataset_to_generator(dataset,**kwargs),batch_size=kwargs.get("out_batch_size",1))
+    use_cache = kwargs.get("cache_activations", False)
+    if use_cache:
+        buffer = CachedActivationIterator(buffer, **kwargs)
+            
+    if kwargs.get("steer_method","KSteer") == "KSteer":
+        steer= KSteer(model)
+    elif kwargs.get("steer_method","KSteer") == "CAA":
+        steer= CAA(model)
+    generate_kwargs = {}
+    if "guidance_scale" in kwargs:
+        generate_kwargs["guidance_scale"] = kwargs["guidance_scale"]
+    imgs = []
+    baseline_imgs = []
+    for i, (ps,activations) in enumerate(zip(iter(prompts),iter(buffer))):
+        log("Steering on batch {}".format(i))
+        steered_activation = steer.steer(activations, target_idx=[1], mapper = mapper, **kwargs)
+        # output = run_intervention(model, ps, interventions = 
+        #                           [ReplaceIntervention(model=model,envoys=[accessor],steering_vec=steered_activation)], **kwargs)
+        hook_obj = OutputAlterHook(replace_policy(steered_activation),step_index=kwargs.get("denoiser_step",0))
+        seed = kwargs.get("seed", None)
+        num_inference_steps = kwargs.get("num_inference_steps", None)   
+        assert seed is not None, "seed must be provided in kwargs"
+        assert num_inference_steps is not None, "num_inference_steps must be provided in kwargs"
+        
+        output = run_with_hook(model, prompts, accessor.module, hook_obj, accessor.io_type,**{**{"seed":seed, "num_inference_steps":num_inference_steps}, **generate_kwargs})
+        baselines = gen_images_from_prompts(model, ps, **{**kwargs,**generate_kwargs})
+        imgs.append(output.images)
+        baseline_imgs.append(baselines)
+    return Output(preds=imgs, baselines=baseline_imgs)
+
 def import_callable(path: Optional[str]) -> Optional[Callable]:
     """Import a callable from 'pkg.module:func_name' or return None."""
     if not path:
@@ -49,6 +118,8 @@ def import_callable(path: Optional[str]) -> Optional[Callable]:
     
 def main():
     p = argparse.ArgumentParser(description="Run T2I workflows with standard outputs.")
+    p.add_argument("--seed", type=int, default=42, help="Random seed.")
+     # Workflow
     p.add_argument("--workflow", type=str, default="steering",
                    choices=["steering", "localisation", "stitching", "sae"])
     p.add_argument("--infer_fn", type=str, default=None,
@@ -70,10 +141,11 @@ def main():
     p.add_argument("--mapper_ckpt", type=str, default=None, help="Path to mapper checkpoint to load.")
 
     # Training/activation params
-    p.add_argument("--steps", type=int, default=1)
+    p.add_argument("--steer_steps", type=int, default=1)
     p.add_argument("--alpha", type=float, default=1)
     p.add_argument("--target_idx", type=int, default=0)
-    p.add_argument("--denoising_step", type=int, default=0)
+    p.add_argument("--denoiser_step", type=int, default=10)
+    p.add_argument("--inference_steps", type=int, default=50)
     p.add_argument("--data_device", type=str, default="cpu")
     p.add_argument("--autocast_dtype", type=str, default="bfloat16", choices=["float16", "bfloat16", "float32"])
     p.add_argument("--refresh_batch_size", type=int, default=64)
@@ -92,8 +164,9 @@ def main():
     p.add_argument("--gt_processing_fn", type=str, default=None,
                    help="Import path 'pkg.mod:fn' to process ground truth.")
 
+    p.add_argument("--steer_method", type=str, default="KSteer", choices=["KSteer","CAA"])
     # Output & caching
-    p.add_argument("--use_memmap", action="store_true", default=True)
+    p.add_argument("--use_memmap", action="store_true", default=False)
     p.add_argument("--cache_activations", action="store_true", default=True)
     p.add_argument("--outputs_root", type=str, default="./runs")
     p.add_argument("--no_symlink_latest", action="store_true", default=False)
@@ -131,10 +204,10 @@ def main():
         "dataset_split": args.dataset_split,
         "dataset_column": args.dataset_column,
         "ground_truth_column": args.ground_truth_column,
-        "num_inference_steps": args.steps,
+        "num_inference_steps": args.inference_steps,
         "target_idx": args.target_idx,
         "alpha": args.alpha,
-        "denoising_step": args.denoising_step,
+        "denoiser_step": args.denoiser_step,
         "data_device": args.data_device,
         "autocast_dtype": autocast_dtype,
         "d_submodule": args.d_submodule,
@@ -144,18 +217,30 @@ def main():
         "cache_activations": args.cache_activations,
         "run_name": args.run_name,
         "dataset": args.dataset,
+        "steer_steps": args.steer_steps,
+        "steer_method": args.steer_method,
+        "seed": args.seed,
     }
 
     # stats_updaters=[]
     wb_cfg = load_config(args.wandb_config)
     wb_cfg["wandb"].update({"run_name": args.wandb_run_name or args.run_name})
+    init_kwargs = wandb_init_kwargs(wb_cfg)
     # if "wandb" in args.updaters:
-    #     init_kwargs = wandb_init_kwargs(wb_cfg)
+    #     
     #     stats_updaters.append(WandbUpdater(init_kwargs=init_kwargs))
     # if "file" in args.updaters:
     #     filelogger = SimpleFileLogger(log_path=args.log_file, args=args, kwargs=workflow_kwargs)
     #     stats_updaters.append(filelogger)
 
+    stats_updaters=[]
+    # if "wandb" in args.updaters:
+    #     init_kwargs = wandb_init_kwargs(wb_cfg)
+    #     stats_updaters.append(WandbUpdater(init_kwargs=init_kwargs))
+    # if "file" in args.updaters:
+    #     filelogger = SimpleFileLogger(log_path=args.log_file, kwargs=workflow_kwargs)
+    #     stats_updaters.append(filelogger)
+        
     mapper_kwargs = parse_json(args.mapper_kwargs)
     mapper = build_mapper(args.mapper, mapper_kwargs).to(device=args.device, dtype=dtype_map[args.model_dtype])
     
@@ -178,8 +263,9 @@ def main():
     spec = InferenceSpec(
         name=args.run_name,
         inference_fn = infer_fn,
+        stats_updaters=stats_updaters,
         callback_fns=callbacks,
-        kwargs={**workflow_kwargs,"wb_cfg": wb_cfg, "model": model, "accessor": accessor, "mapper": mapper},
+        kwargs={**workflow_kwargs, "model": model, "accessor": accessor, "mapper": mapper, "wandb_init_kwargs": init_kwargs},
     )
 
     Inference(spec).run_inference()

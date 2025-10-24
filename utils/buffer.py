@@ -30,7 +30,7 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         refresh_batch_size=512,  # size of batches in which to process the data when adding to buffer
         out_batch_size=512,  # size of batches in which to yield activations
         data_device="cpu",  # device on which to store the activations
-        denoising_step=0,  # steps to trace over
+        denoiser_step = 0,  # steps to trace over
         **kwargs,
     ):
         super().__init__(data=data,model=model,submodule=submodule,d_submodule=d_submodule,n_ctxs=n_ctxs,
@@ -45,7 +45,7 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         self.refresh_batch_size = refresh_batch_size
         self.out_batch_size = out_batch_size
         self.device = data_device
-        self.steps = (denoising_step, denoising_step + 1) if isinstance(denoising_step, int) else denoising_step
+        self.steps = denoiser_step if isinstance(denoiser_step, tuple) else (denoiser_step, denoiser_step + 1)
 
     def __iter__(self):
         return self

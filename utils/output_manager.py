@@ -80,7 +80,7 @@ class OutputManager:
         return
     
     def write_to_wandb(self, out: Output, **kwargs):
-        wb_cfg = kwargs.get("wb_cfg", load_config("reporting/config.yaml"))
+        wb_cfg = kwargs.get("wandb_init_kwargs", load_config("reporting/config.yaml"))
         reporter = WandbReporter(init_kwargs=wb_cfg)
         reporter.log_table(out)
 

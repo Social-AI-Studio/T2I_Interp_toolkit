@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ---------- EDIT THESE ONCE ----------
-PY=python                         # or python3
-SCRIPT=your_inference_script.py   # <-- replace with the filename that contains your `main()` above
-
 DATASET='nirmalendu01/fairface-trainval-race-balanced-200'            # e.g. "yourname/debiasdb" or a local path
 DATASET_SPLIT="val"
 MODEL_REPO="CompVis/stable-diffusion-v1-4"
@@ -17,7 +13,6 @@ WORKFLOW="steering"               # or localisation | stitching | sae
 RUN_BASE="infer_race_steering_mlp"
 
 # Updaters: choose any subset, order doesn't matter
-UPDATERS=(wandb file)
 WANDB_CONFIG="reporting/config.yaml"
 WANDB_RUN_PREFIX="${RUN_BASE}"
 LOG_DIR="./logs"                    # file logger directory
@@ -29,19 +24,19 @@ MAPPER_KW="{\"input_dim\": ${INPUT_DIM}, \"hidden_dim\": 4096, \"output_dim\": 7
 MAPPER_CKPT="./runs/steer_mlp_train_steering_20251021-050122/artifacts/best_ckpt.pt"
 
 # Other knobs
-STEPS=1
+STEER_STEPS=1
 DENOISING_STEP=0
 AUTODTYPE="bfloat16"
 REFRESH_BS=64
 OUT_BS=4
 D_SUBMODULE=$((4096*320))
 DATA_DEVICE="cpu"
-USE_MEMMAP=1
-CACHE_ACTIVATIONS=1
+USE_MEMMAP=0
+CACHE_ACTIVATIONS=0
 
 # ---------- THE ALPHA GRID ----------
 ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0)
-
+DENOISER_STEP=10
 # Make sure log dir exists
 mkdir -p "${LOG_DIR}"
 
@@ -56,7 +51,7 @@ for A in "${ALPHAS[@]}"; do
 
   python -m scripts.infer_pipeline \
     --workflow "${WORKFLOW}" \
-    --infer_fn t2Interp.concept_search:run_steering \
+    --infer_fn scripts.infer_pipeline:run_steering \
     --run_name "${RUN_NAME}" \
     --dataset "${DATASET}" \
     --dataset_split "${DATASET_SPLIT}" \
@@ -69,9 +64,10 @@ for A in "${ALPHAS[@]}"; do
     --mapper "mlp" \
     --mapper-kwargs "${MAPPER_KW}" \
     --mapper_ckpt "${MAPPER_CKPT}" \
-    --steps "${STEPS}" \
+    --steer_steps "${STEER_STEPS}" \
     --alpha "${A}" \
-    --denoising_step "${DENOISING_STEP}" \
+    --denoiser_step "${DENOISER_STEP}" \
+    --inference_steps 50 \
     --device "${MODEL_DEVICE}" \
     --data_device "${DATA_DEVICE}" \
     --autocast_dtype "${AUTODTYPE}" \
@@ -82,6 +78,9 @@ for A in "${ALPHAS[@]}"; do
     $( (( CACHE_ACTIVATIONS )) && echo "--cache_activations" ) \
     --outputs_root "${OUT_ROOT}" \
     --wandb_config "${WANDB_CONFIG}" \
-    $(for u in "${UPDATERS[@]}"; do echo --updaters "$u"; done) \
-    --log-file "${LOG_PATH}"
+    --log-file "${LOG_PATH}" \
+    --updaters file \
+    --seed 42 \
+    --subset 10
+
 done

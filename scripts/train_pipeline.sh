@@ -25,7 +25,7 @@ for ACCESSOR in "${ACCESSORS[@]}"; do
   python -m scripts.train_pipeline \
     --training_fn scripts.train_pipeline:run_ksteer_fit \
     --dataset "$DATASET" \
-    --denoiser-steps "${DENOISER_STEPS}" \
+    --denoiser_steps "${DENOISER_STEPS}" \
     --accessor_path "$ACCESSOR" \
     --run_name "$run_name" \
     --train_steps "${train_steps}" \

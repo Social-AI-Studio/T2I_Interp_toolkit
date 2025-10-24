@@ -352,7 +352,7 @@ class ShardedActivationMemmapDataset:
         # device: Optional[str] = None,      # e.g., "cuda" or "cpu"; None -> leave on CPU
         # dtype: t.dtype = t.float32,        # dtype returned to the caller
         pin_memory: bool = False,          # pin only if device is CUDA and you'll H2D copy later
-        shuffle: bool = True,
+        shuffle: bool = False,
         keep_open_shard: bool = True,       # keep one shard mapped to reduce reopen overhead
         **kwargs,
     ):

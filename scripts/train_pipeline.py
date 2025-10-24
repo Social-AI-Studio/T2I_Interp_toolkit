@@ -140,7 +140,7 @@ def main():
 
     # Training/activation params
     p.add_argument("--train_steps", type=int, default=200)
-    p.add_argument("--denoiser-steps", type=lambda s: json.loads(s), default=[10])
+    p.add_argument("--denoiser_steps", type=lambda s: json.loads(s), default=[10])
     p.add_argument("--training_device", type=str, default="cuda:0")
     p.add_argument("--data_device", type=str, default="cpu")
     p.add_argument("--autocast_dtype", type=str, default="bfloat16", choices=["float16", "bfloat16", "float32"])

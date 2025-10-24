@@ -59,8 +59,10 @@ class WandbReporter(Reporter):
         wandb.log_artifact(art)
         return refs, art
 
-    def log_table(self,outputs: List[Output], add_links: bool = False, **kwargs):
+    def log_table(self,outputs: List[Output]|Output, add_links: bool = False, **kwargs):
         started_here = self._ensure_run()
+        if not isinstance(outputs, list):
+            outputs = [outputs]
         try:
             metric_cols = self._metric_keys(outputs)
             cols = ["group", "idx", "image"] + metric_cols + (["link"] if add_links else [])
@@ -74,7 +76,7 @@ class WandbReporter(Reporter):
                 name = getattr(o, "name", None) or "sample"
                 imgs: Sequence[Any] = o.preds 
                 baseline_imgs = o.baselines or []
-                metrics: Dict[str, List[float]] = o.metrics or {} * len(imgs)
+                metrics: Dict[str, List[float]] = o.metrics or {} 
                 for i, img in enumerate(imgs):
                     pred_pil = _as_pil(img) if img is not None else Image.new("RGB", (512,512), (0,0,0))
                     pred_cell = wandb.Image(pred_pil, caption=f"{name} [{i}]")
@@ -85,6 +87,9 @@ class WandbReporter(Reporter):
                         base_cell = ""  # blank cell is fine in W&B tables
                     # row = [name, i, wandb.Image(pred_pil, caption=f"{name} [{i}]")]
                     row = [name, i, pred_cell, base_cell]
+                    if len(metric_cols)==0 or len(metrics)==0:
+                        table.add_data(*row)
+                        continue
                     for k in metric_cols:
                         v = metrics[k][i] if k in metrics and i < len(metrics[k]) else np.nan
                         try:

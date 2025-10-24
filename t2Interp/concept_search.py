@@ -212,7 +212,7 @@ class KSteer(Steer):
         avoid_idx: List[int] | None = None,
         *,
         alpha: float = 1,
-        steps: int = 1,
+        steer_steps: int = 1,
         step_size_decay: float = 1.0,
         mapper: Optional[str] = None,
         **kwargs,
@@ -232,7 +232,7 @@ class KSteer(Steer):
             acts_t = acts.to(self.classifier.device, dtype=th.bfloat16)
 
         steered = acts_t.detach().clone()
-        for step in range(steps):
+        for step in range(steer_steps):
             curr = steered.clone().requires_grad_(True)
             logits = self.classifier(curr)
             loss_vec = self.compute_steering_loss(
@@ -323,26 +323,5 @@ class CAA(Steer):
 #         steering_type.eval(metric, eval_prompts, **kwargs)  
 #         steering_type.steer(**kwargs)
 
-def run_steering(model:T2IModel,dataset,accessor:ModuleAccessor,mapper:th.nn.Module,**kwargs):
-    prompts, buffer = tee(BatchIterator(hf_dataset_to_generator(dataset,**kwargs),batch_size=kwargs.get("out_batch_size",1)))
-    d_sub = kwargs.pop("d_submodule", kwargs.pop("d_submodule", None))
-    target_idx = kwargs.pop("target_idx", None)
-    assert target_idx is not None, "target_idx must be provided in kwargs"
-    
-    buffer = t2IActivationBuffer(buffer, model, accessor,d_submodule=d_sub, **kwargs) 
-    ksteer= KSteer(model)
-    generate_kwargs = {}
-    if "guidance_scale" in kwargs:
-        generate_kwargs["guidance_scale"] = kwargs["guidance_scale"]
-    imgs = []
-    baseline_imgs = []
-    for ps,activations in zip(iter(prompts),iter(buffer)):
-        steered_activation = ksteer.steer(activations, target_idx=[1], mapper = mapper, **kwargs)
-        output = run_intervention(model, ps, interventions = 
-                                  [ReplaceIntervention(model=model,envoys=[accessor],steering_vec=steered_activation)], **kwargs)
-        baselines = gen_images_from_prompts(model, ps, **{**kwargs,**generate_kwargs})
-        imgs.append(output.preds)
-        baseline_imgs.append(baselines)
-    return Output(preds=imgs, baselines=baseline_imgs)
         
         
