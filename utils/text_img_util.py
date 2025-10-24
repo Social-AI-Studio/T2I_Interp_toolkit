@@ -224,12 +224,12 @@ class BaseCaptureHook:
         self,
         *,
         call_counter: Optional[dict] = None,
-        step_index: Optional[int] = 0,  # 0-based call index; None = last (handled by caller by running once per step) or "any"
+        denoiser_steps: Optional[list[int]] = [0],  # 0-based call index; None = last (handled by caller by running once per step) or "any"
         device: Optional[Union[str, t.device]] = None,
         reduce_fn: Optional[Callable[[Tensor], Tensor]] = None,
     ):
         self.call_counter = call_counter if call_counter is not None else {"n": 0}
-        self.step_index = step_index
+        self.denoiser_steps = denoiser_steps
         self.device = t.device(device) if device is not None else None
         self.reduce_fn = reduce_fn
         self.last: Optional[Tensor] = None
@@ -237,7 +237,7 @@ class BaseCaptureHook:
     def _gate(self) -> bool:
         n = self.call_counter["n"]
         self.call_counter["n"] += 1
-        return (self.step_index is None) or (n == self.step_index)
+        return (self.denoiser_steps is None) or (n in self.denoiser_steps)
 
     def _post(self, x: Tensor) -> None:
         if self.reduce_fn is not None:

@@ -718,5 +718,14 @@ class CachedActivationIterator:
         self.N, self.D = self._buffer.size(0), self._buffer.size(1)
         self._i = 0
 
-
+def gen_images_from_prompts(model, prompts, **kwargs):
+    generate_kwargs = {}
+    num_inference_steps = kwargs.get("num_inference_steps", 50)
+    seed = kwargs.get("seed", None)
+    generate_kwargs = {"num_inference_steps": num_inference_steps, "seed": seed}
+    if "guidance_scale" in kwargs:
+            generate_kwargs["guidance_scale"] = kwargs["guidance_scale"]        
+    with model.generate(prompts, **generate_kwargs):
+        output = model.output.save()
+    return output.images    
 

@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from loguru import logger
 from typing import Any, Dict, Optional, List, Callable, Union, Generator
 from dictionary_learning.utils import hf_dataset_to_generator
-from utils.utils import BatchIterator, CachedActivationIterator
+from utils.utils import BatchIterator, CachedActivationIterator, gen_images_from_prompts
 from utils.metrics import MetricBase
 import torch as th
 from utils.output import Output 
@@ -17,6 +17,7 @@ from utils.utils import convert_buffer_to_memap, ShardedActivationMemmapDataset
 import os
 from pathlib import Path
 from t2Interp.T2I import T2IModel
+from itertools import tee
 
 class Steer(ABC):
     @abstractmethod
@@ -100,7 +101,7 @@ class KSteer(Steer):
         buffer_train_gt  = BatchIterator(gt_train,kwargs.get("out_batch_size", 1))
          
         log_steps = kwargs.get("log_steps", 1) 
-        steps = kwargs.get("steps", 1) 
+        steps = kwargs.get("train_steps", 1) 
         # autocast_context = th.autocast(device_type=training_device, dtype=autocast_dtype) if autocast_dtype is not None else nullcontext()
         if optimizers is None:
             optimizers = [th.optim.Adam(mapper.parameters(), lr=kwargs.get("lr",1e-5))]
@@ -216,6 +217,8 @@ class KSteer(Steer):
         mapper: Optional[str] = None,
         **kwargs,
     ) -> th.Tensor:
+        th.set_grad_enabled(True)
+        
         if not hasattr(self, "classifier") and mapper is not None:
             self.classifier = mapper
             
@@ -239,6 +242,8 @@ class KSteer(Steer):
             grads = th.autograd.grad(loss, curr, retain_graph=False)[0]
             current_alpha = alpha * (step_size_decay ** step)
             steered = (curr - current_alpha * grads).detach()
+        
+        th.set_grad_enabled(False)    
         return steered
     
     def eval(self, *args,**kwargs) -> None:
@@ -309,13 +314,35 @@ class CAA(Steer):
     def steer(self,**kwargs):
         pass 
     
-class ConceptSearch:
-    def __init__(self, model):
-        self.model = model
+# class ConceptSearch:
+#     def __init__(self, model):
+#         self.model = model
 
-    def search_and_steer(self, dataset:dict, accessors:ModuleAccessor, steering_type:Steer, metric:MetricBase, eval_prompts, **kwargs):
-        steering_type.find_directions(dataset, accessors, **kwargs)
-        steering_type.eval(metric, eval_prompts, **kwargs)  
-        steering_type.steer(**kwargs)
+#     def search_and_steer(self, dataset:dict, accessors:ModuleAccessor, steering_type:Steer, metric:MetricBase, eval_prompts, **kwargs):
+#         steering_type.find_directions(dataset, accessors, **kwargs)
+#         steering_type.eval(metric, eval_prompts, **kwargs)  
+#         steering_type.steer(**kwargs)
+
+def run_steering(model:T2IModel,dataset,accessor:ModuleAccessor,mapper:th.nn.Module,**kwargs):
+    prompts, buffer = tee(BatchIterator(hf_dataset_to_generator(dataset,**kwargs),batch_size=kwargs.get("out_batch_size",1)))
+    d_sub = kwargs.pop("d_submodule", kwargs.pop("d_submodule", None))
+    target_idx = kwargs.pop("target_idx", None)
+    assert target_idx is not None, "target_idx must be provided in kwargs"
+    
+    buffer = t2IActivationBuffer(buffer, model, accessor,d_submodule=d_sub, **kwargs) 
+    ksteer= KSteer(model)
+    generate_kwargs = {}
+    if "guidance_scale" in kwargs:
+        generate_kwargs["guidance_scale"] = kwargs["guidance_scale"]
+    imgs = []
+    baseline_imgs = []
+    for ps,activations in zip(iter(prompts),iter(buffer)):
+        steered_activation = ksteer.steer(activations, target_idx=[1], mapper = mapper, **kwargs)
+        output = run_intervention(model, ps, interventions = 
+                                  [ReplaceIntervention(model=model,envoys=[accessor],steering_vec=steered_activation)], **kwargs)
+        baselines = gen_images_from_prompts(model, ps, **{**kwargs,**generate_kwargs})
+        imgs.append(output.preds)
+        baseline_imgs.append(baselines)
+    return Output(preds=imgs, baselines=baseline_imgs)
         
         

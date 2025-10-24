@@ -2,7 +2,7 @@ import os
 import argparse
 import importlib
 from dataclasses import asdict
-from typing import Optional, Callable, List, Any, Dict
+from typing import Optional, Callable, List, Any, Dict, Generator
 
 import torch as th
 
@@ -10,14 +10,33 @@ from t2Interp.T2I import T2IModel
 from t2Interp.concept_search import KSteer 
 from t2Interp.mapper import MLPMapper
 from reporting.config_loader import load_config, wandb_init_kwargs
-from utils.runningstats import WandbUpdater
+from utils.runningstats import WandbUpdater, SimpleFileLogger, Update
 from utils.training import TrainingSpec, Training
 from utils.output_manager import OutputManager
 from utils.utils import preprocess_image
+from utils.output import Output
+import json
+from functools import partial
 
 RACE_LABELS = {
     "East Asian": 0, "Indian": 1, "Black": 2, "White": 3,
     "Middle Eastern": 4, "Latino_Hispanic": 5, "Southeast Asian": 6,
+}
+
+MAPPER_REGISTRY = {
+    "mlp": MLPMapper,
+   
+}
+
+LOSS_REGISTRY = {
+    "cross_entropy": th.nn.CrossEntropyLoss,
+    "mse": th.nn.MSELoss,
+}
+
+OPTIM_REGISTRY = {
+    "adam": th.optim.Adam,
+    "adamw": th.optim.AdamW,
+    "sgd": th.optim.SGD,
 }
 
 def preprocess_fn(x):
@@ -28,6 +47,18 @@ def race_processing_fn(x):
     # your lambda: th.tensor(race_labels[x], dtype=th.long)
     return th.tensor(RACE_LABELS[x], dtype=th.long)
 
+# def steering_classifier_trainer(model):
+#     steer = KSteer(model)
+#     return steer.fit
+
+def run_ksteer_fit(**kwargs):
+    model = kwargs.get("model")
+    assert model is not None, "kwargs must include 'model' key"
+    # ksteer_init = ksteer_init or {}
+    # fit_kwargs = fit_kwargs or {}
+    ksteer = KSteer(model=model)
+    return ksteer.fit(**kwargs)
+
 def import_callable(path: Optional[str]) -> Optional[Callable]:
     """Import a callable from 'pkg.module:func_name' or return None."""
     if not path:
@@ -36,10 +67,33 @@ def import_callable(path: Optional[str]) -> Optional[Callable]:
         raise ValueError(f"Expected 'module.path:callable', got '{path}'")
     mod, name = path.split(":", 1)
     fn = getattr(importlib.import_module(mod), name)
+    
     if not callable(fn):
         raise TypeError(f"{path} is not callable")
     return fn
 
+def resolve_dotted(path: str):
+    mod, name = path.rsplit(".", 1)
+    return getattr(importlib.import_module(mod), name)
+
+def parse_json(s: str | None) -> Dict[str, Any]:
+    return {} if not s else json.loads(s)
+
+def build_loss(spec: str, kwargs: Dict[str, Any]):
+    cls = LOSS_REGISTRY.get(spec) if spec in LOSS_REGISTRY else resolve_dotted(spec)
+    return cls(**kwargs)
+
+def build_mapper(spec: str, mapper_kwargs: Dict[str, Any]):
+    cls = MAPPER_REGISTRY.get(spec) if spec in MAPPER_REGISTRY else resolve_dotted(spec)
+    # Don’t pass dims from bash; infer here:
+    return cls(**mapper_kwargs)
+
+def build_optimizers(specs: List[str], kwargs_list: List[Dict[str, Any]], params):
+    optims = []
+    for spec, kw in zip(specs, kwargs_list):
+        cls = OPTIM_REGISTRY.get(spec) if spec in OPTIM_REGISTRY else resolve_dotted(spec)
+        optims.append(cls(params, **kw))
+    return optims
 
 # def build_workflow(workflow: str, model) -> Any:
 #     """Return the workflow object based on name."""
@@ -53,8 +107,8 @@ def import_callable(path: Optional[str]) -> Optional[Callable]:
 def main():
     p = argparse.ArgumentParser(description="Run T2I workflows with standard outputs.")
     # Core run config
-    # p.add_argument("--workflow", type=str, default="steering",
-    #                choices=["steering", "localisation", "stitching", "sae"])
+    p.add_argument("--workflow", type=str, default="steering",
+                   choices=["steering", "localisation", "stitching", "sae"])
     p.add_argument("--training_fn", type=str, default=None,
                    help="training function to run.")
     p.add_argument("--run_name", type=str, default="training_race_steering_mlp")
@@ -71,14 +125,22 @@ def main():
                         "'model.unet_2.down_attn_blocks[0].self_attn_out'.")
 
     # Mapper & loss/opt
-    p.add_argument("--input_dim", type=int, default=4096*320)
-    p.add_argument("--hidden_dim", type=int, default=4096)
-    p.add_argument("--output_dim", type=int, default=7)
-    p.add_argument("--lr", type=float, default=1e-5)
+    p.add_argument("--mapper", default="mlp", help="mapper name (e.g. mlp) or dotted path")
+    p.add_argument("--mapper-kwargs", default="{}", help='JSON dict for mapper dims, e.g. \'{"input_dim": 4096*320, "hidden_dim": 4096, "output_dim": 7}\'')
+    p.add_argument("--loss", required=True, help="loss name (e.g. cross_entropy) or dotted path")
+    p.add_argument("--loss-kwargs", default="{}", help="JSON dict for loss ctor")
+    p.add_argument("--optim", action="append", required=True,
+                   help="optimizer name or dotted path; repeat for multiple")
+    p.add_argument("--optim-kwargs", action="append", default=[],
+                   help="JSON dict for each optimizer; repeat to match --optim")
+    # p.add_argument("--input_dim", type=int, default=4096*320)
+    # p.add_argument("--hidden_dim", type=int, default=4096)
+    # p.add_argument("--output_dim", type=int, default=7)
+    # p.add_argument("--lr", type=float, default=1e-5)
 
     # Training/activation params
-    p.add_argument("--steps", type=int, default=200)
-    p.add_argument("--denoising_step", type=int, default=0)
+    p.add_argument("--train_steps", type=int, default=200)
+    p.add_argument("--denoiser-steps", type=lambda s: json.loads(s), default=[10])
     p.add_argument("--training_device", type=str, default="cuda:0")
     p.add_argument("--data_device", type=str, default="cpu")
     p.add_argument("--autocast_dtype", type=str, default="bfloat16", choices=["float16", "bfloat16", "float32"])
@@ -103,9 +165,11 @@ def main():
     p.add_argument("--outputs_root", type=str, default="./runs")
     p.add_argument("--no_symlink_latest", action="store_true", default=False)
 
-    # W&B
+    # Updaters
     p.add_argument("--wandb_config", type=str, default="reporting/config.yaml")
     p.add_argument("--wandb_run_name", type=str, default=None)
+    p.add_argument("--updaters", action="append", default=['file'], help="Add a logger: wandb | file ")
+    p.add_argument("--log-file", default="logs/train.jsonl", help="Path for file logger")
 
     args = p.parse_args()
 
@@ -121,10 +185,20 @@ def main():
         raise RuntimeError(f"Failed to evaluate accessor_path: {args.accessor_path}") from e
 
     # ---- Mapper / loss / opt ----
-    mapper = MLPMapper(input_dim=args.input_dim, hidden_dim=args.hidden_dim, output_dim=args.output_dim)
-    loss_fn = th.nn.CrossEntropyLoss()
-    optimizers = [th.optim.Adam(mapper.parameters(), lr=args.lr)]
+    # mapper = MLPMapper(input_dim=args.input_dim, hidden_dim=args.hidden_dim, output_dim=args.output_dim)
+    # loss_fn = th.nn.CrossEntropyLoss()
+    # optimizers = [th.optim.Adam(mapper.parameters(), lr=args.lr)]
+    mapper_kwargs = parse_json(args.mapper_kwargs)
+    loss_kwargs   = parse_json(args.loss_kwargs)
+    optim_kwargs_list = [parse_json(s) for s in (args.optim_kwargs or [])]
 
+    while len(optim_kwargs_list) < len(args.optim):
+        optim_kwargs_list.append({})
+    
+    mapper = build_mapper(args.mapper, mapper_kwargs).to(args.model_device, dtype=getattr(th, dtype_map[args.model_dtype]))
+    loss_fn = build_loss(args.loss, loss_kwargs)
+    optimizers = build_optimizers(args.optim, optim_kwargs_list, mapper.parameters())
+        
     # ---- Pre/Post processing callables ----
     preprocess_fn = import_callable(args.preprocess_fn)
     gt_processing_fn = import_callable(args.gt_processing_fn)
@@ -140,8 +214,8 @@ def main():
         "dataset_column": args.dataset_column,
         "ground_truth_column": args.ground_truth_column,
         "use_val": args.use_val,
-        "steps": args.steps,
-        "denoising_step": args.denoising_step,
+        "train_steps": args.train_steps,
+        "denoiser_steps": args.denoiser_steps,
         "training_device": args.training_device,
         "data_device": args.data_device,
         "autocast_dtype": autocast_dtype,
@@ -154,23 +228,25 @@ def main():
         "workflow": args.workflow,
         "run_name": args.run_name,
     }
-
-    # ---- W&B ----
-    wb_cfg = load_config(args.wandb_config)
-    wb_cfg["wandb"].update({"run_name": args.wandb_run_name or args.run_name})
-    init_kwargs = wandb_init_kwargs(wb_cfg)
-    stats_updaters = [WandbUpdater(init_kwargs=init_kwargs)]
+    
+    stats_updaters=[]
+    if "wandb" in args.updaters:
+        wb_cfg = load_config(args.wandb_config)
+        wb_cfg["wandb"].update({"run_name": args.wandb_run_name or args.run_name})
+        init_kwargs = wandb_init_kwargs(wb_cfg)
+        stats_updaters.append(WandbUpdater(init_kwargs=init_kwargs))
+    if "file" in args.updaters:
+        filelogger = SimpleFileLogger(log_path=args.log_file, kwargs=workflow_kwargs)
+        stats_updaters.append(filelogger)
 
     # ---- Output Manager ----
-    # Many OutputManager impls expect a config; if it accepts plain kwargs, this works:
     out_manager = OutputManager(
         root_dir=args.outputs_root,
         run_name=args.run_name,
         workflow=args.workflow,
         make_latest_symlink=(not args.no_symlink_latest),
     )
-
-    # Two handy callbacks that many OutputManager variants expose:
+    
     # - write_metadata(result, **kwargs)
     # - save_best_ckpt(result, **kwargs)
     callbacks = []
@@ -179,16 +255,21 @@ def main():
     if hasattr(out_manager, "save_best_ckpt"):
         callbacks.append(out_manager.save_best_ckpt)
 
-    # ---- Choose workflow and run ----
-    # workflow = build_workflow(args.workflow, model)
-
     spec = TrainingSpec(
         name=args.run_name,
         fn = training_fn,
         stats_updaters=stats_updaters,
         callback_fns=callbacks,
-        args=(args.dataset, accessor, mapper, loss_fn, optimizers, model),
-        kwargs=workflow_kwargs,
+        # args=(args.dataset, accessor, mapper, loss_fn, optimizers, model),
+        args=[],
+        kwargs={**workflow_kwargs,
+                 "model": model,
+                 "dataset": args.dataset,
+                 "accessor": accessor,
+                 "mapper": mapper,
+                 "loss_fn": loss_fn,
+                 "optimizers": optimizers,
+                 },
     )
 
     Training(spec).run_trainer()

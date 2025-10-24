@@ -103,7 +103,7 @@ class SimpleUpdater(Updater):
     def done(self) -> None:
         self.pbar.close()   
         
-class SimpleFileLogger:  # (Updater) if you want to inherit
+class SimpleFileLogger(Updater):  # (Updater) if you want to inherit
     def __init__(
         self,
         *,

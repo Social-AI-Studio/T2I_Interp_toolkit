@@ -35,7 +35,7 @@ class Training:
 
 
     def run_trainer(self) -> tuple:
-        assert inspect.isgeneratorfunction(self.training_spec.fn), "Training function must be a generator"
+        # assert inspect.isgeneratorfunction(self.training_spec.fn), "Training function must be a generator"
         gen = self.training_spec.fn(
             *self.training_spec.args,
             **self.training_spec.kwargs

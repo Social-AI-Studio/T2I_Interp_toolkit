@@ -73,10 +73,18 @@ class WandbReporter(Reporter):
             for o in outputs:
                 name = getattr(o, "name", None) or "sample"
                 imgs: Sequence[Any] = o.preds 
+                baseline_imgs = o.baselines or []
                 metrics: Dict[str, List[float]] = o.metrics or {} * len(imgs)
                 for i, img in enumerate(imgs):
-                    pil = _as_pil(img) if img is not None else Image.new("RGB", (512,512), (0,0,0))
-                    row = [name, i, wandb.Image(pil, caption=f"{name} [{i}]")]
+                    pred_pil = _as_pil(img) if img is not None else Image.new("RGB", (512,512), (0,0,0))
+                    pred_cell = wandb.Image(pred_pil, caption=f"{name} [{i}]")
+                    if i < len(baseline_imgs) and baseline_imgs[i] is not None:
+                        base_pil = _as_pil(baseline_imgs[i])
+                        base_cell = wandb.Image(base_pil, caption=f"{name} baseline [{i}]")
+                    else:
+                        base_cell = ""  # blank cell is fine in W&B tables
+                    # row = [name, i, wandb.Image(pred_pil, caption=f"{name} [{i}]")]
+                    row = [name, i, pred_cell, base_cell]
                     for k in metric_cols:
                         v = metrics[k][i] if k in metrics and i < len(metrics[k]) else np.nan
                         try:

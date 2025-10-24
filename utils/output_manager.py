@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional, Union, Mapping
 import json, os, shutil, datetime, hashlib
 from utils.output import Output
 from utils.utils import _to_jsonable
+from reporting.config_loader import load_config
+from reporting.wandb import WandbReporter
 import torch
 
 def _ts():
@@ -76,6 +78,11 @@ class OutputManager:
     def save_best_ckpt(self,out: Output, **kwargs):
         torch.save(out.best_ckpt, self.paths["artifacts"] / "best_ckpt.pt")
         return
+    
+    def write_to_wandb(self, out: Output, **kwargs):
+        wb_cfg = kwargs.get("wb_cfg", load_config("reporting/config.yaml"))
+        reporter = WandbReporter(init_kwargs=wb_cfg)
+        reporter.log_table(out)
 
     def save_bytes(self, relpath: str, data: bytes):
         p = self.run_dir / relpath

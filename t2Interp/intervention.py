@@ -55,7 +55,6 @@ class ReplaceIntervention(DiffusionIntervention):
         self.guidance = kwargs.get("guidance", True)
         
     def intervene(self, accessor: ModuleAccessor, **kwargs):
-        print(accessor.value.shape, self.steering_vec.shape)
         if self.guidance and accessor.value.dim() >= 1 and accessor.value.size(0) % 2 == 0 and accessor.value.size(0) > 1:
             B2 = accessor.value.size(0)
             B = B2 // 2
@@ -229,7 +228,6 @@ def run_intervention(model:T2IModel, prompts:List[str], interventions: List[Diff
     
     with model.generate(prompts, validate=False, scan=False, **kwargs) as tracer:
         with tracer.iter[start_step:end_step]:
-            print(start_step,end_step)
             for intervention in interventions:
                 intervention(**kwargs)    
             output = model.output.save()

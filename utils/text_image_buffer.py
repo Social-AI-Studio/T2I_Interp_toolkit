@@ -29,7 +29,7 @@ class TextImageActivationBuffer(t2IActivationBuffer):
         refresh_batch_size: int = 512,
         out_batch_size: int = 512,
         data_device: str = "cpu",
-        step_index: Optional[int] = 0,     # 0-based call index; None = capture on any (first/last managed by policy)
+        denoiser_steps: list[int] =[0],     # 0-based call index; None = capture on any (first/last managed by policy)
         reduce_fn: Optional[Callable[[Tensor], Tensor]] = None,
         **kwargs: Optional[Dict[str, Any]],  # default kwargs passed to pipeline(...)
     ):
@@ -39,7 +39,7 @@ class TextImageActivationBuffer(t2IActivationBuffer):
             out_batch_size=out_batch_size, data_device=data_device
         )
         self.capture = submodule.io_type
-        self.step_index = step_index
+        self.denoiser_steps= denoiser_steps
         self.reduce_fn = reduce_fn
         self.pipeline_kwargs = kwargs if kwargs is not None else {}
 
@@ -86,7 +86,7 @@ class TextImageActivationBuffer(t2IActivationBuffer):
             counter = {"n": 0}
             common = dict(
                 call_counter=counter,
-                step_index=self.step_index,
+                denoiser_steps=self.denoiser_steps,
                 device=self.device,
                 reduce_fn=self.reduce_fn,
             )

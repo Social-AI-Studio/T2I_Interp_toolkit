@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Any, Protocol, Optional, Sequence
+from typing import Callable, Dict, Any, Protocol, Optional, Sequence, Tuple, List
 import torch
 from utils.output import Output
 from utils. metrics import MetricBase
@@ -13,6 +13,7 @@ class InferenceSpec:
     metric_fns: Optional[Sequence[MetricBase.compute]] = field(default_factory=list[MetricBase.compute])
     callback_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])         
     name: Optional[str] = None
+    args: Tuple[Any, ...] = ()
     kwargs: Dict[str, Any] = field(default_factory=dict)
     
 class Inference:
@@ -30,6 +31,7 @@ class Inference:
         # inputs = self._prepare_inputs(inputs)
         with torch.no_grad():
             out: Output = self.inference_spec.inference_fn(
+                *self.inference_spec.args,
                 **self.inference_spec.kwargs
             )
             if len(self.inference_spec.metric_fns)>0:
