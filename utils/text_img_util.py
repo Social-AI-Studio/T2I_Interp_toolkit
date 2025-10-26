@@ -75,7 +75,6 @@ class OutputAlterHook:
         if not self._take_it():
             return None  # no modification
         out = output
-
         # Case A: output is a Tensor
         if isinstance(out, t.Tensor):
             return self._apply(out, module)
@@ -396,7 +395,7 @@ def run_with_hook(
     hook_obj: Any, 
     io_type: IOType,
     **pipe_kwargs,
-    ) -> Tuple[Any, Any]:
+    ) -> Any:
         """
         Register hook_obj.hook on `module`, run `runner()`, then remove the hook.
         Returns (hook_obj, result).

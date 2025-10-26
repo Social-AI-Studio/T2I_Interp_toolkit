@@ -65,7 +65,7 @@ class WandbReporter(Reporter):
             outputs = [outputs]
         try:
             metric_cols = self._metric_keys(outputs)
-            cols = ["group", "idx", "image"] + metric_cols + (["link"] if add_links else [])
+            cols = ["group", "idx", "baseline", "steered image"] + metric_cols + (["link"] if add_links else [])
             table = wandb.Table(columns=cols)
 
             link_map = {}
@@ -86,7 +86,7 @@ class WandbReporter(Reporter):
                     else:
                         base_cell = ""  # blank cell is fine in W&B tables
                     # row = [name, i, wandb.Image(pred_pil, caption=f"{name} [{i}]")]
-                    row = [name, i, pred_cell, base_cell]
+                    row = [name, i, base_cell, pred_cell]
                     if len(metric_cols)==0 or len(metrics)==0:
                         table.add_data(*row)
                         continue

@@ -87,17 +87,17 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         
     def refresh(self):
         self.activations = self.activations[~self.read]
+        # self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
+        # while len(self.activations) < self.refresh_batch_size:
+        with t.no_grad(), self.model.generate(
+            self.token_batch()
+        ) as tracer:
+            with tracer.iter[self.steps[0]: self.steps[1]]:
+                hidden_states = self.submodule.value.save()
+                hidden_states = self._reshaped_activations(hidden_states)
+                self.activations = t.cat([self.activations, hidden_states.to(self.device)], dim=0)
+                tracer.stop()
         self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
-        while len(self.activations) < self.refresh_batch_size:
-            with t.no_grad(), self.model.generate(
-                self.token_batch()
-            ) as tracer:
-                with tracer.iter[self.steps[0]: self.steps[1]]:
-                    hidden_states = self.submodule.value.save()
-                    hidden_states = self._reshaped_activations(hidden_states)
-                    self.activations = t.cat([self.activations, hidden_states.to(self.device)], dim=0)
-                    tracer.stop()
-            self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
             
     @property
     def config(self):

@@ -200,7 +200,7 @@ class KSteer(Steer):
             else:
                 avoid_term = th.zeros(B, device=logits.device)
             if target_idx.numel() > 0:
-                target_term = logits[:, target_idx].mean(dim=1)
+                target_term = logits[:, target_idx].mean(dim=0)
             else:
                 target_term = th.zeros(B, device=logits.device)
             return avoid_term - target_term
@@ -301,15 +301,16 @@ class CAA(Steer):
         self.directions = directions
         
     def eval(self, metric:MetricBase, eval_prompts=List[str], **kwargs):
-        metrics={}
-        for attr_name,dir in self.directions.items():
-            logger.info(f"Evaluating direction for {dir}")
-            output = run_intervention(model=self.model, prompts=eval_prompts, n_steps = 1, start_step=0, end_step=1, seed=40, interventions = [SteeringIntervention(dir)], **kwargs)
-            metrics[attr_name]=metric.compute(output)    
-        if kwargs.get("maximize_metric", True):
-            self.direction= self.directions[max(metrics, key=metrics.get)]    
-        else:    
-            self.direction= self.directions[min(metrics, key=metrics.get)] 
+        # metrics={}
+        # for attr_name,dir in self.directions.items():
+        #     logger.info(f"Evaluating direction for {dir}")
+        #     output = run_intervention(model=self.model, prompts=eval_prompts, n_steps = 1, start_step=0, end_step=1, seed=40, interventions = [SteeringIntervention(dir)], **kwargs)
+        #     metrics[attr_name]=metric.compute(output)    
+        # if kwargs.get("maximize_metric", True):
+        #     self.direction= self.directions[max(metrics, key=metrics.get)]    
+        # else:    
+        #     self.direction= self.directions[min(metrics, key=metrics.get)] 
+        pass
     
     def steer(self,**kwargs):
         pass 

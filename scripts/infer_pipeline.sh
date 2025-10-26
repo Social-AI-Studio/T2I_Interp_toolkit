@@ -35,7 +35,7 @@ USE_MEMMAP=0
 CACHE_ACTIVATIONS=0
 
 # ---------- THE ALPHA GRID ----------
-ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0)
+ALPHAS=(0.25 1)
 DENOISER_STEP=10
 # Make sure log dir exists
 mkdir -p "${LOG_DIR}"
@@ -81,6 +81,5 @@ for A in "${ALPHAS[@]}"; do
     --log-file "${LOG_PATH}" \
     --updaters file \
     --seed 42 \
-    --subset 10
-
+    --subset 100
 done

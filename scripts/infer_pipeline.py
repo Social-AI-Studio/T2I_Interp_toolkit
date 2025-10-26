@@ -2,7 +2,7 @@ import os
 import argparse
 import importlib
 from dataclasses import asdict
-from typing import Optional, Callable, List, Any, Dict
+from typing import Optional, Callable, List, Any, Dict, Generator
 
 import torch as th
 from dictionary_learning.utils import hf_dataset_to_generator
@@ -46,15 +46,14 @@ def build_mapper(spec: str, mapper_kwargs: Dict[str, Any]):
     # Don’t pass dims from bash; infer here:
     return cls(**mapper_kwargs)
 
-def run_steering(model:T2IModel,dataset,accessor:ModuleAccessor,mapper:th.nn.Module,**kwargs):
+def run_steering(model:T2IModel,dataset,accessor:ModuleAccessor,mapper:th.nn.Module,**kwargs) -> Generator[Update, None, Output]: 
     def cache_path(dataset,split,subset):
         base = Path("data") / dataset / accessor.attr_name / split
         return str(base / str(subset) if subset is not None else base)
     
     def log(msg:str):
         update = Update(info=msg)
-        # yield update
-        print(update.info)
+        yield update
             
     # prompts, buffer = tee(BatchIterator(hf_dataset_to_generator(dataset,**kwargs),batch_size=kwargs.get("out_batch_size",1)))
     d_sub = kwargs.pop("d_submodule", kwargs.get("d_submodule", None))
@@ -64,15 +63,15 @@ def run_steering(model:T2IModel,dataset,accessor:ModuleAccessor,mapper:th.nn.Mod
     dataset_split = kwargs.get("dataset_split","val")
     use_memmap = kwargs.get("use_memmap", False)
     if use_memmap and os.path.exists(cache_path(dataset,dataset_split,kwargs.get('subset',None))):
-        log(f"Using existing memmap at {cache_path(dataset,'train',kwargs.get('subset',None))} for steering activations")
-        buffer = ShardedActivationMemmapDataset(cache_path(dataset,"train",kwargs.get('subset',None)),**kwargs)
+        log(f"Using existing memmap at {cache_path(dataset,dataset_split,kwargs.get('subset',None))} for steering activations")
+        buffer = ShardedActivationMemmapDataset(cache_path(dataset,dataset_split,kwargs.get('subset',None)),**kwargs)
     elif use_memmap:
         buffer = t2IActivationBuffer(hf_dataset_to_generator(dataset,**kwargs), model, accessor,d_submodule=d_sub, **kwargs) 
-        log(f"Creating memmap at {cache_path(dataset,'train',kwargs.get('subset',None))} for steering activations")
-        buffer = convert_buffer_to_memap(buffer,memmap_dir=cache_path(dataset,"train",kwargs.get('subset',None)), **kwargs)
+        log(f"Creating memmap at {cache_path(dataset,dataset_split,kwargs.get('subset',None))} for steering activations")
+        buffer = convert_buffer_to_memap(buffer,memmap_dir=cache_path(dataset,dataset_split,kwargs.get('subset',None)), **kwargs)
     else:
         buffer = t2IActivationBuffer(hf_dataset_to_generator(dataset,**kwargs), model, accessor,d_submodule=d_sub, **kwargs)    
-
+    
     prompts = BatchIterator(hf_dataset_to_generator(dataset,**kwargs),batch_size=kwargs.get("out_batch_size",1))
     use_cache = kwargs.get("cache_activations", False)
     if use_cache:
@@ -87,21 +86,47 @@ def run_steering(model:T2IModel,dataset,accessor:ModuleAccessor,mapper:th.nn.Mod
         generate_kwargs["guidance_scale"] = kwargs["guidance_scale"]
     imgs = []
     baseline_imgs = []
-    for i, (ps,activations) in enumerate(zip(iter(prompts),iter(buffer))):
-        log("Steering on batch {}".format(i))
-        steered_activation = steer.steer(activations, target_idx=[1], mapper = mapper, **kwargs)
-        # output = run_intervention(model, ps, interventions = 
-        #                           [ReplaceIntervention(model=model,envoys=[accessor],steering_vec=steered_activation)], **kwargs)
-        hook_obj = OutputAlterHook(replace_policy(steered_activation),step_index=kwargs.get("denoiser_step",0))
+    
+    p_iter = iter(prompts)   # don't recreate iter() each loop
+    b_iter = iter(buffer)
+    
+    i=0
+    while True:
+        try:
+            ps = next(p_iter)
+            activations = next(b_iter)
+        except StopIteration:
+            break  # either side exhausted → we're done
+        
+        yield Update(info=f"Steering on batch {i}")
+
+        steered_activation = steer.steer(
+            activations, target_idx=target_idx, mapper=mapper, **kwargs
+        )
+
+        hook_obj = OutputAlterHook(
+            replace_policy(steered_activation),
+            step_index=kwargs.get("denoiser_step", 0),
+        )
+
+        # If these are constant per run, assert once outside loop
         seed = kwargs.get("seed", None)
-        num_inference_steps = kwargs.get("num_inference_steps", None)   
+        num_inference_steps = kwargs.get("num_inference_steps", None)
         assert seed is not None, "seed must be provided in kwargs"
         assert num_inference_steps is not None, "num_inference_steps must be provided in kwargs"
-        
-        output = run_with_hook(model, prompts, accessor.module, hook_obj, accessor.io_type,**{**{"seed":seed, "num_inference_steps":num_inference_steps}, **generate_kwargs})
-        baselines = gen_images_from_prompts(model, ps, **{**kwargs,**generate_kwargs})
-        imgs.append(output.images)
-        baseline_imgs.append(baselines)
+
+        output = run_with_hook(
+            model, ps, accessor.module, hook_obj, accessor.io_type,
+            **{**{"seed": seed, "num_inference_steps": num_inference_steps}, **generate_kwargs}
+        )
+
+        baselines = gen_images_from_prompts(model, ps, **{**kwargs, **generate_kwargs})
+
+        # extend vs append: extend flattens per-batch image lists
+        imgs.extend(output.images)
+        baseline_imgs.extend(baselines)
+
+        i += 1
     return Output(preds=imgs, baselines=baseline_imgs)
 
 def import_callable(path: Optional[str]) -> Optional[Callable]:
@@ -167,7 +192,7 @@ def main():
     p.add_argument("--steer_method", type=str, default="KSteer", choices=["KSteer","CAA"])
     # Output & caching
     p.add_argument("--use_memmap", action="store_true", default=False)
-    p.add_argument("--cache_activations", action="store_true", default=True)
+    p.add_argument("--cache_activations", action="store_true", default=False)
     p.add_argument("--outputs_root", type=str, default="./runs")
     p.add_argument("--no_symlink_latest", action="store_true", default=False)
 
@@ -234,12 +259,11 @@ def main():
     #     stats_updaters.append(filelogger)
 
     stats_updaters=[]
-    # if "wandb" in args.updaters:
-    #     init_kwargs = wandb_init_kwargs(wb_cfg)
-    #     stats_updaters.append(WandbUpdater(init_kwargs=init_kwargs))
-    # if "file" in args.updaters:
-    #     filelogger = SimpleFileLogger(log_path=args.log_file, kwargs=workflow_kwargs)
-    #     stats_updaters.append(filelogger)
+    if "wandb" in args.updaters:
+        stats_updaters.append(WandbUpdater(init_kwargs=init_kwargs))
+    if "file" in args.updaters:
+        filelogger = SimpleFileLogger(log_path=args.log_file, kwargs=workflow_kwargs)
+        stats_updaters.append(filelogger)
         
     mapper_kwargs = parse_json(args.mapper_kwargs)
     mapper = build_mapper(args.mapper, mapper_kwargs).to(device=args.device, dtype=dtype_map[args.model_dtype])
