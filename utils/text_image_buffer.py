@@ -5,7 +5,8 @@ from utils.buffer import t2IActivationBuffer
 from utils.text_img_util import  _prep_prompts_images, CaptureInputHook, CaptureOutputHook, flatten_batch, run_with_hook
 from t2Interp.T2I import T2IModel
 from t2Interp.accessors import ModuleAccessor, IOType
-
+from utils.utils import cache_path, convert_buffer_to_memap,ActivationConfig, ShardedActivationMemmapDataset, CachedActivationIterator
+import os
 Tensor = t.Tensor
 # ---- Your class imports assumed available ----
 # from t2Interp.T2I import T2IModel
@@ -117,3 +118,29 @@ class TextImageActivationBuffer(t2IActivationBuffer):
             # reset read mask
             self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
 
+def _build_buffer(
+        ds, model, accessor, dataset, split: str, cfg: ActivationConfig
+    ):
+        """Create activation buffer for a split, possibly memmapped and/or cached."""
+        # live iterator
+        if not cfg.data_loader_kwargs.get("use_memmap", False):
+            buf = TextImageActivationBuffer(
+                ds, model, accessor,
+                # d_submodule=cfg.data_loader_kwargs.get("d_submodule", None),
+                **cfg.data_loader_kwargs
+            )
+        else:
+            mm_dir = cache_path(dataset,accessor.attr_name, split, cfg.data_loader_kwargs.get("subset", None))
+            if os.path.exists(mm_dir):
+                buf = ShardedActivationMemmapDataset(mm_dir, **cfg.data_loader_kwargs)
+            else:
+                live = TextImageActivationBuffer(
+                    ds, model, accessor,
+                    # d_submodule=cfg.data_loader_kwargs.get("d_submodule", None),
+                    **cfg.data_loader_kwargs
+                )
+                buf = convert_buffer_to_memap(live, memmap_dir=mm_dir, **cfg.data_loader_kwargs)
+
+        if cfg.data_loader_kwargs.get("cache_activations", False):
+            buf = CachedActivationIterator(buf, **cfg.data_loader_kwargs)
+        return buf

@@ -16,7 +16,7 @@ from diffusers.models import UNet2DConditionModel
 from diffusers.models.transformers.transformer_flux import FluxTransformer2DModel
 from utils.config_loader import build_module_mapper
 import warnings
-from utils.utils import FunctionModule
+# from utils.utils import FunctionModule
 from diffusers import DiffusionPipeline
 
 

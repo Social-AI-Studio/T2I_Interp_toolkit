@@ -13,7 +13,9 @@ from itertools import islice
 from typing import Iterable, Iterator, List, TypeVar, Tuple, Any, Mapping
 from torchvision import transforms
 import numpy as np
-from typing import Iterable, Iterator, List, TypeVar, Optional, Callable
+from typing import Iterable, Iterator, List, TypeVar, Optional, Callable, Tuple, Union, Dict
+from dataclasses import dataclass, field
+# from utils.text_image_buffer import TextImageActivationBuffer
 
 T = TypeVar("T")
 
@@ -729,3 +731,65 @@ def gen_images_from_prompts(model, prompts, **kwargs):
         output = model.output.save()
     return output.images    
 
+def cache_path(dataset: str, accessor_name: str, split: str, subset: Optional[str|int]) -> str:
+    base = Path("data") / dataset / accessor_name / split
+    return str(base / str(subset) if subset is not None else base)
+
+def is_tensor(x) -> bool:
+    return isinstance(x, torch.Tensor)
+
+def is_tuple_of_tensors(x) -> bool:
+    return isinstance(x, tuple) and all(is_tensor(y) for y in x)
+
+def normalize_gt_batch(
+    gt: Union[torch.Tensor, List[Any], Tuple[Any, ...]],
+    device: str
+) -> Union[torch.Tensor, List[torch.Tensor]]:
+    """
+    Accepts:
+      - Tensor -> moves to device
+      - list[tensor] -> stack to (B, ...) on device
+      - list[tuple[tensor]] -> transpose, stack each head -> list[(B, ...), ...]
+    """
+    if is_tensor(gt):
+        return gt.to(device)
+
+    if isinstance(gt, (list, tuple)) and len(gt) > 0:
+        all_tensor = all(is_tensor(x) for x in gt)
+        all_tuple_tensor = all(is_tuple_of_tensors(x) for x in gt)
+
+        if all_tensor:
+            return torch.stack(list(gt), dim=0).to(device)
+
+        if all_tuple_tensor:
+            # zip(*gt) transposes list-of-tuples
+            heads = []
+            for t in zip(*gt):
+                heads.append(torch.stack(list(t), dim=0).to(device))
+            return heads
+
+    # fallthrough: empty list/tuple or unsupported
+    return gt
+
+@dataclass
+class ActivationConfig:
+    # training
+    steps: int = 1
+    log_steps: int = 1
+    lr: float = 1e-5
+    training_device: str = "cpu"
+    autocast_dtype: torch.dtype = torch.float32  # set to th.float16 for CUDA AMP
+    grad_clip_norm: Optional[float] = None
+    # data/buffers
+    # d_submodule: Optional[int] = None
+    # use_val: bool = False
+    # val_split: str = "validation"
+    # use_memmap: bool = False
+    # cache_activations: bool = False
+    # subset: Optional[Union[str, int]] = None
+    out_batch_size: int = 1
+    # namespaced kwargs to avoid collisions
+    data_loader_kwargs: Dict[str, Any] = field(default_factory=dict)
+    buffer_kwargs: Dict[str, Any] = field(default_factory=dict)
+    # pipe_kwargs: Dict[str, Any]   = field(default_factory=dict)
+    

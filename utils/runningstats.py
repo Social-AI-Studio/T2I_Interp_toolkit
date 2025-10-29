@@ -41,7 +41,9 @@ class WandbUpdater(Updater):
     def start(self):
         self.run = self.wandb.init(**self.init_kwargs)
     def log(self, u: Update) -> None:
-        assert isinstance(u, TrainUpdate)
+        # assert isinstance(u, TrainUpdate)
+        if not isinstance(u, TrainUpdate):
+            return
         data = {"step": u.step, **{k: v for k,v in u.parts.items()}}
         if u.extras: data.update(u.extras)
         self.wandb.log(data)

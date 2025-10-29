@@ -8,7 +8,7 @@ import torch as th
 
 from t2Interp.T2I import T2IModel
 from t2Interp.concept_search import KSteer 
-from t2Interp.mapper import MLPMapper
+from t2Interp.mapper import MLPMapper, MLPMapperTwoHeads
 from reporting.config_loader import load_config, wandb_init_kwargs
 from utils.runningstats import WandbUpdater, SimpleFileLogger, Update
 from utils.training import TrainingSpec, Training
@@ -17,15 +17,26 @@ from utils.utils import preprocess_image
 from utils.output import Output
 import json
 from functools import partial
+import ast
+
+# RACE_LABELS = {
+#     "East Asian": 0, "Indian": 1, "Black": 2, "White": 3,
+#     "Middle Eastern": 4, "Latino_Hispanic": 5, "Southeast Asian": 6,
+# }
 
 RACE_LABELS = {
-    "East Asian": 0, "Indian": 1, "Black": 2, "White": 3,
-    "Middle Eastern": 4, "Latino_Hispanic": 5, "Southeast Asian": 6,
+    'white': 0, 'black': 1, 'asian': 2, 'indian': 3, 'latino': 4, 'middle eastern': 5, None: 6
 }
+
+GENDER_LABELS = {
+    "male": 0,
+    "female": 1,
+    None: 2
+    }
 
 MAPPER_REGISTRY = {
     "mlp": MLPMapper,
-   
+    "twohead_mlp" : MLPMapperTwoHeads
 }
 
 LOSS_REGISTRY = {
@@ -39,13 +50,24 @@ OPTIM_REGISTRY = {
     "sgd": th.optim.SGD,
 }
 
+def _norm_str(x: Optional[str]) -> Optional[str]:
+    if not isinstance(x, str):
+        return None
+    s = x.strip().lower()
+    return s if s else None
+
 def preprocess_fn(x):
-    # your lambda: preprocess_image(x, 512)
     return preprocess_image(x, 512)
 
 def race_processing_fn(x):
     # your lambda: th.tensor(race_labels[x], dtype=th.long)
     return th.tensor(RACE_LABELS[x], dtype=th.long)
+
+def gender_processing_fn(x):
+    return th.tensor(GENDER_LABELS[x], dtype=th.long)
+
+def gt_processing_fn(x):
+    return race_processing_fn(_norm_str(x[0])), gender_processing_fn(_norm_str(x[1]))
 
 # def steering_classifier_trainer(model):
 #     steer = KSteer(model)
@@ -190,6 +212,7 @@ def main():
     # optimizers = [th.optim.Adam(mapper.parameters(), lr=args.lr)]
     mapper_kwargs = parse_json(args.mapper_kwargs)
     loss_kwargs   = parse_json(args.loss_kwargs)
+    ground_truth_column = ast.literal_eval(args.ground_truth_column)
     optim_kwargs_list = [parse_json(s) for s in (args.optim_kwargs or [])]
 
     while len(optim_kwargs_list) < len(args.optim):
@@ -207,26 +230,33 @@ def main():
     # ---- kwargs passed to workflow.fit ----
     autocast_dtype = {"float16": th.float16, "bfloat16": th.bfloat16, "float32": th.float32}[args.autocast_dtype]
     workflow_kwargs: Dict[str, Any] = {
-        "preprocess_fn": preprocess_fn,
-        "gt_processing_fn": gt_processing_fn,
-        "subset": args.subset,
-        "val_split": args.val_split,
-        "dataset_column": args.dataset_column,
-        "ground_truth_column": args.ground_truth_column,
-        "use_val": args.use_val,
+        # "preprocess_fn": preprocess_fn,
+        # "gt_processing_fn": gt_processing_fn,
+        # "subset": args.subset,
+        # "val_split": args.val_split,
+        # "dataset_column": args.dataset_column,
+        # "ground_truth_column": ground_truth_column,
+        # "use_val": args.use_val,
         "train_steps": args.train_steps,
-        "denoiser_steps": args.denoiser_steps,
+        # "denoiser_steps": args.denoiser_steps,
         "training_device": args.training_device,
-        "data_device": args.data_device,
+        # "data_device": args.data_device,
         "autocast_dtype": autocast_dtype,
-        "d_submodule": args.d_submodule,
+        # "d_submodule": args.d_submodule,
         "log_steps": args.log_steps,
-        "refresh_batch_size": args.refresh_batch_size,
-        "out_batch_size": args.out_batch_size,
-        "use_memmap": args.use_memmap,
-        "cache_activations": args.cache_activations,
+        # "refresh_batch_size": args.refresh_batch_size,
+        # "out_batch_size": args.out_batch_size,
+        # "use_memmap": args.use_memmap,
+        # "cache_activations": args.cache_activations,
         "workflow": args.workflow,
         "run_name": args.run_name,
+        "data_loader_kwargs": {"refresh_batch_size": args.refresh_batch_size, "out_batch_size": args.out_batch_size,
+                               "use_memmap": args.use_memmap, "cache_activations": args.cache_activations,
+                               "d_submodule": args.d_submodule, "preprocess_fn": preprocess_fn,
+                               "gt_processing_fn": gt_processing_fn, "use_val": args.use_val,
+                               "val_split": args.val_split, "subset": args.subset,
+                               "data_device": args.data_device,"denoiser_steps": args.denoiser_steps,
+                               "ground_truth_column": ground_truth_column,"dataset_column": args.dataset_column,},
     }
     
     stats_updaters=[]

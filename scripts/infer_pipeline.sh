@@ -20,7 +20,7 @@ OUT_ROOT="./runs"                 # OutputManager root
 
 # Be careful with shell quoting for JSON.
 INPUT_DIM=$((4096*320))
-MAPPER_KW="{\"input_dim\": ${INPUT_DIM}, \"hidden_dim\": 4096, \"output_dim\": 7}"
+MAPPER_KW="{\"input_dim\": ${INPUT_DIM}, \"hidden_dim\": ${hidden_dim}, \"output_dims\": [7,2]}"
 MAPPER_CKPT="./runs/steer_mlp_train_steering_20251021-050122/artifacts/best_ckpt.pt"
 
 # Other knobs

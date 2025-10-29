@@ -7,8 +7,8 @@ from typing import Any, Dict, Optional, List
     
 @dataclass
 class Output:
-    preds: Any
-    baselines: Any
+    preds: Any = None
+    baselines: Any = None
     labels: Optional[Any] = None
     metrics: Optional[List[Dict[str, float]]] = None
     name: Optional[str] = None

@@ -20,11 +20,12 @@ from reporting.config_loader import load_config, wandb_init_kwargs
 from utils.runningstats import WandbUpdater, SimpleFileLogger
 from utils.inference import InferenceSpec, Inference
 from utils.output_manager import OutputManager
-from utils.utils import preprocess_image
+from utils.utils import preprocess_image, ActivationConfig
 import json
 from itertools import tee
 from pathlib import Path
 from utils.runningstats import Update
+from utils.text_image_buffer import _build_buffer
 
 
 RACE_LABELS={"East Asian":"East Asian","Indian":"Indian","Black":"Black","White":"White","Middle Eastern":"Middle Eastern","Latino_Hispanic": "Latino Hispanic","Southeast Asian":"Southeast Asian"}
@@ -47,35 +48,45 @@ def build_mapper(spec: str, mapper_kwargs: Dict[str, Any]):
     return cls(**mapper_kwargs)
 
 def run_steering(model:T2IModel,dataset,accessor:ModuleAccessor,mapper:th.nn.Module,**kwargs) -> Generator[Update, None, Output]: 
-    def cache_path(dataset,split,subset):
-        base = Path("data") / dataset / accessor.attr_name / split
-        return str(base / str(subset) if subset is not None else base)
+    # def cache_path(dataset,split,subset):
+    #     base = Path("data") / dataset / accessor.attr_name / split
+    #     return str(base / str(subset) if subset is not None else base)
     
-    def log(msg:str):
-        update = Update(info=msg)
-        yield update
+    # def log(msg:str):
+    #     update = Update(info=msg)
+    #     yield update
             
     # prompts, buffer = tee(BatchIterator(hf_dataset_to_generator(dataset,**kwargs),batch_size=kwargs.get("out_batch_size",1)))
-    d_sub = kwargs.pop("d_submodule", kwargs.get("d_submodule", None))
-    target_idx = kwargs.pop("target_idx", None)
-    assert target_idx is not None, "target_idx must be provided in kwargs"
+    assert hasattr(kwargs, "data_loader_kwargs"), "data_loader_kwargs must be provided in kwargs"
+    d_sub = kwargs.data_loader_kwargs.get("d_submodule",  None)
+    # target_idx = kwargs.pop("target_idx", None)
+    # assert target_idx is not None, "target_idx must be provided in kwargs"
     
-    dataset_split = kwargs.get("dataset_split","val")
-    use_memmap = kwargs.get("use_memmap", False)
-    if use_memmap and os.path.exists(cache_path(dataset,dataset_split,kwargs.get('subset',None))):
-        log(f"Using existing memmap at {cache_path(dataset,dataset_split,kwargs.get('subset',None))} for steering activations")
-        buffer = ShardedActivationMemmapDataset(cache_path(dataset,dataset_split,kwargs.get('subset',None)),**kwargs)
-    elif use_memmap:
-        buffer = t2IActivationBuffer(hf_dataset_to_generator(dataset,**kwargs), model, accessor,d_submodule=d_sub, **kwargs) 
-        log(f"Creating memmap at {cache_path(dataset,dataset_split,kwargs.get('subset',None))} for steering activations")
-        buffer = convert_buffer_to_memap(buffer,memmap_dir=cache_path(dataset,dataset_split,kwargs.get('subset',None)), **kwargs)
-    else:
-        buffer = t2IActivationBuffer(hf_dataset_to_generator(dataset,**kwargs), model, accessor,d_submodule=d_sub, **kwargs)    
+    dataset_split = kwargs.data_loader_kwargs.get("dataset_split","val")
+    use_memmap = kwargs.data_loader_kwargs.get("use_memmap", False)
     
-    prompts = BatchIterator(hf_dataset_to_generator(dataset,**kwargs),batch_size=kwargs.get("out_batch_size",1))
-    use_cache = kwargs.get("cache_activations", False)
-    if use_cache:
-        buffer = CachedActivationIterator(buffer, **kwargs)
+    cfg = ActivationConfig(
+            autocast_dtype=kwargs.get("autocast_dtype", th.float32),
+            data_loader_kwargs=kwargs.get("data_loader_kwargs", {}),
+        )
+    prompts, gen = tee(hf_dataset_to_generator(dataset, **kwargs.data_loader_kwargs))
+    buffer = _build_buffer(gen, model, accessor,dataset,dataset_split, cfg)
+    
+    # if use_memmap and os.path.exists(cache_path(dataset,dataset_split,kwargs.get('subset',None))):
+    #     log(f"Using existing memmap at {cache_path(dataset,dataset_split,kwargs.get('subset',None))} for steering activations")
+    #     buffer = ShardedActivationMemmapDataset(cache_path(dataset,dataset_split,kwargs.get('subset',None)),**kwargs)
+    # elif use_memmap:
+    #     buffer = t2IActivationBuffer(hf_dataset_to_generator(dataset,**kwargs), model, accessor,d_submodule=d_sub, **kwargs) 
+    #     log(f"Creating memmap at {cache_path(dataset,dataset_split,kwargs.get('subset',None))} for steering activations")
+    #     buffer = convert_buffer_to_memap(buffer,memmap_dir=cache_path(dataset,dataset_split,kwargs.get('subset',None)), **kwargs)
+    # else:
+    #     buffer = t2IActivationBuffer(hf_dataset_to_generator(dataset,**kwargs), model, accessor,d_submodule=d_sub, **kwargs)    
+    
+    prompts = BatchIterator(prompts,batch_size=kwargs.data_loader_kwargs.get("out_batch_size",1))
+    
+    # use_cache = kwargs.data_loader_kwargs.get("cache_activations", False)
+    # if use_cache:
+    #     buffer = CachedActivationIterator(buffer, **kwargs)
             
     if kwargs.get("steer_method","KSteer") == "KSteer":
         steer= KSteer(model)
@@ -101,7 +112,7 @@ def run_steering(model:T2IModel,dataset,accessor:ModuleAccessor,mapper:th.nn.Mod
         yield Update(info=f"Steering on batch {i}")
 
         steered_activation = steer.steer(
-            activations, target_idx=target_idx, mapper=mapper, **kwargs
+            activations, mapper=mapper, **kwargs
         )
 
         hook_obj = OutputAlterHook(
@@ -222,29 +233,26 @@ def main():
 
     # ---- kwargs passed to workflow.fit ----
     autocast_dtype = {"float16": th.float16, "bfloat16": th.bfloat16, "float32": th.float32}[args.autocast_dtype]
+    
     workflow_kwargs: Dict[str, Any] = {
-        "preprocess_fn": preprocess_fn,
-        "gt_processing_fn": gt_processing_fn,
-        "subset": args.subset,
-        "dataset_split": args.dataset_split,
-        "dataset_column": args.dataset_column,
-        "ground_truth_column": args.ground_truth_column,
         "num_inference_steps": args.inference_steps,
-        "target_idx": args.target_idx,
-        "alpha": args.alpha,
-        "denoiser_step": args.denoiser_step,
-        "data_device": args.data_device,
+        "train_steps": args.train_steps,
+        "training_device": args.training_device,
         "autocast_dtype": autocast_dtype,
-        "d_submodule": args.d_submodule,
-        "refresh_batch_size": args.refresh_batch_size,
-        "out_batch_size": args.out_batch_size,
-        "use_memmap": args.use_memmap,
-        "cache_activations": args.cache_activations,
-        "run_name": args.run_name,
-        "dataset": args.dataset,
+        "log_steps": args.log_steps,
+        "alpha": args.alpha,
         "steer_steps": args.steer_steps,
         "steer_method": args.steer_method,
         "seed": args.seed,
+        "workflow": args.workflow,
+        "run_name": args.run_name,
+        "data_loader_kwargs": {"refresh_batch_size": args.refresh_batch_size, "out_batch_size": args.out_batch_size,
+                               "use_memmap": args.use_memmap, "cache_activations": args.cache_activations,
+                               "d_submodule": args.d_submodule, "preprocess_fn": preprocess_fn,
+                               "gt_processing_fn": gt_processing_fn, "use_val": args.use_val,
+                               "dataset_split": args.dataset_split, "subset": args.subset,
+                               "data_device": args.data_device,"denoiser_step": args.denoiser_step,
+                               "dataset_column": args.dataset_column,"ground_truth_column": args.ground_truth_column,},
     }
 
     # stats_updaters=[]

@@ -20,7 +20,7 @@ class ClipEncoder:
         self.blocks: List[TransformerBlock] = [
             TransformerBlock(
                 in_=ModuleAccessor(encoder.layers[i],f"clip_encoder_block_{i}_input",IOType.INPUT),
-                out_=ModuleAccessor(encoder.layers[i],f"clip_encoder_block_{i}_output",IOType.OUTPUT, returns_tuple=True),
+                out_=ModuleAccessor(encoder.layers[i].layer_norm2,f"clip_encoder_block_{i}_output",IOType.OUTPUT, returns_tuple=True),
                 attn_in=ModuleAccessor(encoder.layers[i].self_attn,f"clip_encoder_block_{i}_self_attn_in",IOType.INPUT),
                 attn_out=ModuleAccessor(encoder.layers[i].self_attn,f"clip_encoder_block_{i}_self_attn_out",IOType.OUTPUT),
                 WO_in=ModuleAccessor(encoder.layers[i].self_attn.out_proj,f"clip_encoder_block_{i}_WO_in",IOType.INPUT),

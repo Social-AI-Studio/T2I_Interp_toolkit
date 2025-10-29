@@ -120,7 +120,8 @@ def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
             else:
                 vals = [ex[c] for c in cols]
                 if preprocess_fn:
-                    vals = [preprocess_fn(v) for v in vals]
+                    # vals = [preprocess_fn(v) for v in vals]
+                    vals = preprocess_fn(vals)
                 return tuple(vals)
 
         # Iterator protocol
