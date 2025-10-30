@@ -103,7 +103,7 @@ class TextImageActivationBuffer(t2IActivationBuffer):
                 io_type=self.capture,            # IOType.OUTPUT or IOType.INPUT
                 **self.pipeline_kwargs,          # forwarded as-is
             )
-
+            
             if cap.last is None:
                 # Probably wrong submodule or step_index out of range for this submodule in this call.
                 # Skip this mini-batch and continue.
@@ -139,6 +139,7 @@ def _build_buffer(
                     # d_submodule=cfg.data_loader_kwargs.get("d_submodule", None),
                     **cfg.data_loader_kwargs
                 )
+                
                 buf = convert_buffer_to_memap(live, memmap_dir=mm_dir, **cfg.data_loader_kwargs)
 
         if cfg.data_loader_kwargs.get("cache_activations", False):

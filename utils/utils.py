@@ -560,7 +560,7 @@ def convert_buffer_to_memap(
     while True:
         try:
             batch = next(buffer)              # expects [B, D] (or [B, ...])
-        except StopIteration:
+        except StopIteration as e:
             break
 
         if not isinstance(batch, torch.Tensor):
@@ -770,6 +770,24 @@ def normalize_gt_batch(
 
     # fallthrough: empty list/tuple or unsupported
     return gt
+
+def last_token_indices(tokenizer, prompts):
+    enc = tokenizer(
+        prompts, padding="max_length", truncation=True,
+        max_length=tokenizer.model_max_length, return_tensors="pt"
+    )
+    ids, mask = enc["input_ids"], enc["attention_mask"]
+    last_by_mask = mask.sum(dim=1) - 1
+
+    eos_id = getattr(tokenizer, "eos_token_id", None) or getattr(tokenizer, "sep_token_id", None)
+    if eos_id is None:
+        return last_by_mask
+
+    eos_mask = (ids == eos_id)
+    has_eos = eos_mask.any(dim=1)
+    # first EOS position (works even if EOS is repeated to the end)
+    eos_pos_first = eos_mask.int().argmax(dim=1)
+    return torch.where(has_eos, eos_pos_first, last_by_mask)
 
 @dataclass
 class ActivationConfig:

@@ -2,7 +2,7 @@ from typing import Callable, Optional, Union, Tuple, List, Any, Dict
 import torch as t
 from t2Interp.accessors import ModuleAccessor, IOType
 from t2Interp.T2I import T2IModel
-from utils.utils import reshape_like
+from utils.utils import reshape_like, last_token_indices
 
 Tensor = t.Tensor
 
@@ -240,7 +240,7 @@ class BaseCaptureHook:
 
     def _post(self, x: Tensor) -> None:
         if self.reduce_fn is not None:
-            x = self.reduce_fn(x)
+            x = self.reduce_fn(x, self.last_token_indices) if self.last_token_indices is not None else self.reduce_fn(x)
         if self.device is not None:
             x = x.to(self.device)
         self.last = x
@@ -254,6 +254,7 @@ class CaptureOutputHook(BaseCaptureHook):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._handle = None
+        self.last_token_indices = None
 
     def _extract(self, output: Any) -> Optional[Tensor]:
         val = output
@@ -271,6 +272,7 @@ class CaptureOutputHook(BaseCaptureHook):
         tensor = self._extract(output)
         if tensor is not None:
             self._post(tensor)
+            
         return None  # capture-only
 
     def register(self, module: t.nn.Module):
@@ -290,6 +292,7 @@ class CaptureInputHook(BaseCaptureHook):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._handle = None
+        self.last_token_indices = None
 
     def _pick(self, inputs: Any) -> Optional[Tensor]:
         if not isinstance(inputs, tuple) or len(inputs) == 0:
@@ -403,6 +406,10 @@ def run_with_hook(
         handle = _register(module, io_type, hook_obj.hook)
         try:
             io = _prep_prompts_images(batch)
+            if io.get("prompt", None) is not None:
+                prompt_inputs = io["prompt"]
+                hook_obj.last_token_indices = last_token_indices(model.tokenizer, prompt_inputs)
+                
             # If all prompts empty, avoid CFG pulling toward text by mistake
             if "prompt" in io and isinstance(io["prompt"], list) and all(p == "" for p in io["prompt"]):
                 pipe_kwargs.setdefault("guidance_scale", 1.0)

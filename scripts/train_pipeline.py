@@ -56,11 +56,17 @@ def _norm_str(x: Optional[str]) -> Optional[str]:
     s = x.strip().lower()
     return s if s else None
 
-def preprocess_fn(x):
-    return preprocess_image(x, 512)
+# def preprocess_fn(x):
+#     return preprocess_image(x, 512)
 
+def reduce_fn(x, last_indices=None):
+    # must be (B,ctx,dim)
+    assert x.dim() == 3, "reduce_fn expects 3D tensor"
+    B, S, H = x.shape
+    idx = last_indices.view(B, 1, 1).expand(B, 1, H).to(x.device)
+    return x.gather(1, idx).squeeze(1)
+    
 def race_processing_fn(x):
-    # your lambda: th.tensor(race_labels[x], dtype=th.long)
     return th.tensor(RACE_LABELS[x], dtype=th.long)
 
 def gender_processing_fn(x):
@@ -162,7 +168,7 @@ def main():
 
     # Training/activation params
     p.add_argument("--train_steps", type=int, default=200)
-    p.add_argument("--denoiser_steps", type=lambda s: json.loads(s), default=[10])
+    p.add_argument("--denoiser_steps", type=lambda s: json.loads(s), default=None)
     p.add_argument("--training_device", type=str, default="cuda:0")
     p.add_argument("--data_device", type=str, default="cpu")
     p.add_argument("--autocast_dtype", type=str, default="bfloat16", choices=["float16", "bfloat16", "float32"])
@@ -177,6 +183,8 @@ def main():
     p.add_argument("--subset", type=int, default=None)
     p.add_argument("--preprocess_fn", type=str, default=None,
                    help="Import path 'pkg.mod:fn' to preprocess inputs.")
+    p.add_argument("--reduce_fn", type=str, default=None,
+                   help="Import path 'pkg.mod:fn' to reduce captured activations.")
     p.add_argument("--gt_processing_fn", type=str, default=None,
                    help="Import path 'pkg.mod:fn' to process ground truth.")
 
@@ -224,6 +232,7 @@ def main():
         
     # ---- Pre/Post processing callables ----
     preprocess_fn = import_callable(args.preprocess_fn)
+    reduce_fn = import_callable(args.reduce_fn)
     gt_processing_fn = import_callable(args.gt_processing_fn)
     training_fn = import_callable(args.training_fn)
 
@@ -256,7 +265,8 @@ def main():
                                "gt_processing_fn": gt_processing_fn, "use_val": args.use_val,
                                "val_split": args.val_split, "subset": args.subset,
                                "data_device": args.data_device,"denoiser_steps": args.denoiser_steps,
-                               "ground_truth_column": ground_truth_column,"dataset_column": args.dataset_column,},
+                               "ground_truth_column": ground_truth_column,"dataset_column": args.dataset_column,
+                               "reduce_fn":reduce_fn,},
     }
     
     stats_updaters=[]

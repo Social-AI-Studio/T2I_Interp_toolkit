@@ -4,6 +4,7 @@ set -euo pipefail
 # Edit once:
 # ACCESSOR='model.unet_2.down_attn_blocks[0].self_attn_out'
 # DATASET='nirmalendu01/fairface-trainval-race-balanced-200'
+
 DATASET='nirmalendu01/socialcounterfactuals-200'
 
 # Example grid
@@ -35,14 +36,14 @@ declare -a ACCESSORS=(
 
 )
 # INPUT_DIM=$((4096*320))
-INPUT_DIM=$((768*77))
+INPUT_DIM=768
 # MAPPER_KW="{\"input_dim\": ${INPUT_DIM}, \"hidden_dim\": 4096, \"output_dim\": 7}"
 
 run_name='steer_mlp_train'
 # hidden_dim=4096
 hidden_dim=256
-train_steps=30
-DENOISER_STEPS='[10]' 
+train_steps=100
+# DENOISER_STEPS='[10]' 
 autocast_dtype='bfloat16'
 MAPPER_KW="{\"input_dim\": ${INPUT_DIM}, \"hidden_dim\": ${hidden_dim}, \"output_dims\": [7,2]}"
 USE_MEMMAP=1
@@ -55,14 +56,15 @@ for ACCESSOR in "${ACCESSORS[@]}"; do
 
   python -m scripts.train_pipeline \
     --training_fn scripts.train_pipeline:run_ksteer_fit \
+    --reduce_fn scripts.train_pipeline:reduce_fn \
     --dataset "$DATASET" \
     --val_split "validation" \
-    --denoiser_steps "${DENOISER_STEPS}" \
+    --d_submodule "${INPUT_DIM}" \
     --accessor_path "$ACCESSOR" \
     --run_name "$run_name" \
     --train_steps "${train_steps}" \
     --refresh_batch_size 64 \
-    --out_batch_size 4 \
+    --out_batch_size 32 \
     --training_device cuda:0 \
     --data_device cpu \
     --autocast_dtype "${autocast_dtype}" \
@@ -76,7 +78,9 @@ for ACCESSOR in "${ACCESSORS[@]}"; do
     --updaters file \
     --ground_truth_column "${GT_COLS}" \
     --dataset_column "${DATASET_COL}" \
-    --optim torch.optim.Adam --optim-kwargs '{"lr":1e-5}' \
+    --optim torch.optim.Adam --optim-kwargs '{"lr":1e-3}' \
+    --subset 100 \
     $( (( USE_MEMMAP )) && echo "--use_memmap" ) \
-    $( (( CACHE_ACTIVATIONS )) && echo "--cache_activations" ) 
+    $( (( CACHE_ACTIVATIONS )) && echo "--cache_activations" ) \
+    # --denoiser_steps "${DENOISER_STEPS}" # for unet blocks
 done
