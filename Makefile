@@ -5,9 +5,9 @@ help:
 	@echo "T2I-Interp Toolkit - Available commands:"
 	@echo ""
 	@echo "Installation:"
-	@echo "  make install          Install package dependencies (uv sync)"
-	@echo "  make install-dev      Install with dev dependencies"
-	@echo "  make sync             Install all optional dependencies"
+	@echo "  make install          Install all dependencies (including dev tools)"
+	@echo "  make install-prod     Install production dependencies only"
+	@echo "  make sync             Install all optional dependencies (dev, ray, notebook)"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  make lint            Run ruff linter"
@@ -29,10 +29,10 @@ help:
 
 # Installation targets
 install:
-	uv sync
-
-install-dev:
 	uv sync --extra dev
+
+install-prod:
+	uv sync
 
 sync:
 	uv sync --all-extras
