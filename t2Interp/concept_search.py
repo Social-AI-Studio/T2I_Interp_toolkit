@@ -35,176 +35,13 @@ class Steer(ABC):
         pass
     
 class KSteer(Steer):
-    def __init__(self, model:T2IModel=None):
+    def __init__(self, model: T2IModel = None):
+        """Initialize KSteer steering mechanism.
+        
+        Args:
+            model: T2IModel instance (can also be provided in fit())
+        """
         self.model = model
-        
-    # def fit(self,dataset, accessor, mapper:th.nn.Module,loss_fn: Optional[Callable] = None,
-    #         optimizers: List[th.optim.Optimizer]=None,out:Output=None, 
-    #         model:T2IModel=None, **kwargs) -> Generator[Update, None, Output]:
-        
-    #     if self.model is None and model is not None:
-    #         self.model = model
-    #     assert self.model is not None, "Model must be provided either at initialization or in fit()"
-        
-    #     if out is not None:
-    #         self.out=out
-        
-    #     def is_tensor(x) -> bool:
-    #         return isinstance(x, th.Tensor)
-
-    #     def is_tuple_of_tensors(x) -> bool:
-    #         return isinstance(x, tuple) and all(is_tensor(y) for y in x)
-   
-    #     def log(msg:str):
-    #         update = Update(info=msg)
-    #         yield update
-                
-    #     def cache_path(dataset,split,subset):
-    #         base = Path("data") / dataset / accessor.attr_name / split
-    #         return str(base / str(subset) if subset is not None else base)
-        
-    #     log(f"Starting KSteer training on dataset {dataset} with accessor {accessor.attr_name}")
-    #     generator_train = hf_dataset_to_generator(dataset,**kwargs) 
-    #     gt_train = hf_dataset_to_generator(dataset,**{**kwargs,"dataset_column": kwargs.get("ground_truth_column", "ground_truth"),
-    #                                                   "preprocess_fn" : kwargs.get("gt_processing_fn", None)}) 
-    #     if kwargs.get("use_val", False):
-    #         generator_val = hf_dataset_to_generator(dataset,split=kwargs.get("val_split","validation"),**kwargs)
-    #         gt_val = hf_dataset_to_generator(dataset,split=kwargs.get("val_split","validation"),
-    #                                          **{**kwargs,"dataset_column": kwargs.get("ground_truth_column", "ground_truth"),
-    #                                            "preprocess_fn" : kwargs.get("gt_processing_fn", None)})
-    #         buffer_val_gt = BatchIterator(gt_val,kwargs.get("out_batch_size", 1))
-            
-    #     d_sub = kwargs.pop("d_submodule", kwargs.pop("d_submodule", None))
-    #     training_device = kwargs.get("training_device", "cpu")
-    #     autocast_dtype = kwargs.get("autocast_dtype", th.float32)
-        
-    #     use_memmap = kwargs.get("use_memmap", False)
-        
-    #     if use_memmap and os.path.exists(cache_path(dataset,"train",kwargs.get('subset',None))):
-    #         log(f"Using existing memmap at {cache_path(dataset,'train',kwargs.get('subset',None))} for training activations")
-    #         buffer_train = ShardedActivationMemmapDataset(cache_path(dataset,"train",kwargs.get('subset',None)),**kwargs)
-    #     elif use_memmap:
-    #         buffer_train = TextImageActivationBuffer(generator_train, self.model, accessor,d_submodule=d_sub, **kwargs) 
-    #         log(f"Creating memmap at {cache_path(dataset,'train',kwargs.get('subset',None))} for training activations")
-    #         buffer_train = convert_buffer_to_memap(buffer_train,memmap_dir=cache_path(dataset,"train",kwargs.get('subset',None)), **kwargs)
-    #     else:
-    #         buffer_train = TextImageActivationBuffer(generator_train, self.model, accessor,d_submodule=d_sub, **kwargs)
-        
-    #     if use_memmap and os.path.exists(cache_path(dataset,"val",kwargs.get('subset',None))) and kwargs.get("use_val", False):
-    #         log(f"Using existing memmap at {cache_path(dataset,'val',kwargs.get('subset',None))} for validation activations")
-    #         buffer_val = ShardedActivationMemmapDataset(cache_path(dataset,"val",kwargs.get('subset',None)),**kwargs)
-    #     elif use_memmap and kwargs.get("use_val", False):
-    #         buffer_val = TextImageActivationBuffer(generator_val, self.model, accessor,d_submodule=d_sub, **kwargs)
-    #         log(f"Creating memmap at {cache_path(dataset,'val',kwargs.get('subset',None))} for validation activations")
-    #         buffer_val = convert_buffer_to_memap(buffer_val,memmap_dir=cache_path(dataset,"val",kwargs.get('subset',None)),**kwargs)
-    #     elif kwargs.get("use_val", False):
-    #         buffer_val = TextImageActivationBuffer(generator_val, self.model, accessor,d_submodule=d_sub, **kwargs)
-        
-    #     use_cache = kwargs.get("cache_activations", False)
-    #     if use_cache:
-    #         buffer_train = CachedActivationIterator(buffer_train, **kwargs)
-    #         if kwargs.get("use_val", False):    
-    #             buffer_val = CachedActivationIterator(buffer_val, **kwargs)
-            
-    #     buffer_train_gt  = BatchIterator(gt_train,kwargs.get("out_batch_size", 1))
-         
-    #     log_steps = kwargs.get("log_steps", 1) 
-    #     steps = kwargs.get("train_steps", 1) 
-    #     # autocast_context = th.autocast(device_type=training_device, dtype=autocast_dtype) if autocast_dtype is not None else nullcontext()
-    #     if optimizers is None:
-    #         optimizers = [th.optim.Adam(mapper.parameters(), lr=kwargs.get("lr",1e-5))]
-    #     mapper = mapper.to(device=training_device, dtype=autocast_dtype) 
-        
-    #     self.model.eval()
-    #     for p in self.model.parameters():
-    #         p.requires_grad_(False)  
-        
-    #     val_losses = [] 
-    #     step = 0
-    #     log(f"Beginning training for {steps} steps")
-    #     while True:
-    #         for act,gt in zip(iter(buffer_train),iter(buffer_train_gt)):
-    #             # print(125,gt)
-    #             act = act.to(training_device, dtype=autocast_dtype)
-    #             if type(gt) is list or type(gt) is tuple:
-    #                 all_tensor = all(is_tensor(x) for x in gt)
-    #                 all_tuple_tensor = all(is_tuple_of_tensors(x) for x in gt)
-    #                 if all_tensor:
-    #                     gt = th.stack(gt, dim=0)
-    #                     gt = gt.to(training_device)
-    #                 elif all_tuple_tensor:
-    #                     gt = [th.stack(t, dim=0).to(training_device) for t in zip(*gt)]    
-                
-    #             mapped = mapper(act) 
-    #             if type(mapped) is tuple:
-    #                 mapped = list(mapped)
-    #             if type(mapped) is list and type(gt) is list:
-    #                 loss = 0
-    #                 for m,g in zip(mapped,gt):
-    #                     loss += loss_fn(m,g.to(training_device))
-    #             else:
-    #                 print(141,gt,mapped)
-    #                 loss = loss_fn(mapped, gt)
-    #             loss.backward()
-            
-    #             for opt in optimizers:
-    #                 opt.step()
-    #                 opt.zero_grad()
-
-    #             if log_steps and step % log_steps == 0:
-    #                 # eval
-    #                 val_loss=0
-    #                 n_samples=0
-    #                 if kwargs.get("use_val", False):
-    #                     with th.no_grad():                   
-    #                         for val_act,gt_val in zip(iter(buffer_val),iter(buffer_val_gt)):
-    #                             val_act = val_act.to(device=training_device, dtype=autocast_dtype)
-    #                             # gt_val = gt_val.to(training_device)
-    #                             if type(gt_val) is list:
-    #                                 # gt_val = th.stack(gt_val, dim=0).to(training_device)
-    #                                 if type(gt_val) is list or type(gt_val) is tuple:
-    #                                     all_tensor = all(is_tensor(x) for x in gt_val)
-    #                                     all_tuple_tensor = all(is_tuple_of_tensors(x) for x in gt_val)
-    #                                     if all_tensor:
-    #                                         gt_val = th.stack(gt_val, dim=0)
-    #                                         gt_val = gt_val.to(training_device)
-    #                                     elif all_tuple_tensor:
-    #                                         gt_val = [th.stack(t, dim=0).to(training_device) for t in zip(*gt_val)]   
-                         
-    #                             mapped_val = mapper(val_act)
-    #                             if type(mapped_val) is tuple:
-    #                                 mapped_val = list(mapped_val)
-    #                             if type(mapped_val) is list and type(gt_val) is list:
-    #                                 for m_val,g_val in zip(mapped_val,gt_val):
-    #                                     val_loss += loss_fn(m_val, g_val.to(training_device))
-    #                             else:
-    #                                 val_loss += loss_fn(mapped_val, gt_val)
-    #                             n_samples += 1
-      
-    #                         val_loss = val_loss / n_samples
-    #                         if val_loss < min(val_losses, default=float('inf')):
-    #                             best_mapper = mapper.state_dict()
-    #                         val_losses.append(val_loss)
-    #                     update = TrainUpdate(step=step, parts={"loss": loss.item(), "val_loss": val_loss.item()})    
-    #                 else:
-    #                     update = TrainUpdate(step=step, parts={"loss": loss.item()})
-    #                 yield update
-    #             step += 1    
-    #             if step >= steps:
-    #                 break
-    #         if step >= steps:
-    #                 break
-            
-    #     if kwargs.get("use_val", False):
-    #        assert "best_mapper" in locals(), "No best mapper found during validation"
-    #        mapper = mapper.load_state_dict(best_mapper) 
-    #     log("Finished training KSteer mapper")       
-    #     self.classifier = mapper 
-    #     if not hasattr(self, "out"):
-    #         self.out = Output()
-    #     self.out.run_metadata = {**kwargs}
-    #     self.out.best_ckpt = best_mapper
-    #     return self.out
 
     def fit(
         self,
@@ -217,6 +54,68 @@ class KSteer(Steer):
         model: T2IModel | None = None,
         **kwargs,
     ) -> Generator[Update, None, Output]:
+        """Train a KSteer classifier mapper on model activations.
+        
+        This method trains a neural network mapper to predict target attributes
+        from model activations, enabling steering during generation.
+        
+        Args:
+            dataset: HuggingFace dataset path (str) or dataset dict
+            accessor: ModuleAccessor targeting the model component to extract activations from
+            mapper: Neural network mapper (e.g., MLPMapper) to train
+            loss_fn: Loss function (e.g., CrossEntropyLoss). If None, uses Adam default
+            optimizers: List of optimizers for training. If None, creates Adam optimizer
+            out: Output object to store results. If None, creates new Output()
+            model: T2IModel instance. If None, uses self.model from __init__
+            **kwargs: Additional configuration options:
+                - train_steps (int): Number of training iterations (default: 1)
+                - lr (float): Learning rate (default: 1e-5)
+                - log_steps (int): Log interval (default: 1)
+                - training_device (str): Device for training (default: "cpu")
+                - autocast_dtype (torch.dtype): Dtype for mixed precision (default: float32)
+                - grad_clip_norm (float): Gradient clipping value (default: None)
+                - data_loader_kwargs (dict): Configuration for data loading:
+                    - out_batch_size (int): Batch size for training
+                    - use_val (bool): Whether to use validation set
+                    - val_split (str): Validation split name
+                    - use_memmap (bool): Use memory-mapped datasets
+                    - cache_activations (bool): Cache activations in memory
+                    - ground_truth_column (str): Column name for labels
+                    - gt_processing_fn (Callable): Function to process labels
+                    - preprocess_fn (Callable): Function to preprocess inputs
+        
+        Yields:
+            Update: Training progress updates containing:
+                - info (str): Informational messages
+                - TrainUpdate: Training metrics (step, loss, val_loss)
+        
+        Returns:
+            Output: Training results containing:
+                - run_metadata (dict): Training configuration
+                - best_ckpt (dict): Best model checkpoint state_dict
+        
+        Raises:
+            AssertionError: If model is not provided at init or in fit()
+        
+        Example:
+            >>> from t2Interp.T2I import T2IModel
+            >>> from t2Interp.concept_search import KSteer
+            >>> from t2Interp.mapper import MLPMapper
+            >>> 
+            >>> model = T2IModel("CompVis/stable-diffusion-v1-4")
+            >>> accessor = model.unet.down_blocks[0].attentions[0]
+            >>> mapper = MLPMapper(input_dim=4096*320, hidden_dim=4096, output_dim=7)
+            >>> 
+            >>> ksteer = KSteer(model)
+            >>> for update in ksteer.fit(
+            ...     dataset="dataset/path",
+            ...     accessor=accessor,
+            ...     mapper=mapper,
+            ...     train_steps=100,
+            ...     lr=1e-5
+            ... ):
+            ...     print(update)
+        """
 
         # resolve model/out
         if self.model is None and model is not None:
@@ -506,7 +405,7 @@ class KSteer(Steer):
     def steer(
         self,
         acts: Union[np.ndarray, th.Tensor],
-        target_idx: List[int]| None = None,
+        target_idx: List[int] | None = None,
         avoid_idx: List[int] | None = None,
         *,
         alpha: float = 1,
@@ -515,6 +414,38 @@ class KSteer(Steer):
         mapper: Optional[str] = None,
         **kwargs,
     ) -> th.Tensor:
+        """Apply gradient-based steering to activations.
+        
+        Uses the trained classifier to steer activations toward target attributes
+        and away from avoid attributes via gradient descent.
+        
+        Args:
+            acts: Input activations to steer, shape (batch, features)
+            target_idx: Indices of target classes to steer toward (currently uses uniform steering)
+            avoid_idx: Indices of classes to avoid (currently uses uniform steering)
+            alpha: Step size for gradient updates (default: 1)
+            steer_steps: Number of gradient steps (default: 1)
+            step_size_decay: Decay factor for alpha per step (default: 1.0, no decay)
+            mapper: Mapper/classifier to use. If None, uses self.classifier
+            **kwargs: Additional arguments (unused, for compatibility)
+        
+        Returns:
+            Steered activations of same shape as input
+        
+        Raises:
+            AssertionError: If classifier not found and mapper not provided
+        
+        Note:
+            Currently uses `steering_loss_uniform` which balances all classes.
+            The target_idx and avoid_idx parameters are not actively used in
+            the current implementation but reserved for future targeted steering.
+        
+        Example:
+            >>> acts = torch.randn(4, 4096*320)  # Batch of 4 activations
+            >>> steered = ksteer.steer(acts, alpha=1.5, steer_steps=3)
+            >>> steered.shape
+            torch.Size([4, 1310720])
+        """
         th.set_grad_enabled(True)
         
         if not hasattr(self, "classifier") and mapper is not None:
