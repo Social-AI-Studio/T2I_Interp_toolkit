@@ -5,8 +5,9 @@ help:
 	@echo "T2I-Interp Toolkit - Available commands:"
 	@echo ""
 	@echo "Installation:"
-	@echo "  make install          Install package dependencies"
-	@echo "  make install-dev      Install package with dev dependencies"
+	@echo "  make install          Install package dependencies (uv sync)"
+	@echo "  make install-dev      Install with dev dependencies"
+	@echo "  make sync             Install all optional dependencies"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  make lint            Run ruff linter"
@@ -28,10 +29,13 @@ help:
 
 # Installation targets
 install:
-	uv pip install -e .
+	uv sync
 
 install-dev:
-	uv pip install -e ".[dev]"
+	uv sync --extra dev
+
+sync:
+	uv sync --all-extras
 
 # Linting and formatting
 lint:
