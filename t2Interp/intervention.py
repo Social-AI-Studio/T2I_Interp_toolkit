@@ -15,25 +15,25 @@ class DiffusionIntervention:
     def __init__(
         self,
         model: T2IModel,
-        envoys: List[Envoy],
+        accessors: List[ModuleAccessor],
         selection: Dict[str, List[int]] = None,
         start_step: int = 0,
         end_step: int = 50,
     ) -> None:
 
         self.model = model
-        self.envoys = envoys
+        self.accessors = accessors
         self.selection = selection
         self.start_step = start_step
         self.end_step = end_step
         
-    def intervene(self, envoy: Envoy, **kwargs):
+    def intervene(self, accessor: ModuleAccessor, **kwargs):
         pass
 
     def __call__(self,**kwargs):
-        for envoy in self.envoys:
-        #     with envoy.iter[self.start_step:self.end_step]:
-            self.intervene(envoy,**kwargs)
+        for accessor in self.accessors:
+        #     with accessor.iter[self.start_step:self.end_step]:
+            self.intervene(accessor,**kwargs)
 
     @classmethod
     def fields(cls):
@@ -179,6 +179,9 @@ class ScalingAttentionIntervention(DiffusionIntervention):
         spatial_idx = sel.get("spatial_location", None)
         head_idx    = sel.get("heads", None)
 
+        if type(head_idx) == dict:
+            head_idx = head_idx.get(attn.attr_name, None)
+            
         device = hs.device
 
         def to_index(idx, length):
@@ -229,7 +232,6 @@ def run_intervention(model:T2IModel, prompts:List[str], interventions: List[Diff
             for intervention in interventions:
                 intervention(**kwargs)    
             output = model.output.save()
-            print(output)
     return Output(preds=output.images) 
 
 # @ray.remote(num_gpus=1)
