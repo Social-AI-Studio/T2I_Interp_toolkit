@@ -81,16 +81,19 @@ class AutoEncoderTopK(Dictionary, nn.Module):
         self.b_dec = nn.Parameter(t.zeros(activation_dim))
 
     def encode(
-        self, x: t.Tensor, return_topk: bool = False, use_threshold: bool = False
+        self, x: t.Tensor, return_topk: bool = False, use_threshold: bool = False, remove_bias = False
     ):
-        post_relu_feat_acts_BF = nn.functional.relu(self.encoder(x - self.b_dec))
-
+        if remove_bias:
+            post_relu_feat_acts_BF = nn.functional.relu(self.encoder(x - self.b_dec)) 
+        else:
+            post_relu_feat_acts_BF = nn.functional.relu(self.encoder(x)) 
+                
         if use_threshold:
             encoded_acts_BF = post_relu_feat_acts_BF * (
                 post_relu_feat_acts_BF > self.threshold
             )
             if return_topk:
-                post_topk = post_relu_feat_acts_BF.topk(self.k, sorted=False, dim=-1)
+                post_topk = post_relu_feat_acts_BF.topk(self.k if self.k is int else self.k.item(), sorted=False, dim=-1)
                 return (
                     encoded_acts_BF,
                     post_topk.values,
@@ -100,7 +103,7 @@ class AutoEncoderTopK(Dictionary, nn.Module):
             else:
                 return encoded_acts_BF
 
-        post_topk = post_relu_feat_acts_BF.topk(self.k, sorted=False, dim=-1)
+        post_topk = post_relu_feat_acts_BF.topk(self.k if self.k is int else self.k.item(), sorted=False, dim=-1)
 
         # We can't split immediately due to nnsight
         tops_acts_BK = post_topk.values

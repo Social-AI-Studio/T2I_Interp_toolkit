@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 import torch
 from t2Interp.T2I import T2IModel
 from nnsight import NNsight
@@ -16,7 +16,7 @@ class DiffusionIntervention:
         self,
         model: T2IModel,
         accessors: List[ModuleAccessor],
-        selection: Dict[str, List[int]] = None,
+        selection: Dict[str, List[int]]| None = None,
         start_step: int = 0,
         end_step: int = 50,
     ) -> None:
@@ -223,6 +223,27 @@ class ScalingAttentionIntervention(DiffusionIntervention):
     # def fields(cls):
     #     return [FieldModel(name="Factor", type=FieldModel.FieldType.float)]
 
+class FeatureIntervention(DiffusionIntervention):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)    
+            
+    def intervene(self, accessor: ModuleAccessor, **kwargs):   
+        feature_indices = kwargs.get("feature_indices", None)
+        scale = kwargs.get("factor", 0.0)
+        assert feature_indices is not None, "feature_indices must be provided as kwargs"
+        def scale_hook(module, input, output):
+            # ablate last indices
+            if output.dim() == 2:
+                output[:, feature_indices] *= scale
+            elif output.dim() ==3:
+                output[:, :, feature_indices] *= scale
+            elif output.dim() ==4:
+                output[:, :, :, feature_indices] *= scale
+            else:
+                raise ValueError(f"Unexpected output dim: {output.dim()}")
+            return output
+        accessor.module.register_forward_hook(scale_hook) 
+    
 def run_intervention(model:T2IModel, prompts:List[str], interventions: List[DiffusionIntervention] = [], **kwargs) -> Output:
     start_step = kwargs.get("denoiser_step", 0)
     start_step = 0

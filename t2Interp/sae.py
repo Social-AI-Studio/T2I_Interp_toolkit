@@ -18,13 +18,19 @@ import copy
 from typing import Dict
 from functools import partial
 from t2Interp.accessors import ModuleAccessor
+from utils.output import Output   
+from collections import defaultdict
             
 class SAEManager:
     def __init__(self, model):
         self.model: T2IModel = model
         self.registry_mod = {}        # dict: hook_name -> SAE module
-        # self.handles = {}     # dict: hook_name -> hook handle
+        self._handles = []         # list of hook handles
+        self.sae_activations = defaultdict(list)  # key -> list of tensors
 
+    def clear_activations(self):
+        self.sae_activations = defaultdict(list)
+        
     def train(self, hf_dataset, module:ModuleAccessor, **kwargs):
         generator = hf_dataset_to_generator(hf_dataset)
         buffer = t2IActivationBuffer(generator, self.model, module, **kwargs)
@@ -46,51 +52,53 @@ class SAEManager:
             h.remove()
         self._handles.clear()
     
-    def add_saes_to_model(self, sae_list:List[Tuple[ModuleAccessor,Dictionary,str]]):
+    def add_saes_to_model(self, sae_list:List[Tuple[ModuleAccessor,Dictionary,str]],**kwargs):
         def process(x, accessor:ModuleAccessor):
             ae = accessor.ae
-            kwargs = ae[0].bound_kwargs
-            accessor_input = accessor.module.input
-            diff = kwargs.get("diff",False)
-            if diff:
-                sae_in = x - accessor_input
-                enc_out = ae[0](sae_in)
+            # if hasattr(cache, "parent_out") and hasattr(cache, "parent_in"):
+                # parent_out = cache["parent_out"].to(x.device,x.dtype)
+                # parent_in = cache["parent_in"].to(x.device,x.dtype)
+            if accessor.attr_name + "_out" in self.sae_activations and accessor.attr_name + "_in" in self.sae_activations:    
+                parent_out = self.sae_activations[accessor.attr_name + "_out"].to(x.device,x.dtype)
+                parent_in = self.sae_activations[accessor.attr_name + "_in"].to(x.device,x.dtype)
+                sae_in = parent_out - parent_in
+                print(62, parent_in.shape, parent_out.shape, sae_in.shape)
             else:
-                enc_out = ae[0](x)    
-                
-            mask = kwargs.get("mask", False)
-            error = kwargs.get("error", False)
-            
-            if mask is not None:
-                masked_out = enc_out * mask.to(x.device,x.dtype)
-            if error:    
-                enc_out = t.cat([enc_out,masked_out], dim=0)
-     
-            dec_out = ae[1](enc_out)
-            
-            if diff:
-                out = dec_out + accessor_input.expand((dec_out.shape[0], accessor_input.shape[1:]))
-                
-            if error:
-                error = x - out[0]
-                out = out[1] + error
-            return out
+                sae_in = x
+            enc_out = accessor.ae.encoder_out.module(sae_in,return_topk = False, use_threshold = False, remove_bias = False)    
+            return enc_out
         
-        def sae_pre_hook(module, inputs, accessor:ModuleAccessor):
-            (x,) = inputs
-            out = process(x, accessor=accessor)
-            return (out,)
+        # def sae_pre_hook(module, inputs, accessor:ModuleAccessor, cache={}):
+        #     (x,) = inputs
+        #     out = process(x, accessor=accessor, cache=cache)
+        #     self.sae_activations[accessor.attr_name].append(out.detach().cpu())
+        #     return (out,)
             
         def sae_forward_hook(module, input, output, accessor:ModuleAccessor):
             if type(output) == tuple:
                 (x,) = output
             else:
                 x = output
-            out = process(x, accessor=accessor) 
-            if type(output) == tuple:
-                return (out,)
-            return out 
-    
+            enc_out = process(x, accessor=accessor) 
+            self.sae_activations[accessor.ae.encoder_out.attr_name] = enc_out.detach().cpu()
+            # if type(output) == tuple:
+            #     return (out,)
+            return output
+
+
+        def parent_out_hook(module, input, output, accessor:ModuleAccessor=None):
+            # cache["parent_out"] = output.detach().cpu()
+            self.sae_activations[accessor.attr_name + "_out"] = output.detach().cpu()
+            if accessor is not None:
+                accessor.ae.encoder_out.module(output)
+            return output
+        
+        def parent_in_hook(module, inputs):
+            (x,) = inputs
+            # cache["parent_in"] = x.detach().cpu()
+            self.sae_activations[accessor.attr_name + "_in"] = x.detach().cpu()
+            return inputs
+            
         for accessor, sae, parent_attr_name in sae_list:
             encode = FunctionModule(sae.encode)
             decode = FunctionModule(sae.decode)
@@ -100,35 +108,52 @@ class SAEManager:
                             "decoder_in":ModuleAccessor(ae[1], parent_attr_name + "_decode_in", io_type=IOType.INPUT),
                             "decoder_out":ModuleAccessor(ae[1], parent_attr_name + "_decode_out", io_type=IOType.OUTPUT)})
             accessor.ae = ae
-            if accessor.io_type == IOType.OUTPUT:
-                h = accessor.module.register_forward_hook(partial(sae_forward_hook,accessor=accessor))
-            elif accessor.io_type == IOType.INPUT:
-                h = accessor.module.register_forward_pre_hook(partial(sae_pre_hook,accessor=accessor))
-            else:
-                raise ValueError(f"IOType {accessor.io_type} not supported for SAE insertion")    
+            # cache={}
             self._handles = getattr(self, "_handles", [])
+            if kwargs.pop("diff", False):
+                h = accessor.module.register_forward_hook(partial(parent_out_hook, accessor=accessor))
+                self._handles.append(h)
+                h = accessor.module.register_forward_pre_hook(partial(parent_in_hook))
+                self._handles.append(h)
+            # if accessor.io_type == IOType.OUTPUT:
+            #     h = accessor.ae.encoder_out.module.register_forward_hook(partial(sae_forward_hook,accessor=accessor.ae.encoder_out, cache=cache))
+            #     self._handles.append(h)
+            # elif accessor.io_type == IOType.INPUT:
+            #     h = accessor.ae.encoder_in.module.register_forward_pre_hook(partial(sae_pre_hook,accessor=accessor.ae.encoder_in, cache=cache))
+            #     self._handles.append(h)
+            h = accessor.module.register_forward_hook(partial(sae_forward_hook,accessor=accessor))
+            # else:
+            #     raise ValueError(f"IOType {accessor.io_type} not supported for SAE insertion")    
+            
             self._handles.append(h)
     
-    def add_encoder_hook(self, accessor:ModuleAccessor, cache:Dict[str,t.Tensor]):
-        def cache_hook(module, input, output):
-            if type(output) == tuple:
-                (x,) = output
-            else:
-                x = output
-            cache[accessor.attr_name] = x.detach().cpu()
-        h = accessor.ae.module.register_forward_hook(cache_hook)
-        self._handles = getattr(self, "_handles", [])
-        self._handles.append(h)
+    # def add_encoder_hook(self, accessor:ModuleAccessor, cache:Dict[str,t.Tensor]):
+    #     def cache_hook(module, input, output):
+    #         if type(output) == tuple:
+    #             (x,) = output
+    #         else:
+    #             x = output
+    #         cache[accessor.attr_name] = x.detach().cpu()
+    #     h = accessor.module.register_forward_hook(cache_hook)
+    #     self._handles = getattr(self, "_handles", [])
+    #     self._handles.append(h)
         
-    def run_with_cache(self, prompt, accessors: List[ModuleAccessor], **kwargs) -> List[Tuple[ModuleAccessor, dict]]:
-        for accessor in accessors:
-            if not hasattr(accessor, "ae"):
-                raise ValueError(f"Accessor {accessor.attr_name} does not have an SAE attached")
-        cache = {}
-        for accessor in accessors:
-            self.add_encoder_hook(accessor, cache)
-        self.model.generate(prompt, **kwargs)
-        return [(accessor, cache[accessor.attr_name]) for accessor in accessors]
+    def run_with_cache(self, prompt, **kwargs) -> Output:
+        # for accessor in accessors:
+        #     if not hasattr(accessor, "ae"):
+        #         raise ValueError(f"Accessor {accessor.attr_name} does not have an SAE attached")
+        # cache = {}
+        # for accessor in accessors:
+        #     self.add_encoder_hook(accessor, cache)
+        try:    
+            self.model.generate(prompt, **kwargs)
+        finally:
+            for h in self._handles:
+                h.remove()
+            self._handles.clear() 
+        output=Output()  
+        output.preds = self.sae_activations     
+        return output
     
     # def ScaleIntervention(self, accessor:ModuleAccessor, factor:float, **kwargs):
     #     pass     
@@ -197,8 +222,8 @@ class SAEManager:
     #         accessor.ae = ae                                      
     #     return edited
     
-    def extract_activation(self,site):
-        pass
+    # def extract_activation(self,site):
+    #     pass
     
     @t.no_grad()
     def evaluate(self, data_loader, site):
