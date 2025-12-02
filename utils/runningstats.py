@@ -27,9 +27,7 @@ class TrainUpdate(Update):
 
 class Updater(ABC):
     @abstractmethod
-    def start(
-        self, run_name: str | None = None, config: dict[str, Any] | None = None
-    ) -> None:
+    def start(self, run_name: str | None = None, config: dict[str, Any] | None = None) -> None:
         pass
 
     @abstractmethod

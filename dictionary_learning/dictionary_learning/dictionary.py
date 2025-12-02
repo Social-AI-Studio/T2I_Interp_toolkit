@@ -368,9 +368,9 @@ class JumpReluAutoEncoder(Dictionary, nn.Module):
             from sae_lens import SAE
 
             sae, cfg_dict, _ = SAE.from_pretrained(**kwargs)
-            assert cfg_dict["finetuning_scaling_factor"] == False, (
-                "Finetuning scaling factor not supported"
-            )
+            assert (
+                cfg_dict["finetuning_scaling_factor"] == False
+            ), "Finetuning scaling factor not supported"
             dict_size, activation_dim = cfg_dict["d_sae"], cfg_dict["d_in"]
             autoencoder = JumpReluAutoEncoder(activation_dim, dict_size, device=device)
             autoencoder.load_state_dict(sae.state_dict())

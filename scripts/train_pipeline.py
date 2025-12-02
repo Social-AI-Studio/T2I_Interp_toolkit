@@ -127,7 +127,7 @@ def build_mapper(spec: str, mapper_kwargs: dict[str, Any]):
 
 def build_optimizers(specs: list[str], kwargs_list: list[dict[str, Any]], params):
     optims = []
-    for spec, kw in zip(specs, kwargs_list):
+    for spec, kw in zip(specs, kwargs_list, strict=False):
         cls = OPTIM_REGISTRY.get(spec) if spec in OPTIM_REGISTRY else resolve_dotted(spec)
         optims.append(cls(params, **kw))
     return optims

@@ -4,6 +4,7 @@ from enum import Enum
 from typing import Any
 
 import torch as t
+
 from dictionary_learning.dictionary import (
     AutoEncoder,
     GatedAutoEncoder,

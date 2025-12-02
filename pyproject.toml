@@ -45,6 +45,7 @@ dev = [
     "pytest-cov>=4.1.0",
     "ruff>=0.8.0",
     "mypy>=1.5.0",
+    "pre-commit>=3.5.0",
 ]
 ray = [
     "ray>=2.7.0",

@@ -179,7 +179,7 @@ def trainSAE(
     # make save dirs, export config
     if save_dir is not None:
         save_dirs = [os.path.join(save_dir, f"trainer_{i}") for i in range(len(trainer_configs))]
-        for trainer, dir in zip(trainers, save_dirs):
+        for trainer, dir in zip(trainers, save_dirs, strict=False):
             os.makedirs(dir, exist_ok=True)
             # save config
             config = {"trainer": trainer.config}
@@ -223,7 +223,7 @@ def trainSAE(
 
         # saving
         if save_steps is not None and step in save_steps:
-            for dir, trainer in zip(save_dirs, trainers):
+            for dir, trainer in zip(save_dirs, trainers, strict=False):
                 if dir is None:
                     continue
 
@@ -245,7 +245,7 @@ def trainSAE(
 
         # backup
         if backup_steps is not None and step % backup_steps == 0:
-            for save_dir, trainer in zip(save_dirs, trainers):
+            for save_dir, trainer in zip(save_dirs, trainers, strict=False):
                 if save_dir is None:
                     continue
                 # save the current state of the trainer for resume if training is interrupted
@@ -267,7 +267,7 @@ def trainSAE(
                 trainer.update(step, act)
 
     # save final SAEs
-    for save_dir, trainer in zip(save_dirs, trainers):
+    for save_dir, trainer in zip(save_dirs, trainers, strict=False):
         if normalize_activations:
             trainer.ae.scale_biases(norm_factor)
         if save_dir is not None:

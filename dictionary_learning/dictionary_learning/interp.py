@@ -130,11 +130,11 @@ def examine_dimension(
     token_indices = topk_indices % activations.shape[1]
     tokens = [
         tokens[batch_idx, : token_idx + 1].tolist()
-        for batch_idx, token_idx in zip(batch_indices, token_indices)
+        for batch_idx, token_idx in zip(batch_indices, token_indices, strict=False)
     ]
     activations = [
         activations[batch_idx, : token_id + 1, None, None]
-        for batch_idx, token_id in zip(batch_indices, token_indices)
+        for batch_idx, token_id in zip(batch_indices, token_indices, strict=False)
     ]
     decoded_tokens = _list_decode(tokens)
     top_contexts = text_neuron_activations(decoded_tokens, activations)
@@ -142,7 +142,9 @@ def examine_dimension(
     top_affected = feature_effect(
         model, submodule, dictionary, dim_idx, tokens, max_length=max_length, k=k
     )
-    top_affected = [(model.tokenizer.decode(tok), prob.item()) for tok, prob in zip(*top_affected)]
+    top_affected = [
+        (model.tokenizer.decode(tok), prob.item()) for tok, prob in zip(*top_affected, strict=False)
+    ]
 
     return namedtuple("featureProfile", ["top_contexts", "top_tokens", "top_affected"])(
         top_contexts, top_tokens, top_affected

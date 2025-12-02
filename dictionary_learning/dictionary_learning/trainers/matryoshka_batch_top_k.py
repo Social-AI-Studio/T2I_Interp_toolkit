@@ -174,9 +174,9 @@ class MatryoshkaBatchTopKTrainer(SAETrainer):
         if group_weights is None:
             group_weights = [(1.0 / len(group_sizes))] * len(group_sizes)
 
-        assert len(group_sizes) == len(group_weights), (
-            "group_sizes and group_weights must have the same length"
-        )
+        assert len(group_sizes) == len(
+            group_weights
+        ), "group_sizes and group_weights must have the same length"
 
         self.group_fractions = group_fractions
         self.group_sizes = group_sizes

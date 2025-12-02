@@ -5,8 +5,8 @@ from typing import Any
 
 import numpy as np
 import torch as th
-from dictionary_learning.utils import hf_dataset_to_generator
 
+from dictionary_learning.utils import hf_dataset_to_generator
 from t2Interp.accessors import ModuleAccessor
 from t2Interp.T2I import T2IModel
 from utils.metrics import MetricBase
@@ -211,7 +211,7 @@ class KSteer(Steer):
         step = 0
         while step < cfg.steps:
             # NOTE: if your iterators are finite, re-initialize per epoch
-            train_iter = zip(iter(buf_train), iter(gt_train_iter))
+            train_iter = zip(iter(buf_train), iter(gt_train_iter), strict=False)
             for act, gt in train_iter:
                 act = act.to(cfg.training_device, dtype=cfg.autocast_dtype)
                 gt = normalize_gt_batch(gt, cfg.training_device)
@@ -221,7 +221,7 @@ class KSteer(Steer):
                     mapped = list(mapped)
 
                 if isinstance(mapped, list) and isinstance(gt, list):
-                    loss = sum(loss_fn(m, g) for m, g in zip(mapped, gt))
+                    loss = sum(loss_fn(m, g) for m, g in zip(mapped, gt, strict=False))
                 else:
                     loss = loss_fn(mapped, gt)
 
@@ -240,7 +240,9 @@ class KSteer(Steer):
                         mapper.eval()
                         with th.no_grad():
                             val_loss, n = 0.0, 0
-                            for val_act, gt_val in zip(iter(buf_val), iter(gt_val_iter)):
+                            for val_act, gt_val in zip(
+                                iter(buf_val), iter(gt_val_iter), strict=False
+                            ):
                                 val_act = val_act.to(cfg.training_device, dtype=cfg.autocast_dtype)
                                 gt_val = normalize_gt_batch(gt_val, cfg.training_device)
 
@@ -249,7 +251,7 @@ class KSteer(Steer):
                                     mapped_val = list(mapped_val)
 
                                 if isinstance(mapped_val, list) and isinstance(gt_val, list):
-                                    for m_val, g_val in zip(mapped_val, gt_val):
+                                    for m_val, g_val in zip(mapped_val, gt_val, strict=False):
                                         val_loss += float(loss_fn(m_val, g_val))
                                 else:
                                     val_loss += float(loss_fn(mapped_val, gt_val))
@@ -344,7 +346,7 @@ class KSteer(Steer):
 
         val_correct = 0
         val_total = 0
-        for val_act, gt_val in zip(iter(buf_val), iter(gt_val_iter)):
+        for val_act, gt_val in zip(iter(buf_val), iter(gt_val_iter), strict=False):
             val_act = val_act.to(
                 kwargs.get("training_device", "cpu"), dtype=kwargs.get("autocast_dtype", th.float32)
             )
@@ -355,7 +357,7 @@ class KSteer(Steer):
                 mapped_val = list(mapped_val)
 
             if isinstance(mapped_val, list) and isinstance(gt_val, list):
-                for m_val, g_val in zip(mapped_val, gt_val):
+                for m_val, g_val in zip(mapped_val, gt_val, strict=False):
                     _, predicted = th.max(m_val, 1)
                     val_correct += (predicted == g_val).sum().item()
                     val_total += 1
@@ -474,9 +476,9 @@ class KSteer(Steer):
         if not hasattr(self, "classifier") and mapper is not None:
             self.classifier = mapper
 
-        assert hasattr(self, "classifier"), (
-            "Classifier not found. Please fit the model or provide a classifier_path."
-        )
+        assert hasattr(
+            self, "classifier"
+        ), "Classifier not found. Please fit the model or provide a classifier_path."
 
         if avoid_idx is None:
             avoid_idx = []

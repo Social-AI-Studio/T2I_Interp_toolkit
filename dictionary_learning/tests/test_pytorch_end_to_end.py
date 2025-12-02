@@ -1,6 +1,8 @@
 import random
 
 import torch as t
+from transformers import AutoModelForCausalLM
+
 from dictionary_learning.dictionary import (
     AutoEncoder,
 )
@@ -16,7 +18,6 @@ from dictionary_learning.utils import (
     hf_dataset_to_generator,
     load_dictionary,
 )
-from transformers import AutoModelForCausalLM
 
 EXPECTED_RESULTS = {
     "AutoEncoderTopK": {

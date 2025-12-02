@@ -71,9 +71,9 @@ def loss_recovered(
         x = x.save()
 
     # If we incorrectly handle output_is_tuple, such as with some mlp submodules, we will get an error here.
-    assert len(x.shape) == 3, (
-        f"Expected x to have shape (B, L, D), got {x.shape}, output_is_tuple: {output_is_tuple}"
-    )
+    assert (
+        len(x.shape) == 3
+    ), f"Expected x to have shape (B, L, D), got {x.shape}, output_is_tuple: {output_is_tuple}"
 
     x_hat = dictionary(x).to(model.dtype)
 

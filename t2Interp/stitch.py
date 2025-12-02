@@ -9,8 +9,8 @@ from typing import Any
 
 import torch as th
 import torch.nn as nn
-from dictionary_learning.utils import hf_dataset_to_generator
 
+from dictionary_learning.utils import hf_dataset_to_generator
 from t2Interp.T2I import T2IModel
 from utils.buffer import t2IActivationBuffer
 from utils.output import Output
@@ -191,7 +191,7 @@ class Stitcher:
             else th.autocast(device_type=training_device, dtype=autocast_dtype)
         )
 
-        for step, (act_a, act_b) in enumerate(zip(buffer_a, buffer_b)):
+        for step, (act_a, act_b) in enumerate(zip(buffer_a, buffer_b, strict=False)):
             with autocast_context:
                 # if loss_fn:
                 #     mapped,loss = mapper(act_a,loss_fn=loss_fn)

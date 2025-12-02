@@ -1,4 +1,3 @@
-
 # from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
 from collections import defaultdict
@@ -6,12 +5,12 @@ from functools import partial
 
 import torch as t
 import torch.nn as nn
+
 from dictionary_learning.dictionary import Dictionary
 from dictionary_learning.training import trainSAE
 
 # from datasets import load_dataset
 from dictionary_learning.utils import hf_dataset_to_generator
-
 from t2Interp.accessors import IOType, ModuleAccessor
 from t2Interp.blocks import SAEBlock
 from t2Interp.T2I import T2IModel

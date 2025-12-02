@@ -1,4 +1,4 @@
-.PHONY: help install install-dev clean test test-unit test-integration test-cov lint format check train infer
+.PHONY: help install install-dev clean test test-unit test-integration test-cov lint format check train infer pre-commit-install pre-commit
 
 # Default target
 help:
@@ -13,6 +13,8 @@ help:
 	@echo "  make lint            Run ruff linter"
 	@echo "  make format          Format code with ruff"
 	@echo "  make check           Run all checks (lint + format check)"
+	@echo "  make pre-commit-install  Install pre-commit hooks"
+	@echo "  make pre-commit      Run pre-commit on all files"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test            Run all tests"
@@ -47,6 +49,13 @@ format:
 
 check: lint
 	uv run ruff format --check .
+
+# Pre-commit hooks
+pre-commit-install:
+	uv run pre-commit install
+
+pre-commit:
+	uv run pre-commit run --all-files
 
 # Testing targets
 test:

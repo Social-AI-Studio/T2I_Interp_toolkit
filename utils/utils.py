@@ -799,7 +799,7 @@ def normalize_gt_batch(
         if all_tuple_tensor:
             # zip(*gt) transposes list-of-tuples
             heads = []
-            for t in zip(*gt):
+            for t in zip(*gt, strict=False):
                 heads.append(torch.stack(list(t), dim=0).to(device))
             return heads
 
