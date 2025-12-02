@@ -1,8 +1,8 @@
+import contextlib
+import gc
+
 import torch as t
 from transformers import AutoModelForCausalLM, AutoTokenizer
-import gc
-from tqdm import tqdm
-import contextlib
 
 
 class EarlyStopException(Exception):
@@ -62,9 +62,7 @@ def collect_activations(
     if activations_BLD is None:
         # This should ideally not happen if the hook worked and EarlyStopException was raised,
         # but handle it just in case.
-        raise RuntimeError(
-            "Failed to collect activations. The hook might not have run correctly."
-        )
+        raise RuntimeError("Failed to collect activations. The hook might not have run correctly.")
 
     return activations_BLD
 
@@ -104,9 +102,7 @@ class ActivationBuffer:
                 else:
                     d_submodule = submodule.out_features
             except:
-                raise ValueError(
-                    "d_submodule cannot be inferred and must be specified directly"
-                )
+                raise ValueError("d_submodule cannot be inferred and must be specified directly")
         self.activations = t.empty(0, d_submodule, device=device, dtype=model.dtype)
         self.read = t.zeros(0).bool()
 
@@ -148,9 +144,7 @@ class ActivationBuffer:
 
             # return a batch
             unreads = (~self.read).nonzero().squeeze()
-            idxs = unreads[
-                t.randperm(len(unreads), device=unreads.device)[: self.out_batch_size]
-            ]
+            idxs = unreads[t.randperm(len(unreads), device=unreads.device)[: self.out_batch_size]]
             self.read[idxs] = True
             return self.activations[idxs]
 
@@ -226,8 +220,8 @@ class ActivationBuffer:
             assert remaining_space > 0
             hidden_states = hidden_states[:remaining_space]
 
-            self.activations[current_idx : current_idx + len(hidden_states)] = (
-                hidden_states.to(self.device)
+            self.activations[current_idx : current_idx + len(hidden_states)] = hidden_states.to(
+                self.device
             )
             current_idx += len(hidden_states)
 

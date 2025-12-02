@@ -1,7 +1,8 @@
 """Pytest configuration and shared fixtures."""
+
+
 import pytest
 import torch
-from pathlib import Path
 
 
 @pytest.fixture
@@ -43,9 +44,3 @@ def mock_dataset():
             {"image": "path/to/image3.png", "race": "asian"},
         ],
     }
-
-
-
-
-
-

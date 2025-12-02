@@ -1,16 +1,22 @@
 from __future__ import annotations
-from typing import List, Dict, Optional, Any, Tuple, Sequence
-from utils.image_ops import _as_pil
-from PIL import Image
+
+import io
+from collections.abc import Sequence
+from typing import Any
+
 import numpy as np
-import wandb, io
-from utils.output import Output
+import wandb
+from PIL import Image
+
 from reporting.base import Reporter
+from utils.image_ops import _as_pil
+from utils.output import Output
+
 
 class WandbReporter(Reporter):
-    def __init__(self, init_kwargs: Dict):
+    def __init__(self, init_kwargs: dict):
         self.init_kwargs = init_kwargs
-        self.run: Optional[wandb.sdk.wandb_run.Run] = None
+        self.run: wandb.sdk.wandb_run.Run | None = None
 
     def start(self) -> None:
         self.run = wandb.init(**self.init_kwargs)
@@ -21,7 +27,7 @@ class WandbReporter(Reporter):
             self.run = wandb.init(**(self.init_kwargs or {}))
             return True
         return False
-    
+
     @staticmethod
     def _to_scalar(v) -> float:
         if isinstance(v, (list, tuple)) and v:
@@ -29,43 +35,49 @@ class WandbReporter(Reporter):
         return float(v)
 
     @staticmethod
-    def _metric_keys(outputs: List[Output]) -> List[str]:
+    def _metric_keys(outputs: list[Output]) -> list[str]:
         keys: set[str] = set()
         for o in outputs:
             if not getattr(o, "metrics", None):
                 continue
             keys.update(o.metrics.keys())
         return sorted(keys)
-    
-    def save_artifact(self, outputs: List[Output], artifact_name="all_images", artifact_type="dataset"):
+
+    def save_artifact(
+        self, outputs: list[Output], artifact_name="all_images", artifact_type="dataset"
+    ):
         def add_pil_to_artifact(pil: Image.Image, path_in_artifact: str):
             buf = io.BytesIO()
             pil.save(buf, format="PNG")
             buf.seek(0)
             with art.new_file(path_in_artifact, mode="wb") as f:
                 f.write(buf.getbuffer())
-        
+
         art = wandb.Artifact(artifact_name, type=artifact_type)
         # map (group, idx) -> artifact relative path
-        refs: Dict[Tuple[str,int], str] = {}
+        refs: dict[tuple[str, int], str] = {}
         for o in outputs:
             name = getattr(o, "name", None) or "sample"
             imgs: Sequence[Any] = o.preds if isinstance(o.preds, (list, tuple)) else [o.preds]
             for i, img in enumerate(imgs):
                 pil = _as_pil(img)
-                fn = f"{name}/{i:04d}.png"  
+                fn = f"{name}/{i:04d}.png"
                 add_pil_to_artifact(pil, fn)
                 refs[(name, i)] = fn
         wandb.log_artifact(art)
         return refs, art
 
-    def log_table(self,outputs: List[Output]|Output, add_links: bool = False, **kwargs):
+    def log_table(self, outputs: list[Output] | Output, add_links: bool = False, **kwargs):
         started_here = self._ensure_run()
         if not isinstance(outputs, list):
             outputs = [outputs]
         try:
             metric_cols = self._metric_keys(outputs)
-            cols = ["group", "idx", "baseline", "steered image"] + metric_cols + (["link"] if add_links else [])
+            cols = (
+                ["group", "idx", "baseline", "steered image"]
+                + metric_cols
+                + (["link"] if add_links else [])
+            )
             table = wandb.Table(columns=cols)
 
             link_map = {}
@@ -74,11 +86,13 @@ class WandbReporter(Reporter):
 
             for o in outputs:
                 name = getattr(o, "name", None) or "sample"
-                imgs: Sequence[Any] = o.preds 
+                imgs: Sequence[Any] = o.preds
                 baseline_imgs = o.baselines or []
-                metrics: Dict[str, List[float]] = o.metrics or {} 
+                metrics: dict[str, list[float]] = o.metrics or {}
                 for i, img in enumerate(imgs):
-                    pred_pil = _as_pil(img) if img is not None else Image.new("RGB", (512,512), (0,0,0))
+                    pred_pil = (
+                        _as_pil(img) if img is not None else Image.new("RGB", (512, 512), (0, 0, 0))
+                    )
                     pred_cell = wandb.Image(pred_pil, caption=f"{name} [{i}]")
                     if i < len(baseline_imgs) and baseline_imgs[i] is not None:
                         base_pil = _as_pil(baseline_imgs[i])
@@ -87,7 +101,7 @@ class WandbReporter(Reporter):
                         base_cell = ""  # blank cell is fine in W&B tables
                     # row = [name, i, wandb.Image(pred_pil, caption=f"{name} [{i}]")]
                     row = [name, i, base_cell, pred_cell]
-                    if len(metric_cols)==0 or len(metrics)==0:
+                    if len(metric_cols) == 0 or len(metrics) == 0:
                         table.add_data(*row)
                         continue
                     for k in metric_cols:
@@ -102,7 +116,9 @@ class WandbReporter(Reporter):
                         row.append(v)
                     if add_links:
                         # artifact paths render as clickable in the UI
-                        row.append(link_map.get((name, i), ""))  # e.g., "artifact_name/dir/file.png"
+                        row.append(
+                            link_map.get((name, i), "")
+                        )  # e.g., "artifact_name/dir/file.png"
                     table.add_data(*row)
 
             wandb.log({"report/master_table": table})
@@ -110,13 +126,14 @@ class WandbReporter(Reporter):
             if started_here:
                 self.finish()
 
-    def log_summaries(self, scalar_metrics: Dict[str, float]) -> None:
+    def log_summaries(self, scalar_metrics: dict[str, float]) -> None:
         pass
 
     def start_silent(self) -> None:
         """Convenience to suppress Diffusers progress bars if you have your own."""
         try:
             from diffusers.utils import logging as dlog
+
             dlog.disable_progress_bar()
         except Exception:
             pass

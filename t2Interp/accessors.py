@@ -1,15 +1,12 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from enum import Enum
-from loguru import logger
-from packaging import version
-from typing import Callable, Union, Type, Any, Optional
+from typing import Any, Union
+
 import torch as th
 from nnsight import Envoy
 from nnsight.intervention.tracing.globals import Object
-from typing import Literal
 
 TraceTensor = Union[th.Tensor, Object]
+
 
 class IOType(Enum):
     """Enum to specify input or output access"""
@@ -28,14 +25,13 @@ class ModuleAccessor:
         io_type: IOType | None,
         returns_tuple: bool = False,
     ):
-
         self.module = module
         self.attr_name = attr_name
         self.io_type = io_type
         self.returns_tuple = returns_tuple
         # self.module.io_type = io_type
         # self.module.returns_tuple = returns_tuple
-        
+
         # self.module = self.attach_io_property_to_envoy(
         #     module,
         #     kind=self.io_type if self.io_type else IOType.INPUT,
@@ -43,14 +39,12 @@ class ModuleAccessor:
         #     prop_name="value",
         #     overwrite=True,
         # )
-    
+
     @property
     def value(self) -> TraceTensor | Envoy:
         if self.io_type is None:
             # name = self.attr_name or "layers"
-            raise ValueError(
-                f"Cannot get the value of a module accessor."
-            )
+            raise ValueError("Cannot get the value of a module accessor.")
         if self.io_type.value == "input":
             target = self.module.input
         elif self.io_type.value == "output":
@@ -61,7 +55,7 @@ class ModuleAccessor:
             return target[0]
         else:
             return target
-        
+
     @value.setter
     def value(self, new):
         if self.io_type is None:
@@ -71,33 +65,33 @@ class ModuleAccessor:
         if kind == "input":
             if self.returns_tuple:
                 # keep any extra tuple elements intact
-                old = getattr(self.module, "input")
+                old = self.module.input
                 rest = tuple(old[1:]) if isinstance(old, tuple) and len(old) > 1 else ()
                 self.module.input = (new, *rest)
             else:
                 self.module.input = new
         elif kind == "output":
             if self.returns_tuple:
-                old = getattr(self.module, "output")
+                old = self.module.output
                 rest = tuple(old[1:]) if isinstance(old, tuple) and len(old) > 1 else ()
                 self.module.output = (new, *rest)
             else:
                 self.module.output = new
         else:
             raise ValueError(f"Invalid io_type: {self.io_type}")
-    
+
     @property
     def heads(self) -> int:
         return getattr(self.module, "heads", None)
-      
+
     @property
     def inputs(self) -> Any:
-        return self.module.inputs  
-    
+        return self.module.inputs
+
     @inputs.setter
     def inputs(self, new):
-        self.module.inputs=new
-     
+        self.module.inputs = new
+
     # def __call__(self) -> TraceTensor | Envoy:
     #     return self.value
 
@@ -147,10 +141,12 @@ class ModuleAccessor:
     #     attrs = {prop_name: property(fget, fset)}
     #     env.__class__ = type(Base.__name__, (Base,), attrs)
     #     return env
-        
+
+
 class AttentionAccessor:
     def __init__(self):
         pass
+
 
 # class AttentionAccessor:
 #     def __init__(self, model, rename_config: RenameConfig | None = None):

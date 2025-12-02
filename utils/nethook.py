@@ -222,9 +222,16 @@ def recursive_copy(x, clone=None, detach=None, retain_grad=None):
         return x
     # Only dicts, lists, and tuples (and subclasses) can be copied.
     if isinstance(x, dict):
-        return type(x)({k: recursive_copy(v, clone=clone, detach=detach, retain_grad=retain_grad) for k, v in x.items()})
+        return type(x)(
+            {
+                k: recursive_copy(v, clone=clone, detach=detach, retain_grad=retain_grad)
+                for k, v in x.items()
+            }
+        )
     elif isinstance(x, (list, tuple)):
-        return type(x)([recursive_copy(v, clone=clone, detach=detach, retain_grad=retain_grad) for v in x])
+        return type(x)(
+            [recursive_copy(v, clone=clone, detach=detach, retain_grad=retain_grad) for v in x]
+        )
     else:
         assert False, f"Unknown type {type(x)} cannot be broken into tensors."
 
@@ -270,9 +277,7 @@ def subsequence(
     )
 
 
-def hierarchical_subsequence(
-    sequential, first, last, after, upto, share_weights=False, depth=0
-):
+def hierarchical_subsequence(sequential, first, last, after, upto, share_weights=False, depth=0):
     """
     Recursive helper for subsequence() to support descent into dotted
     layer names.  In this helper, first, last, after, and upto are
@@ -291,9 +296,7 @@ def hierarchical_subsequence(
     # A = current level short name of A.
     # AN = full name for recursive descent if not innermost.
     (F, FN), (L, LN), (A, AN), (U, UN) = [
-        (d[depth], (None if len(d) == depth + 1 else d))
-        if d is not None
-        else (None, None)
+        (d[depth], (None if len(d) == depth + 1 else d)) if d is not None else (None, None)
         for d in [first, last, after, upto]
     ]
     for name, layer in sequential._modules.items():
@@ -427,9 +430,7 @@ def invoke_with_optional_args(fn, *args, **kwargs):
     used_kw = set()
     unmatched_pos = []
     used_pos = 0
-    defaulted_pos = len(argspec.args) - (
-        0 if not argspec.defaults else len(argspec.defaults)
-    )
+    defaulted_pos = len(argspec.args) - (0 if not argspec.defaults else len(argspec.defaults))
     # Pass positional args that match name first, then by position.
     for i, n in enumerate(argspec.args):
         if n in kwargs:
@@ -440,9 +441,7 @@ def invoke_with_optional_args(fn, *args, **kwargs):
             used_pos += 1
         else:
             unmatched_pos.append(len(pass_args))
-            pass_args.append(
-                None if i < defaulted_pos else argspec.defaults[i - defaulted_pos]
-            )
+            pass_args.append(None if i < defaulted_pos else argspec.defaults[i - defaulted_pos])
     # Fill unmatched positional args with unmatched keyword args in order.
     if len(unmatched_pos):
         for k, v in kwargs.items():
@@ -455,9 +454,7 @@ def invoke_with_optional_args(fn, *args, **kwargs):
                 break
         else:
             if unmatched_pos[0] < defaulted_pos:
-                unpassed = ", ".join(
-                    argspec.args[u] for u in unmatched_pos if u < defaulted_pos
-                )
+                unpassed = ", ".join(argspec.args[u] for u in unmatched_pos if u < defaulted_pos)
                 raise TypeError(f"{fn.__name__}() cannot be passed {unpassed}.")
     # Pass remaining kw args if they can be accepted.
     pass_kw = {

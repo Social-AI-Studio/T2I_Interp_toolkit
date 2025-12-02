@@ -1,25 +1,20 @@
-import torch as t
-from nnsight import LanguageModel
-import os
-import json
 import random
 
-from dictionary_learning.training import trainSAE
-from dictionary_learning.trainers.standard import StandardTrainer
-from dictionary_learning.trainers.top_k import TopKTrainer, AutoEncoderTopK
-from dictionary_learning.utils import (
-    hf_dataset_to_generator,
-    get_nested_folders,
-    load_dictionary,
-)
+import torch as t
 from dictionary_learning.buffer import ActivationBuffer
 from dictionary_learning.dictionary import (
     AutoEncoder,
-    GatedAutoEncoder,
-    AutoEncoderNew,
-    JumpReluAutoEncoder,
 )
 from dictionary_learning.evaluation import evaluate
+from dictionary_learning.trainers.standard import StandardTrainer
+from dictionary_learning.trainers.top_k import AutoEncoderTopK, TopKTrainer
+from dictionary_learning.training import trainSAE
+from dictionary_learning.utils import (
+    get_nested_folders,
+    hf_dataset_to_generator,
+    load_dictionary,
+)
+from nnsight import LanguageModel
 
 EXPECTED_RESULTS = {
     "AutoEncoderTopK": {

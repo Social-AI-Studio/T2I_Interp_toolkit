@@ -1,11 +1,12 @@
 import random
-from circuitsvis.activations import text_neuron_activations
-from einops import rearrange
-import torch as t
 from collections import namedtuple
-import umap
+
 import pandas as pd
 import plotly.express as px
+import torch as t
+import umap
+from circuitsvis.activations import text_neuron_activations
+from einops import rearrange
 
 
 def feature_effect(
@@ -82,7 +83,6 @@ def feature_effect(
 def examine_dimension(
     model, submodule, buffer, dictionary=None, max_length=128, n_inputs=512, dim_idx=None, k=30
 ):
-
     tracer_kwargs = {
         "scan": False,
         "validate": False,

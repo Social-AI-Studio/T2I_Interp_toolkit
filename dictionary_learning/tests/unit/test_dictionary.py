@@ -1,16 +1,14 @@
-import torch as t
 import pytest
+import torch as t
 from dictionary_learning.dictionary import (
     AutoEncoder,
-    GatedAutoEncoder,
     AutoEncoderNew,
+    GatedAutoEncoder,
     JumpReluAutoEncoder,
 )
 
 
-@pytest.mark.parametrize(
-    "sae_cls", [AutoEncoder, GatedAutoEncoder, JumpReluAutoEncoder]
-)
+@pytest.mark.parametrize("sae_cls", [AutoEncoder, GatedAutoEncoder, JumpReluAutoEncoder])
 def test_forward_equals_decode_encode(sae_cls: type) -> None:
     """Test that forward pass equals decode(encode(x)) for all SAE types"""
     batch_size = 4
@@ -67,9 +65,7 @@ def test_simple_gated_autoencoder() -> None:
 
     x = t.tensor([[2.0, -1.0]])
     encoded = sae.encode(x)
-    assert t.allclose(
-        encoded, t.tensor([[2.0, 0.0]])
-    )  # Only positive values pass through
+    assert t.allclose(encoded, t.tensor([[2.0, 0.0]]))  # Only positive values pass through
 
 
 def test_normalize_decoder() -> None:

@@ -1,9 +1,8 @@
+
 import torch as t
-from t2Interp.T2I import T2IModel 
-import gc
-from tqdm import tqdm
-from typing import Iterator, Optional, Union
-from dictionary_learning.buffer import NNsightActivationBuffer, tracer_kwargs
+from dictionary_learning.buffer import NNsightActivationBuffer
+
+from t2Interp.T2I import T2IModel
 
 # from config import DEBUG
 
@@ -11,6 +10,7 @@ from dictionary_learning.buffer import NNsightActivationBuffer, tracer_kwargs
 #     tracer_kwargs = {'scan' : True, 'validate' : True}
 # else:
 #     tracer_kwargs = {'scan' : False, 'validate' : False}
+
 
 class t2IActivationBuffer(NNsightActivationBuffer):
     """
@@ -30,11 +30,19 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         refresh_batch_size=512,  # size of batches in which to process the data when adding to buffer
         out_batch_size=512,  # size of batches in which to yield activations
         data_device="cpu",  # device on which to store the activations
-        denoiser_step = 0,  # steps to trace over
+        denoiser_step=0,  # steps to trace over
         **kwargs,
     ):
-        super().__init__(data=data,model=model,submodule=submodule,d_submodule=d_submodule,n_ctxs=n_ctxs,
-                         refresh_batch_size=refresh_batch_size,out_batch_size=out_batch_size,device=data_device)
+        super().__init__(
+            data=data,
+            model=model,
+            submodule=submodule,
+            d_submodule=d_submodule,
+            n_ctxs=n_ctxs,
+            refresh_batch_size=refresh_batch_size,
+            out_batch_size=out_batch_size,
+            device=data_device,
+        )
         self.activations = t.empty(0, d_submodule, device=data_device)
         self.read = t.zeros(0).bool()
         self.data = data
@@ -45,7 +53,11 @@ class t2IActivationBuffer(NNsightActivationBuffer):
         self.refresh_batch_size = refresh_batch_size
         self.out_batch_size = out_batch_size
         self.device = data_device
-        self.steps = denoiser_step if isinstance(denoiser_step, tuple) else (denoiser_step, denoiser_step + 1)
+        self.steps = (
+            denoiser_step
+            if isinstance(denoiser_step, tuple)
+            else (denoiser_step, denoiser_step + 1)
+        )
 
     def __iter__(self):
         return self
@@ -60,14 +72,14 @@ class t2IActivationBuffer(NNsightActivationBuffer):
             batch = [next(self.data) for _ in range(batch_size)]
             if type(batch[0]) == list:
                 batch = [item for sublist in batch for item in sublist]
-            return batch    
+            return batch
         except StopIteration:
             raise StopIteration("End of data stream reached")
 
     def _reshaped_activations(self, hidden_states):
         if isinstance(hidden_states, tuple):
             hidden_states = hidden_states[0]
-        hidden_states = hidden_states.view((hidden_states.shape[0],-1))
+        hidden_states = hidden_states.view((hidden_states.shape[0], -1))
         return hidden_states
 
     def __next__(self):
@@ -84,21 +96,19 @@ class t2IActivationBuffer(NNsightActivationBuffer):
             idxs = unreads[t.randperm(len(unreads), device=unreads.device)[: self.out_batch_size]]
             self.read[idxs] = True
             return self.activations[idxs]
-        
+
     def refresh(self):
         self.activations = self.activations[~self.read]
         # self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
         # while len(self.activations) < self.refresh_batch_size:
-        with t.no_grad(), self.model.generate(
-            self.token_batch()
-        ) as tracer:
-            with tracer.iter[self.steps[0]: self.steps[1]]:
+        with t.no_grad(), self.model.generate(self.token_batch()) as tracer:
+            with tracer.iter[self.steps[0] : self.steps[1]]:
                 hidden_states = self.submodule.value.save()
                 hidden_states = self._reshaped_activations(hidden_states)
                 self.activations = t.cat([self.activations, hidden_states.to(self.device)], dim=0)
                 tracer.stop()
         self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
-            
+
     @property
     def config(self):
         return {

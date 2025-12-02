@@ -1,26 +1,25 @@
-import torch as t
-from typing import Any, Optional, Type, Union, Optional
-from enum import Enum
-from dataclasses import dataclass, field, asdict
 import itertools
+from dataclasses import asdict, dataclass, field
+from enum import Enum
+from typing import Any
 
-from dictionary_learning.trainers.standard import StandardTrainer, StandardTrainerAprilUpdate
-from dictionary_learning.trainers.top_k import TopKTrainer, AutoEncoderTopK
-from dictionary_learning.trainers.batch_top_k import BatchTopKTrainer, BatchTopKSAE
-from dictionary_learning.trainers.gdm import GatedSAETrainer
-from dictionary_learning.trainers.p_anneal import PAnnealTrainer
-from dictionary_learning.trainers.jumprelu import JumpReluTrainer
-
-from dictionary_learning.trainers.matryoshka_batch_top_k import (
-    MatryoshkaBatchTopKTrainer,
-    MatryoshkaBatchTopKSAE,
-)
+import torch as t
 from dictionary_learning.dictionary import (
     AutoEncoder,
     GatedAutoEncoder,
-    AutoEncoderNew,
     JumpReluAutoEncoder,
 )
+from dictionary_learning.trainers.batch_top_k import BatchTopKSAE, BatchTopKTrainer
+from dictionary_learning.trainers.gdm import GatedSAETrainer
+from dictionary_learning.trainers.jumprelu import JumpReluTrainer
+from dictionary_learning.trainers.matryoshka_batch_top_k import (
+    MatryoshkaBatchTopKSAE,
+    MatryoshkaBatchTopKTrainer,
+)
+from dictionary_learning.trainers.p_anneal import PAnnealTrainer
+from dictionary_learning.trainers.standard import StandardTrainer, StandardTrainerAprilUpdate
+from dictionary_learning.trainers.top_k import AutoEncoderTopK, TopKTrainer
+
 # from dictionary_learning.trainers.sampledsae import (
 #     SampledActivationTrainer,
 #     SampledActivationSAE,
@@ -30,6 +29,7 @@ from dictionary_learning.dictionary import (
 
 
 DEBUG = False
+
 
 class TrainerType(Enum):
     STANDARD = "standard"
@@ -42,6 +42,7 @@ class TrainerType(Enum):
     Matryoshka_BATCH_TOP_K = "matryoshka_batch_top_k"
     # SAMPLED_SAE = "sampled_sae"
     # HYBRID_SAMPLED_TOP_K = "hybrid_sampled_top_k"
+
 
 @dataclass
 class LLMConfig:
@@ -65,12 +66,12 @@ num_tokens = 25_000_000  # 500 million tokens
 print(f"NOTE: Training on {num_tokens} tokens")
 
 eval_num_inputs = 200
-random_seeds = [0,1,2]
+random_seeds = [0, 1, 2]
 dictionary_widths = [2**16]
 
-WARMUP_STEPS =1000
+WARMUP_STEPS = 1000
 SPARSITY_WARMUP_STEPS = 5000
-DECAY_START_FRACTION = 0.8 
+DECAY_START_FRACTION = 0.8
 
 learning_rates = [3e-4]
 
@@ -100,12 +101,12 @@ class BaseTrainerConfig:
     layer: str
     lm_name: str
     submodule_name: str
-    trainer: Type[Any]
-    dict_class: Type[Any]
+    trainer: type[Any]
+    dict_class: type[Any]
     wandb_name: str
     warmup_steps: int
     steps: int
-    decay_start: Optional[int]
+    decay_start: int | None
 
 
 @dataclass
@@ -114,8 +115,8 @@ class StandardTrainerConfig(BaseTrainerConfig):
     seed: int
     lr: float
     l1_penalty: float
-    sparsity_warmup_steps: Optional[int]
-    resample_steps: Optional[int] = None
+    sparsity_warmup_steps: int | None
+    resample_steps: int | None = None
 
 
 @dataclass
@@ -124,7 +125,7 @@ class StandardNewTrainerConfig(BaseTrainerConfig):
     seed: int
     lr: float
     l1_penalty: float
-    sparsity_warmup_steps: Optional[int]
+    sparsity_warmup_steps: int | None
 
 
 @dataclass
@@ -133,12 +134,12 @@ class PAnnealTrainerConfig(BaseTrainerConfig):
     seed: int
     lr: float
     initial_sparsity_penalty: float
-    sparsity_warmup_steps: Optional[int]
+    sparsity_warmup_steps: int | None
     sparsity_function: str = "Lp^p"
     p_start: float = 1.0
     p_end: float = 0.2
     anneal_start: int = 10000
-    anneal_end: Optional[int] = None
+    anneal_end: int | None = None
     sparsity_queue_length: int = 10
     n_sparsity_updates: int = 10
 
@@ -152,6 +153,7 @@ class TopKTrainerConfig(BaseTrainerConfig):
     auxk_alpha: float = 1 / 32
     threshold_beta: float = 0.999
     threshold_start_step: int = 1000  # when to begin tracking the average threshold
+
 
 # @dataclass
 # class SampledActivationTrainerConfig(BaseTrainerConfig):
@@ -199,11 +201,10 @@ class MatryoshkaBatchTopKTrainerConfig(BaseTrainerConfig):
             ((1 / 2) + (1 / 32)),
         ]
     )
-    group_weights: Optional[list[float]] = None
+    group_weights: list[float] | None = None
     auxk_alpha: float = 1 / 32
     threshold_beta: float = 0.999
     threshold_start_step: int = 1000  # when to begin tracking the average threshold
-
 
 
 @dataclass
@@ -212,7 +213,7 @@ class GatedTrainerConfig(BaseTrainerConfig):
     seed: int
     lr: float
     l1_penalty: float
-    sparsity_warmup_steps: Optional[int]
+    sparsity_warmup_steps: int | None
 
 
 @dataclass
@@ -221,7 +222,7 @@ class JumpReluTrainerConfig(BaseTrainerConfig):
     seed: int
     lr: float
     target_l0: int
-    sparsity_warmup_steps: Optional[int]
+    sparsity_warmup_steps: int | None
     sparsity_penalty: float = 1.0
     bandwidth: float = 0.001
 
@@ -399,12 +400,12 @@ def sae_trainer_config(
     #         ridge_lambda = 0.01
     #         if method == "coreset":
     #             ridge_lambda = 0.01  # Default value for coreset
-                
+
     #         # Set appropriate sketching_size for coreset method
     #         sketching_size = None
     #         if method == "coreset":
     #             sketching_size = min(dict_size // 10, 100)
-                
+
     #         config = SampledActivationTrainerConfig(
     #             **base_config,
     #             trainer=SampledActivationTrainer,
@@ -419,7 +420,7 @@ def sae_trainer_config(
     #             wandb_name=f"SampledActivationTrainer-{method}-{model_name}-{submodule_name}",
     #         )
     #         trainer_configs.append(asdict(config))
-    
+
     # if TrainerType.HYBRID_SAMPLED_TOP_K.value == architecture:
     #     sampling_methods = ["leverage", "entropy", "uniform", "l2_norm"]
     #     l_multipliers = [3.0]

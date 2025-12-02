@@ -1,8 +1,10 @@
-import torch as th
-from t2Interp.accessors import ModuleAccessor, AttentionAccessor, IOType
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, List
+
+import torch as th
+
+from t2Interp.accessors import AttentionAccessor, IOType, ModuleAccessor
 from t2Interp.blocks import TransformerBlock
+
 
 @dataclass
 class T5Block(TransformerBlock):
@@ -14,43 +16,61 @@ class T5Block(TransformerBlock):
     - For attention, use a *single* AttentionAccessor shared by
       attn_in / attn_q / attn_k / attn_v / attn_out.
     """
-    up_a_in: Optional[ModuleAccessor] = None
-    up_a_out: Optional[ModuleAccessor] = None
-    up_b_in: Optional[ModuleAccessor] = None
-    up_b_out: Optional[ModuleAccessor] = None
-    down_in: Optional[ModuleAccessor] = None
-    down_out: Optional[ModuleAccessor] = None
+
+    up_a_in: ModuleAccessor | None = None
+    up_a_out: ModuleAccessor | None = None
+    up_b_in: ModuleAccessor | None = None
+    up_b_out: ModuleAccessor | None = None
+    down_in: ModuleAccessor | None = None
+    down_out: ModuleAccessor | None = None
 
     @property
-    def up_a_in(self) -> Optional[ModuleAccessor]:
+    def up_a_in(self) -> ModuleAccessor | None:
         return self.up_a_in
+
     @up_a_in.setter
-    def up_a_in(self, v: Optional[ModuleAccessor]): self.up_a_in = v
+    def up_a_in(self, v: ModuleAccessor | None):
+        self.up_a_in = v
+
     @property
-    def up_a_out(self) -> Optional[ModuleAccessor]:
+    def up_a_out(self) -> ModuleAccessor | None:
         return self.up_a_out
+
     @up_a_out.setter
-    def up_a_out(self, v: Optional[ModuleAccessor]): self.up_a_out = v
+    def up_a_out(self, v: ModuleAccessor | None):
+        self.up_a_out = v
+
     @property
-    def up_b_in(self) -> Optional[ModuleAccessor]:
+    def up_b_in(self) -> ModuleAccessor | None:
         return self.up_b_in
+
     @up_b_in.setter
-    def up_b_in(self, v: Optional[ModuleAccessor]): self.up_b_in = v
+    def up_b_in(self, v: ModuleAccessor | None):
+        self.up_b_in = v
+
     @property
-    def up_b_out(self) -> Optional[ModuleAccessor]:
+    def up_b_out(self) -> ModuleAccessor | None:
         return self.up_b_out
+
     @up_b_out.setter
-    def up_b_out(self, v: Optional[ModuleAccessor]): self.up_b_out = v
+    def up_b_out(self, v: ModuleAccessor | None):
+        self.up_b_out = v
+
     @property
-    def down_in(self) -> Optional[ModuleAccessor]:
+    def down_in(self) -> ModuleAccessor | None:
         return self.down_in
+
     @down_in.setter
-    def down_in(self, v: Optional[ModuleAccessor]): self.down_in = v
+    def down_in(self, v: ModuleAccessor | None):
+        self.down_in = v
+
     @property
-    def down_out(self) -> Optional[ModuleAccessor]:
+    def down_out(self) -> ModuleAccessor | None:
         return self.down_out
+
     @down_out.setter
-    def down_out(self, v: Optional[ModuleAccessor]): self.down_out = v
+    def down_out(self, v: ModuleAccessor | None):
+        self.down_out = v
 
     # ---- helpers ----
     def summary(self) -> str:
@@ -59,7 +79,8 @@ class T5Block(TransformerBlock):
             f"in={bool(self.in_)} | attn={bool(self.attention)} | "
             f"mlp_in={bool(self.mlp_in)} | mlp_out={bool(self.mlp_out)} | out={bool(self.out_)}"
         )
-  
+
+
 class T5Encoder:
     """
     Container of TransformerBlock objects with convenient getters/setters and
@@ -70,20 +91,25 @@ class T5Encoder:
       - get_block(i) / set_block(i, block)
       - summary()
     """
+
     def __init__(self, encoder: th.nn.Module):
-        self._blocks: Dict[int, TransformerBlock] = {
+        self._blocks: dict[int, TransformerBlock] = {
             i: TransformerBlock(
-                layer=i, in_=ModuleAccessor(encoder.layers[i],"t5_encoder_input",IOType.INPUT),
-                out_=ModuleAccessor(encoder.layers[i],"t5_encoder_output",IOType.OUTPUT),
-                attn_in=AttentionAccessor(encoder.layers[i].self_attn,"t5_encoder_attn",IOType.INPUT),
-                attn_out=AttentionAccessor(encoder.layers[i].self_attn,"t5_encoder_attn",IOType.OUTPUT),
-                mlp_in=ModuleAccessor(encoder.layers[i].mlp,"t5_encoder_mlp_in",IOType.INPUT),
-                mlp_out=ModuleAccessor(encoder.layers[i].mlp,"t5_encoder_mlp_out",IOType.OUTPUT),
-                ) for i in range(int(len(encoder.layers)))
+                layer=i,
+                in_=ModuleAccessor(encoder.layers[i], "t5_encoder_input", IOType.INPUT),
+                out_=ModuleAccessor(encoder.layers[i], "t5_encoder_output", IOType.OUTPUT),
+                attn_in=AttentionAccessor(
+                    encoder.layers[i].self_attn, "t5_encoder_attn", IOType.INPUT
+                ),
+                attn_out=AttentionAccessor(
+                    encoder.layers[i].self_attn, "t5_encoder_attn", IOType.OUTPUT
+                ),
+                mlp_in=ModuleAccessor(encoder.layers[i].mlp, "t5_encoder_mlp_in", IOType.INPUT),
+                mlp_out=ModuleAccessor(encoder.layers[i].mlp, "t5_encoder_mlp_out", IOType.OUTPUT),
+            )
+            for i in range(int(len(encoder.layers)))
         }
 
     def summary(self) -> str:
         lines = [blk.summary() for blk in self]
         return "\n".join(lines)
-        
-        

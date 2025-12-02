@@ -1,10 +1,14 @@
-from typing import Callable, Optional, Union, Tuple, List, Any, Dict
+from collections.abc import Callable
+from typing import Any
+
 import torch as t
-from t2Interp.accessors import ModuleAccessor, IOType
+
+from t2Interp.accessors import IOType
 from t2Interp.T2I import T2IModel
-from utils.utils import reshape_like, last_token_indices
+from utils.utils import last_token_indices, reshape_like
 
 Tensor = t.Tensor
+
 
 def _to_dtype_device(x: Tensor, ref: Tensor) -> Tensor:
     # keep gradients, but match dtype/device for numerical safety
@@ -13,6 +17,7 @@ def _to_dtype_device(x: Tensor, ref: Tensor) -> Tensor:
     if x.device != ref.device:
         x = x.to(ref.device)
     return x
+
 
 # def reshape_like(vec, x):
 #     """
@@ -35,13 +40,14 @@ class OutputAlterHook:
     Supports optional step gating with an external call_counter.
     If `guidance=True`, applies policy only to the second half of batch (CFG cond branch).
     """
+
     def __init__(
         self,
         policy: Callable[[Tensor, t.nn.Module], Tensor],
-        call_counter: Optional[dict] = None,
-        step_index: Optional[int] = None,     # apply only on the Nth call (0-index)
-        device: Optional[str] = None,
-        guidance: bool = True,               # NEW: apply only to latter half if CFG duplication is used
+        call_counter: dict | None = None,
+        step_index: int | None = None,  # apply only on the Nth call (0-index)
+        device: str | None = None,
+        guidance: bool = True,  # NEW: apply only to latter half if CFG duplication is used
     ):
         self.policy = policy
         self.call_counter = call_counter if call_counter is not None else {"n": 0}
@@ -61,7 +67,7 @@ class OutputAlterHook:
             B2 = x.size(0)
             B = B2 // 2
             uncond = x[:B]
-            cond   = x[B:]
+            cond = x[B:]
             cond_new = self.policy(cond, module)
             out = t.cat([uncond, cond_new], dim=0)
         else:
@@ -109,17 +115,19 @@ class OutputAlterHook:
             self._handle.remove()
             self._handle = None
 
+
 class InputAlterHook:
     """
     Modifies the **first positional tensor input** of a module.
     If your module's meaningful input isn't the first tensor, adapt the selection logic.
     """
+
     def __init__(
         self,
         policy: Callable[[Tensor, t.nn.Module], Tensor],
-        call_counter: Optional[dict] = None,
-        step_index: Optional[int] = None,
-        device: Optional[str] = None,
+        call_counter: dict | None = None,
+        step_index: int | None = None,
+        device: str | None = None,
     ):
         self.policy = policy
         self.call_counter = call_counter if call_counter is not None else {"n": 0}
@@ -155,11 +163,19 @@ class InputAlterHook:
         target = new_inputs[idx]
         if isinstance(target, t.Tensor):
             new_t = self.policy(target, module)
-        elif isinstance(target, (tuple, list)) and len(target) > 0 and isinstance(target[0], t.Tensor):
+        elif (
+            isinstance(target, (tuple, list))
+            and len(target) > 0
+            and isinstance(target[0], t.Tensor)
+        ):
             # modify only the first tensor inside this nested structure
             head = target[0]
             new_head = self.policy(head, module)
-            target = (new_head,) + tuple(target[1:]) if isinstance(target, tuple) else [new_head] + list(target[1:])
+            target = (
+                (new_head,) + tuple(target[1:])
+                if isinstance(target, tuple)
+                else [new_head] + list(target[1:])
+            )
             new_t = target
         else:
             return None
@@ -178,7 +194,8 @@ class InputAlterHook:
             self._handle.remove()
             self._handle = None
 
-def scale_policy(factor: Union[float, Tensor]) -> Callable[[Tensor, t.nn.Module], Tensor]:
+
+def scale_policy(factor: float | Tensor) -> Callable[[Tensor, t.nn.Module], Tensor]:
     """
     factor: float or tensor. If tensor, it will be broadcast to x.
     """
@@ -188,50 +205,63 @@ def scale_policy(factor: Union[float, Tensor]) -> Callable[[Tensor, t.nn.Module]
     def _f(x: Tensor, module: t.nn.Module) -> Tensor:
         f = reshape_like(factor, x)
         return x * f
+
     return _f
 
-def add_vector_policy(vec: Tensor, *, channel_dim: Optional[int] = None) -> Callable[[Tensor, t.nn.Module], Tensor]:
+
+def add_vector_policy(
+    vec: Tensor, *, channel_dim: int | None = None
+) -> Callable[[Tensor, t.nn.Module], Tensor]:
     """
     vec: tensor to add; can be 1D (e.g., channels) or any shape broadcastable to x.
     channel_dim: set if you want to force which dimension the 1D vec maps to.
     """
+
     def _f(x: Tensor, module: t.nn.Module) -> Tensor:
         v = reshape_like(vec, x)
         return x + v
+
     return _f
 
+
 def replace_policy(
-    value: Union[Tensor, Callable[[Tensor, t.nn.Module], Tensor]]
+    value: Tensor | Callable[[Tensor, t.nn.Module], Tensor],
 ) -> Callable[[Tensor, t.nn.Module], Tensor]:
     """
-    value: 
+    value:
       - Tensor: used directly (broadcast to x if needed)
       - Callable: called as value(x, module) -> Tensor
     """
+
     def _f(x: Tensor, module: t.nn.Module) -> Tensor:
         new = value(x, module) if callable(value) else value
         new = reshape_like(new, x)
         return new
+
     return _f
+
 
 class BaseCaptureHook:
     """
     Base class with step gating & reduce.
     Stores the most recent captured tensor in self.last (on chosen device).
     """
+
     def __init__(
         self,
         *,
-        call_counter: Optional[dict] = None,
-        denoiser_steps: Optional[list[int]] = [0],  # 0-based call index; None = last (handled by caller by running once per step) or "any"
-        device: Optional[Union[str, t.device]] = None,
-        reduce_fn: Optional[Callable[[Tensor], Tensor]] = None,
+        call_counter: dict | None = None,
+        denoiser_steps: list[int] | None = [
+            0
+        ],  # 0-based call index; None = last (handled by caller by running once per step) or "any"
+        device: str | t.device | None = None,
+        reduce_fn: Callable[[Tensor], Tensor] | None = None,
     ):
         self.call_counter = call_counter if call_counter is not None else {"n": 0}
         self.denoiser_steps = denoiser_steps
         self.device = t.device(device) if device is not None else None
         self.reduce_fn = reduce_fn
-        self.last: Optional[Tensor] = None
+        self.last: Tensor | None = None
 
     def _gate(self) -> bool:
         n = self.call_counter["n"]
@@ -240,7 +270,11 @@ class BaseCaptureHook:
 
     def _post(self, x: Tensor) -> None:
         if self.reduce_fn is not None:
-            x = self.reduce_fn(x, self.last_token_indices) if self.last_token_indices is not None else self.reduce_fn(x)
+            x = (
+                self.reduce_fn(x, self.last_token_indices)
+                if self.last_token_indices is not None
+                else self.reduce_fn(x)
+            )
         if self.device is not None:
             x = x.to(self.device)
         self.last = x
@@ -251,12 +285,13 @@ class CaptureOutputHook(BaseCaptureHook):
     Captures the (tensor) output of a module.
     Handles: Tensor, (Tensor, ...), and objects with `.sample`.
     """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._handle = None
         self.last_token_indices = None
 
-    def _extract(self, output: Any) -> Optional[Tensor]:
+    def _extract(self, output: Any) -> Tensor | None:
         val = output
         if isinstance(val, (tuple, list)) and len(val) > 0:
             val = val[0]
@@ -272,7 +307,7 @@ class CaptureOutputHook(BaseCaptureHook):
         tensor = self._extract(output)
         if tensor is not None:
             self._post(tensor)
-            
+
         return None  # capture-only
 
     def register(self, module: t.nn.Module):
@@ -289,12 +324,13 @@ class CaptureInputHook(BaseCaptureHook):
     Captures the first tensor-like positional input of a module.
     (You can customize the selection logic if your target arg differs.)
     """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._handle = None
         self.last_token_indices = None
 
-    def _pick(self, inputs: Any) -> Optional[Tensor]:
+    def _pick(self, inputs: Any) -> Tensor | None:
         if not isinstance(inputs, tuple) or len(inputs) == 0:
             return None
         val = inputs[0]
@@ -321,56 +357,54 @@ class CaptureInputHook(BaseCaptureHook):
             self._handle = None
 
 
+def _prep_prompts_images(batch: list[Any] | dict[str, Any]) -> dict[str, Any]:
+    """
+    Accepts:
+      - list of mixed samples (str prompts and/or images tensors/PIL) -> split into dict
+      - dict with keys 'prompt' and/or 'image' -> used directly
+    Ensures at least an empty prompt list if only images are provided.
+    """
+    # Case 1: batch is a dict already
+    if isinstance(batch, dict):
+        prompts = batch.get("prompt", None)
+        images = batch.get("image", None)
 
-def _prep_prompts_images(
-        batch: Union[List[Any], Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        Accepts:
-          - list of mixed samples (str prompts and/or images tensors/PIL) -> split into dict
-          - dict with keys 'prompt' and/or 'image' -> used directly
-        Ensures at least an empty prompt list if only images are provided.
-        """
-        # Case 1: batch is a dict already
-        if isinstance(batch, dict):
-            prompts = batch.get("prompt", None)
-            images = batch.get("image", None)
-
-            # Normalize prompts
-            if prompts is None:
-                if images is not None:
-                    bs = len(images) if hasattr(images, "__len__") else 1
-                    prompts = [""] * bs
-            elif isinstance(prompts, str):
-                prompts = [prompts]
-
-            out = {}
-            if prompts is not None:
-                out["prompt"] = prompts
+        # Normalize prompts
+        if prompts is None:
             if images is not None:
-                out["image"] = images
-            return out
+                bs = len(images) if hasattr(images, "__len__") else 1
+                prompts = [""] * bs
+        elif isinstance(prompts, str):
+            prompts = [prompts]
 
-        # Case 2: batch is a list of mixed entries
-        prompts: List[str] = []
-        images: List[Any] = []
-        for x in batch:
-            if isinstance(x, str):
-                prompts.append(x)
-            else:
-                images.append(x)
-
-        if not prompts and images:
-            prompts = [""] * len(images)
-
-        out: Dict[str, Any] = {}
-        if prompts:
+        out = {}
+        if prompts is not None:
             out["prompt"] = prompts
-        if images:
+        if images is not None:
             out["image"] = images
         return out
 
-def flatten_batch(acts: Tensor, device: Optional[Union[str, t.device]] = None) -> Tensor:
+    # Case 2: batch is a list of mixed entries
+    prompts: list[str] = []
+    images: list[Any] = []
+    for x in batch:
+        if isinstance(x, str):
+            prompts.append(x)
+        else:
+            images.append(x)
+
+    if not prompts and images:
+        prompts = [""] * len(images)
+
+    out: dict[str, Any] = {}
+    if prompts:
+        out["prompt"] = prompts
+    if images:
+        out["image"] = images
+    return out
+
+
+def flatten_batch(acts: Tensor, device: str | t.device | None = None) -> Tensor:
     """
     (B, ...) -> (B, -1)
     """
@@ -385,35 +419,37 @@ def flatten_batch(acts: Tensor, device: Optional[Union[str, t.device]] = None) -
         acts = acts.to(device)
     return acts.view(B, -1)
 
-def _register(module: t.nn.Module, io_type:IOType, fn: Callable):
+
+def _register(module: t.nn.Module, io_type: IOType, fn: Callable):
     if io_type == IOType.INPUT:
         return module.register_forward_pre_hook(fn)
     else:
         return module.register_forward_hook(fn)
 
+
 def run_with_hook(
-    model:T2IModel,
+    model: T2IModel,
     batch,
     module: t.nn.Module,
-    hook_obj: Any, 
+    hook_obj: Any,
     io_type: IOType,
     **pipe_kwargs,
-    ) -> Any:
-        """
-        Register hook_obj.hook on `module`, run `runner()`, then remove the hook.
-        Returns (hook_obj, result).
-        """
-        handle = _register(module, io_type, hook_obj.hook)
-        try:
-            io = _prep_prompts_images(batch)
-            if io.get("prompt", None) is not None:
-                prompt_inputs = io["prompt"]
-                hook_obj.last_token_indices = last_token_indices(model.tokenizer, prompt_inputs)
-                
-            # If all prompts empty, avoid CFG pulling toward text by mistake
-            if "prompt" in io and isinstance(io["prompt"], list) and all(p == "" for p in io["prompt"]):
-                pipe_kwargs.setdefault("guidance_scale", 1.0)
-            result = model.pipeline(**io, **pipe_kwargs)
-        finally:
-            handle.remove()
-        return result
+) -> Any:
+    """
+    Register hook_obj.hook on `module`, run `runner()`, then remove the hook.
+    Returns (hook_obj, result).
+    """
+    handle = _register(module, io_type, hook_obj.hook)
+    try:
+        io = _prep_prompts_images(batch)
+        if io.get("prompt", None) is not None:
+            prompt_inputs = io["prompt"]
+            hook_obj.last_token_indices = last_token_indices(model.tokenizer, prompt_inputs)
+
+        # If all prompts empty, avoid CFG pulling toward text by mistake
+        if "prompt" in io and isinstance(io["prompt"], list) and all(p == "" for p in io["prompt"]):
+            pipe_kwargs.setdefault("guidance_scale", 1.0)
+        result = model.pipeline(**io, **pipe_kwargs)
+    finally:
+        handle.remove()
+    return result

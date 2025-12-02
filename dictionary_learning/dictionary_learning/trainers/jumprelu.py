@@ -3,15 +3,14 @@ from collections import namedtuple
 import torch
 import torch.autograd as autograd
 from torch import nn
-from typing import Optional
 
-from ..dictionary import Dictionary, JumpReluAutoEncoder
+from ..dictionary import JumpReluAutoEncoder
 from ..trainers.trainer import (
     SAETrainer,
     get_lr_schedule,
     get_sparsity_warmup_fn,
-    set_decoder_norm_to_unit_norm,
     remove_gradient_parallel_to_decoder_directions,
+    set_decoder_norm_to_unit_norm,
 )
 
 
@@ -80,18 +79,18 @@ class JumpReluTrainer(nn.Module, SAETrainer):
         layer: int,
         lm_name: str,
         dict_class=JumpReluAutoEncoder,
-        seed: Optional[int] = None,
+        seed: int | None = None,
         # TODO: What's the default lr use in the paper?
         lr: float = 7e-5,
         bandwidth: float = 0.001,
         sparsity_penalty: float = 1.0,
         warmup_steps: int = 1000,  # lr warmup period at start of training and after each resample
-        sparsity_warmup_steps: Optional[int] = 2000,  # sparsity warmup period at start of training
-        decay_start: Optional[int] = None,  # decay learning rate after this many steps
+        sparsity_warmup_steps: int | None = 2000,  # sparsity warmup period at start of training
+        decay_start: int | None = None,  # decay learning rate after this many steps
         target_l0: float = 20.0,
         device: str = "cpu",
         wandb_name: str = "JumpRelu",
-        submodule_name: Optional[str] = None,
+        submodule_name: str | None = None,
     ):
         super().__init__()
 

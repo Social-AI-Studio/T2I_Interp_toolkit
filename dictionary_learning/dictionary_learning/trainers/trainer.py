@@ -1,6 +1,7 @@
-from typing import Optional, Callable
-import torch
+from collections.abc import Callable
+
 import einops
+import torch
 
 
 class SAETrainer:
@@ -114,9 +115,9 @@ def remove_gradient_parallel_to_decoder_directions(
 def get_lr_schedule(
     total_steps: int,
     warmup_steps: int,
-    decay_start: Optional[int] = None,
-    resample_steps: Optional[int] = None,
-    sparsity_warmup_steps: Optional[int] = None,
+    decay_start: int | None = None,
+    resample_steps: int | None = None,
+    sparsity_warmup_steps: int | None = None,
 ) -> Callable[[int], float]:
     """
     Creates a learning rate schedule function with linear warmup followed by an optional decay phase.
@@ -170,7 +171,7 @@ def get_lr_schedule(
 
 
 def get_sparsity_warmup_fn(
-    total_steps: int, sparsity_warmup_steps: Optional[int] = None
+    total_steps: int, sparsity_warmup_steps: int | None = None
 ) -> Callable[[int], float]:
     """
     Return a function that computes a scale factor for sparsity penalty at a given step.

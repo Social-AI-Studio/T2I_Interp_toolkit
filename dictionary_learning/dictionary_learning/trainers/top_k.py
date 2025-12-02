@@ -3,19 +3,17 @@ Implements the SAE training scheme from https://arxiv.org/abs/2406.04093.
 Significant portions of this code have been copied from https://github.com/EleutherAI/sae/blob/main/sae
 """
 
-import einops
+from collections import namedtuple
+
 import torch as t
 import torch.nn as nn
-from collections import namedtuple
-from typing import Optional
 
-from ..config import DEBUG
 from ..dictionary import Dictionary
 from ..trainers.trainer import (
     SAETrainer,
     get_lr_schedule,
-    set_decoder_norm_to_unit_norm,
     remove_gradient_parallel_to_decoder_directions,
+    set_decoder_norm_to_unit_norm,
 )
 
 
@@ -81,19 +79,19 @@ class AutoEncoderTopK(Dictionary, nn.Module):
         self.b_dec = nn.Parameter(t.zeros(activation_dim))
 
     def encode(
-        self, x: t.Tensor, return_topk: bool = False, use_threshold: bool = False, remove_bias = False
+        self, x: t.Tensor, return_topk: bool = False, use_threshold: bool = False, remove_bias=False
     ):
         if remove_bias:
-            post_relu_feat_acts_BF = nn.functional.relu(self.encoder(x - self.b_dec)) 
+            post_relu_feat_acts_BF = nn.functional.relu(self.encoder(x - self.b_dec))
         else:
-            post_relu_feat_acts_BF = nn.functional.relu(self.encoder(x)) 
-                
+            post_relu_feat_acts_BF = nn.functional.relu(self.encoder(x))
+
         if use_threshold:
-            encoded_acts_BF = post_relu_feat_acts_BF * (
-                post_relu_feat_acts_BF > self.threshold
-            )
+            encoded_acts_BF = post_relu_feat_acts_BF * (post_relu_feat_acts_BF > self.threshold)
             if return_topk:
-                post_topk = post_relu_feat_acts_BF.topk(self.k if self.k is int else self.k.item(), sorted=False, dim=-1)
+                post_topk = post_relu_feat_acts_BF.topk(
+                    self.k if self.k is int else self.k.item(), sorted=False, dim=-1
+                )
                 return (
                     encoded_acts_BF,
                     post_topk.values,
@@ -103,16 +101,16 @@ class AutoEncoderTopK(Dictionary, nn.Module):
             else:
                 return encoded_acts_BF
 
-        post_topk = post_relu_feat_acts_BF.topk(self.k if self.k is int else self.k.item(), sorted=False, dim=-1)
+        post_topk = post_relu_feat_acts_BF.topk(
+            self.k if self.k is int else self.k.item(), sorted=False, dim=-1
+        )
 
         # We can't split immediately due to nnsight
         tops_acts_BK = post_topk.values
         top_indices_BK = post_topk.indices
 
         buffer_BF = t.zeros_like(post_relu_feat_acts_BF)
-        encoded_acts_BF = buffer_BF.scatter_(
-            dim=-1, index=top_indices_BK, src=tops_acts_BK
-        )
+        encoded_acts_BF = buffer_BF.scatter_(dim=-1, index=top_indices_BK, src=tops_acts_BK)
 
         if return_topk:
             return encoded_acts_BF, tops_acts_BK, top_indices_BK, post_relu_feat_acts_BF
@@ -136,7 +134,7 @@ class AutoEncoderTopK(Dictionary, nn.Module):
         if self.threshold >= 0:
             self.threshold *= scale
 
-    def from_pretrained(path, k: Optional[int] = None, device=None):
+    def from_pretrained(path, k: int | None = None, device=None):
         """
         Load a pretrained autoencoder from a file.
         """
@@ -169,17 +167,17 @@ class TopKTrainer(SAETrainer):
         layer: int,
         lm_name: str,
         dict_class: type = AutoEncoderTopK,
-        lr: Optional[float] = None,
+        lr: float | None = None,
         auxk_alpha: float = 1 / 32,  # see Appendix A.2
         warmup_steps: int = 1000,
-        decay_start: Optional[int] = None,  # when does the lr decay start
+        decay_start: int | None = None,  # when does the lr decay start
         threshold_beta: float = 0.999,
         threshold_start_step: int = 1000,
-        k_anneal_steps: Optional[int] = None,
-        seed: Optional[int] = None,
-        device: Optional[str] = None,
+        k_anneal_steps: int | None = None,
+        seed: int | None = None,
+        device: str | None = None,
         wandb_name: str = "AutoEncoderTopK",
-        submodule_name: Optional[str] = None,
+        submodule_name: str | None = None,
     ):
         super().__init__(seed)
 
@@ -230,24 +228,20 @@ class TopKTrainer(SAETrainer):
         self.pre_norm_auxk_loss = -1
 
         # Optimizer and scheduler
-        self.optimizer = t.optim.Adam(
-            self.ae.parameters(), lr=self.lr, betas=(0.9, 0.999)
-        )
+        self.optimizer = t.optim.Adam(self.ae.parameters(), lr=self.lr, betas=(0.9, 0.999))
 
         lr_fn = get_lr_schedule(steps, warmup_steps, decay_start=decay_start)
 
         self.scheduler = t.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lr_fn)
 
     def update_annealed_k(
-        self, step: int, activation_dim: int, k_anneal_steps: Optional[int] = None
+        self, step: int, activation_dim: int, k_anneal_steps: int | None = None
     ) -> None:
         """Update k buffer in-place with annealed value"""
         if k_anneal_steps is None:
             return
 
-        assert 0 <= k_anneal_steps < self.steps, (
-            "k_anneal_steps must be >= 0 and < steps."
-        )
+        assert 0 <= k_anneal_steps < self.steps, "k_anneal_steps must be >= 0 and < steps."
         # self.k is the target k set for the trainer, not the dictionary's current k
         assert activation_dim > self.k, "activation_dim must be greater than k"
 
@@ -271,28 +265,19 @@ class TopKTrainer(SAETrainer):
             auxk_acts, auxk_indices = auxk_latents.topk(k_aux, sorted=False)
 
             auxk_buffer_BF = t.zeros_like(post_relu_acts_BF)
-            auxk_acts_BF = auxk_buffer_BF.scatter_(
-                dim=-1, index=auxk_indices, src=auxk_acts
-            )
+            auxk_acts_BF = auxk_buffer_BF.scatter_(dim=-1, index=auxk_indices, src=auxk_acts)
 
             # Note: decoder(), not decode(), as we don't want to apply the bias
             x_reconstruct_aux = self.ae.decoder(auxk_acts_BF)
             l2_loss_aux = (
-                (residual_BD.float() - x_reconstruct_aux.float())
-                .pow(2)
-                .sum(dim=-1)
-                .mean()
+                (residual_BD.float() - x_reconstruct_aux.float()).pow(2).sum(dim=-1).mean()
             )
 
             self.pre_norm_auxk_loss = l2_loss_aux
 
             # normalization from OpenAI implementation: https://github.com/openai/sparse_autoencoder/blob/main/sparse_autoencoder/kernels.py#L614
-            residual_mu = residual_BD.mean(dim=0)[None, :].broadcast_to(
-                residual_BD.shape
-            )
-            loss_denom = (
-                (residual_BD.float() - residual_mu.float()).pow(2).sum(dim=-1).mean()
-            )
+            residual_mu = residual_BD.mean(dim=0)[None, :].broadcast_to(residual_BD.shape)
+            loss_denom = (residual_BD.float() - residual_mu.float()).pow(2).sum(dim=-1).mean()
             normalized_auxk_loss = l2_loss_aux / loss_denom
 
             return normalized_auxk_loss.nan_to_num(0.0)
@@ -345,9 +330,7 @@ class TopKTrainer(SAETrainer):
 
         l2_loss = e.pow(2).sum(dim=-1).mean()
         auxk_loss = (
-            self.get_auxiliary_loss(e.detach(), post_relu_acts_BF)
-            if self.auxk_alpha > 0
-            else 0
+            self.get_auxiliary_loss(e.detach(), post_relu_acts_BF) if self.auxk_alpha > 0 else 0
         )
 
         loss = l2_loss + self.auxk_alpha * auxk_loss

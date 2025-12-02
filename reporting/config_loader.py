@@ -1,21 +1,28 @@
 from __future__ import annotations
-from pathlib import Path
-from typing import Any, Dict, Optional
-import os
-import json
 
-def _read_yaml(p: Path) -> Dict[str, Any]:
+import json
+import os
+from pathlib import Path
+from typing import Any
+
+
+def _read_yaml(p: Path) -> dict[str, Any]:
     import yaml  # pip install pyyaml
+
     return yaml.safe_load(p.read_text()) or {}
 
-def _read_toml(p: Path) -> Dict[str, Any]:
+
+def _read_toml(p: Path) -> dict[str, Any]:
     import tomllib  # py3.11+
+
     return tomllib.loads(p.read_text())
 
-def _read_json(p: Path) -> Dict[str, Any]:
+
+def _read_json(p: Path) -> dict[str, Any]:
     return json.loads(p.read_text())
 
-def load_config(path: str | Path) -> Dict[str, Any]:
+
+def load_config(path: str | Path) -> dict[str, Any]:
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(p)
@@ -31,16 +38,17 @@ def load_config(path: str | Path) -> Dict[str, Any]:
     # Optional: environment variable overrides (e.g., WANDB_PROJECT, WANDB_MODE)
     w = cfg.setdefault("wandb", {})
     w["project"] = os.getenv("WANDB_PROJECT", w.get("project"))
-    w["entity"]  = os.getenv("WANDB_ENTITY",  w.get("entity"))
-    w["mode"]    = os.getenv("WANDB_MODE",    w.get("mode", "online"))
+    w["entity"] = os.getenv("WANDB_ENTITY", w.get("entity"))
+    w["mode"] = os.getenv("WANDB_MODE", w.get("mode", "online"))
     # You can extend with run name, tags, etc., as needed.
 
     return cfg
 
-def wandb_init_kwargs(cfg: Dict[str, Any]) -> Dict[str, Any]:
+
+def wandb_init_kwargs(cfg: dict[str, Any]) -> dict[str, Any]:
     """Extract a dict of kwargs for wandb.init from the loaded config."""
     w = cfg.get("wandb", {})
-    kw: Dict[str, Any] = {}
+    kw: dict[str, Any] = {}
     if w.get("project") is None:
         raise ValueError("wandb.project is required")
     kw["project"] = w["project"]

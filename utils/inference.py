@@ -1,24 +1,33 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Callable, Dict, Any, Protocol, Optional, Sequence, Tuple, List
-import torch
-from utils.output import Output
-from utils. metrics import MetricBase
-import inspect
-from utils.runningstats import TrainUpdate, Updater, WandbUpdater, SimpleUpdater, SimpleFileLogger, Update
 
-InferenceFn = Callable[[torch.nn.Module, Dict[str, Any]], Dict[str, Any]]
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+import torch
+
+from utils.metrics import MetricBase
+from utils.output import Output
+from utils.runningstats import (
+    Updater,
+)
+
+InferenceFn = Callable[[torch.nn.Module, dict[str, Any]], dict[str, Any]]
+
 
 @dataclass
 class InferenceSpec:
-    inference_fn: InferenceFn 
-    stats_updaters: Optional[Sequence[Updater]] = field(default_factory=list[Updater])
-    metric_fns: Optional[Sequence[MetricBase.compute]] = field(default_factory=list[MetricBase.compute])
-    callback_fns: Optional[Sequence[Callable]] = field(default_factory=list[Callable])         
-    name: Optional[str] = None
-    args: Tuple[Any, ...] = ()
-    kwargs: Dict[str, Any] = field(default_factory=dict)
-    
+    inference_fn: InferenceFn
+    stats_updaters: Sequence[Updater] | None = field(default_factory=list[Updater])
+    metric_fns: Sequence[MetricBase.compute] | None = field(
+        default_factory=list[MetricBase.compute]
+    )
+    callback_fns: Sequence[Callable] | None = field(default_factory=list[Callable])
+    name: str | None = None
+    args: tuple[Any, ...] = ()
+    kwargs: dict[str, Any] = field(default_factory=dict)
+
+
 # class Inference:
 #     # """
 #     # A thin wrapper around HF Trainer that calls a custom inference function
@@ -52,7 +61,7 @@ class InferenceSpec:
 #                 assert isinstance(e.value, Output), f"Expected Output, got {type(e.value)}"
 #                 out = e.value
 #             except TypeError as e:
-#                 out = e.value    
+#                 out = e.value
 #             except Exception as e:
 #                 raise e
 #             finally:
@@ -71,7 +80,7 @@ class InferenceSpec:
 #             out.name = getattr(spec, "name", getattr(out, "name", None))
 
 #         return out
-    
+
 
 class Inference:
     # """
@@ -79,7 +88,7 @@ class Inference:
     # to produce predictions. We override prediction_step so Trainer handles
     # batching/DDP/AMP/gathering, while you provide the forward logic.
     # """
-    def __init__(self, inference_spec: InferenceSpec,*args, **kw):
+    def __init__(self, inference_spec: InferenceSpec, *args, **kw):
         super().__init__(*args, **kw)
         self.inference_spec = inference_spec
 
@@ -87,15 +96,13 @@ class Inference:
         # Move inputs to the right device the Trainer way
         # inputs = self._prepare_inputs(inputs)
         with torch.no_grad():
-            out: Output = self.inference_spec.inference_fn(
-                **self.inference_spec.kwargs
-            )
-            if len(self.inference_spec.metric_fns)>0:
+            out: Output = self.inference_spec.inference_fn(**self.inference_spec.kwargs)
+            if len(self.inference_spec.metric_fns) > 0:
                 for cb in self.inference_spec.metric_fns:
                     cb(out, **self.inference_spec.kwargs)
-                    
-            if len(self.inference_spec.callback_fns)>0:
+
+            if len(self.inference_spec.callback_fns) > 0:
                 for cb in self.inference_spec.callback_fns:
-                    cb(out, **self.inference_spec.kwargs)        
-            out.name = self.inference_spec.name        
-        return out  
+                    cb(out, **self.inference_spec.kwargs)
+            out.name = self.inference_spec.name
+        return out
