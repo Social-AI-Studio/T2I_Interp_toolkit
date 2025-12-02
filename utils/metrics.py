@@ -37,9 +37,9 @@ class CLIPScore(MetricBase):
     Cosine similarity between a GT image and each candidate image using CLIP image encoder.
     Uses Hugging Face Transformers checkpoint names, e.g. 'openai/clip-vit-large-patch14'.
     """
-    def __init__(self, model_name: str = "openai/clip-vit-large-patch14", device: str = "cuda"):
+    def __init__(self, model_name: str = "openai/clip-vit-large-patch14", device: str = "cuda:1"):
         self.device = torch.device(device if torch.cuda.is_available() and device.startswith("cuda") else "cpu")
-        self.model = CLIPModel.from_pretrained(model_name).to(self.device)
+        self.model = CLIPModel.from_pretrained(model_name).to(self.device, torch.float16)
         self.processor = CLIPProcessor.from_pretrained(model_name)
         self.model.eval()
 

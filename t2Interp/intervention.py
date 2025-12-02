@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 import torch
 from t2Interp.T2I import T2IModel
 from nnsight import NNsight
@@ -15,25 +15,25 @@ class DiffusionIntervention:
     def __init__(
         self,
         model: T2IModel,
-        envoys: List[Envoy],
-        selection: Dict[str, List[int]] = None,
+        accessors: List[ModuleAccessor],
+        selection: Dict[str, List[int]]| None = None,
         start_step: int = 0,
         end_step: int = 50,
     ) -> None:
 
         self.model = model
-        self.envoys = envoys
+        self.accessors = accessors
         self.selection = selection
         self.start_step = start_step
         self.end_step = end_step
         
-    def intervene(self, envoy: Envoy, **kwargs):
+    def intervene(self, accessor: ModuleAccessor, **kwargs):
         pass
 
     def __call__(self,**kwargs):
-        for envoy in self.envoys:
-        #     with envoy.iter[self.start_step:self.end_step]:
-            self.intervene(envoy,**kwargs)
+        for accessor in self.accessors:
+        #     with accessor.iter[self.start_step:self.end_step]:
+            self.intervene(accessor,**kwargs)
 
     @classmethod
     def fields(cls):
@@ -179,6 +179,9 @@ class ScalingAttentionIntervention(DiffusionIntervention):
         spatial_idx = sel.get("spatial_location", None)
         head_idx    = sel.get("heads", None)
 
+        if type(head_idx) == dict:
+            head_idx = head_idx.get(attn.attr_name, None)
+            
         device = hs.device
 
         def to_index(idx, length):
@@ -220,6 +223,27 @@ class ScalingAttentionIntervention(DiffusionIntervention):
     # def fields(cls):
     #     return [FieldModel(name="Factor", type=FieldModel.FieldType.float)]
 
+class FeatureIntervention(DiffusionIntervention):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)    
+            
+    def intervene(self, accessor: ModuleAccessor, **kwargs):   
+        feature_indices = kwargs.get("feature_indices", None)
+        scale = kwargs.get("factor", 0.0)
+        assert feature_indices is not None, "feature_indices must be provided as kwargs"
+        def scale_hook(module, input, output):
+            # ablate last indices
+            if output.dim() == 2:
+                output[:, feature_indices] *= scale
+            elif output.dim() ==3:
+                output[:, :, feature_indices] *= scale
+            elif output.dim() ==4:
+                output[:, :, :, feature_indices] *= scale
+            else:
+                raise ValueError(f"Unexpected output dim: {output.dim()}")
+            return output
+        accessor.module.register_forward_hook(scale_hook) 
+    
 def run_intervention(model:T2IModel, prompts:List[str], interventions: List[DiffusionIntervention] = [], **kwargs) -> Output:
     start_step = kwargs.get("denoiser_step", 0)
     start_step = 0
@@ -229,7 +253,6 @@ def run_intervention(model:T2IModel, prompts:List[str], interventions: List[Diff
             for intervention in interventions:
                 intervention(**kwargs)    
             output = model.output.save()
-            print(output)
     return Output(preds=output.images) 
 
 # @ray.remote(num_gpus=1)

@@ -42,24 +42,26 @@ class Unet:
         setattr(self, "in_", in_)
         setattr(self, "out_", out_)
         
-        for i,down_block in enumerate(unet.down_blocks):
+        i=0
+        for down_block in unet.down_blocks:
             if down_block._get_name()=='CrossAttnDownBlock2D':
-                for j,attention in enumerate(down_block.attentions):
-                    for k,block in enumerate(attention.transformer_blocks):
+                for attention in down_block.attentions:
+                    for block in attention.transformer_blocks:
                         self.down_attn_blocks.append(UnetTransformerBlock(
-                                in_=ModuleAccessor(block,f"unet_down_block_attn{i+j+k}_in",IOType.INPUT),
-                                out_=ModuleAccessor(block,f"unet_down_block_attn{i+j+k}_out",IOType.OUTPUT),
-                                self_attn_in=ModuleAccessor(block.attn1,f"unet_down_block_attn{i+j+k}_self_attn_in",IOType.INPUT),
-                                self_attn_out=ModuleAccessor(block.attn1,f"unet_down_block_attn{i+j+k}_self_attn_out",IOType.OUTPUT),
-                                cross_attn_in=ModuleAccessor(block.attn2,f"unet_down_block_attn{i+j+k}_cross_attn_in",IOType.INPUT),
-                                cross_attn_out=ModuleAccessor(block.attn2,f"unet_down_block_attn{i+j+k}_cross_attn_out",IOType.OUTPUT),
-                                mlp_in=ModuleAccessor(block.ff,f"unet_down_block_attn{i+j+k}_mlp_in",IOType.INPUT),
-                                mlp_out=ModuleAccessor(block.ff,f"unet_down_block_attn{i+j+k}_mlp_out",IOType.OUTPUT),
-                                self_attn_WO_in=ModuleAccessor(block.attn1.to_out[0],f"unet_down_block_attn{i+j+k}_self_attn_WO_in",IOType.INPUT),
-                                self_attn_WO_out=ModuleAccessor(block.attn1.to_out[0],f"unet_down_block_attn{i+j+k}_self_attn_WO_out",IOType.OUTPUT, returns_tuple=True),
-                                cross_attn_WO_in=ModuleAccessor(block.attn2.to_out[0],f"unet_down_block_attn{i+j+k}_cross_attn_WO_in",IOType.INPUT),
-                                cross_attn_WO_out=ModuleAccessor(block.attn2.to_out[0],f"unet_down_block_attn{i+j+k}_cross_attn_WO_out",IOType.OUTPUT, returns_tuple=True),
+                                in_=ModuleAccessor(block,f"unet_down_block_attn{i}_in",IOType.INPUT),
+                                out_=ModuleAccessor(block,f"unet_down_block_attn{i}_out",IOType.OUTPUT),
+                                self_attn_in=ModuleAccessor(block.attn1,f"unet_down_block_attn{i}_self_attn_in",IOType.INPUT),
+                                self_attn_out=ModuleAccessor(block.attn1,f"unet_down_block_attn{i}_self_attn_out",IOType.OUTPUT),
+                                cross_attn_in=ModuleAccessor(block.attn2,f"unet_down_block_attn{i}_cross_attn_in",IOType.INPUT),
+                                cross_attn_out=ModuleAccessor(block.attn2,f"unet_down_block_attn{i}_cross_attn_out",IOType.OUTPUT),
+                                mlp_in=ModuleAccessor(block.ff,f"unet_down_block_attn{i}_mlp_in",IOType.INPUT),
+                                mlp_out=ModuleAccessor(block.ff,f"unet_down_block_attn{i}_mlp_out",IOType.OUTPUT),
+                                self_attn_WO_in=ModuleAccessor(block.attn1.to_out[0],f"unet_down_block_attn{i}_self_attn_WO_in",IOType.INPUT),
+                                self_attn_WO_out=ModuleAccessor(block.attn1.to_out[0],f"unet_down_block_attn{i}_self_attn_WO_out",IOType.OUTPUT, returns_tuple=True),
+                                cross_attn_WO_in=ModuleAccessor(block.attn2.to_out[0],f"unet_down_block_attn{i}_cross_attn_WO_in",IOType.INPUT),
+                                cross_attn_WO_out=ModuleAccessor(block.attn2.to_out[0],f"unet_down_block_attn{i}_cross_attn_WO_out",IOType.OUTPUT, returns_tuple=True),
                                 ))
+                        i+=1
         for attention in unet.mid_block.attentions:
             for block in attention.transformer_blocks:
                 self.mid_attn_block = UnetTransformerBlock(
@@ -76,24 +78,26 @@ class Unet:
                         cross_attn_WO_in=ModuleAccessor(block.attn2.to_out[0],"unet_mid_block_cross_attn_WO_in",IOType.INPUT),
                         cross_attn_WO_out=ModuleAccessor(block.attn2.to_out[0],"unet_mid_block_cross_attn_WO_out",IOType.OUTPUT),
                         ) 
-        for i,up_block in enumerate(unet.up_blocks):
+        i=0        
+        for up_block in unet.up_blocks:
             if up_block._get_name()=='CrossAttnUpBlock2D':
-                for j,attention in enumerate(up_block.attentions):
-                    for k,block in enumerate(attention.transformer_blocks):
+                for attention in up_block.attentions:
+                    for block in attention.transformer_blocks:
                         self.up_attn_blocks.append(UnetTransformerBlock(
-                                in_=ModuleAccessor(block,f"unet_up_block_attn{i+j+k}_in",IOType.INPUT),
-                                out_=ModuleAccessor(block,f"unet_up_block_attn{i+j+k}_out",IOType.OUTPUT),
-                                self_attn_in=ModuleAccessor(block.attn1,f"unet_up_block_attn{i+j+k}_self_attn_in",IOType.INPUT),
-                                self_attn_out=ModuleAccessor(block.attn1,f"unet_up_block_attn{i+j+k}_self_attn_out",IOType.OUTPUT),
-                                cross_attn_in=ModuleAccessor(block.attn2,f"unet_up_block_attn{i+j+k}_cross_attn_in",IOType.INPUT),
-                                cross_attn_out=ModuleAccessor(block.attn2,f"unet_up_block_attn{i+j+k}_cross_attn_out",IOType.OUTPUT),
-                                mlp_in=ModuleAccessor(block.ff,f"unet_up_block_attn{i+j+k}_mlp_in",IOType.INPUT),
-                                mlp_out=ModuleAccessor(block.ff,f"unet_up_block_attn{i+j+k}_mlp_out",IOType.OUTPUT),
-                                self_attn_WO_in=ModuleAccessor(block.attn1.to_out[0],f"unet_up_block_attn{i+j+k}_self_attn_WO_in",IOType.INPUT),
-                                self_attn_WO_out=ModuleAccessor(block.attn1.to_out[0],f"unet_up_block_attn{i+j+k}_self_attn_WO_out",IOType.OUTPUT, returns_tuple=True),
-                                cross_attn_WO_in=ModuleAccessor(block.attn2.to_out[0],f"unet_up_block_attn{i+j+k}_cross_attn_WO_in",IOType.INPUT),
-                                cross_attn_WO_out=ModuleAccessor(block.attn2.to_out[0],f"unet_up_block_attn{i+j+k}_cross_attn_WO_out",IOType.OUTPUT, returns_tuple=True),
+                                in_=ModuleAccessor(block,f"unet_up_block_attn{i}_in",IOType.INPUT),
+                                out_=ModuleAccessor(block,f"unet_up_block_attn{i}_out",IOType.OUTPUT),
+                                self_attn_in=ModuleAccessor(block.attn1,f"unet_up_block_attn{i}_self_attn_in",IOType.INPUT),
+                                self_attn_out=ModuleAccessor(block.attn1,f"unet_up_block_attn{i}_self_attn_out",IOType.OUTPUT),
+                                cross_attn_in=ModuleAccessor(block.attn2,f"unet_up_block_attn{i}_cross_attn_in",IOType.INPUT),
+                                cross_attn_out=ModuleAccessor(block.attn2,f"unet_up_block_attn{i}_cross_attn_out",IOType.OUTPUT),
+                                mlp_in=ModuleAccessor(block.ff,f"unet_up_block_attn{i}_mlp_in",IOType.INPUT),
+                                mlp_out=ModuleAccessor(block.ff,f"unet_up_block_attn{i}_mlp_out",IOType.OUTPUT),
+                                self_attn_WO_in=ModuleAccessor(block.attn1.to_out[0],f"unet_up_block_attn{i}_self_attn_WO_in",IOType.INPUT),
+                                self_attn_WO_out=ModuleAccessor(block.attn1.to_out[0],f"unet_up_block_attn{i}_self_attn_WO_out",IOType.OUTPUT, returns_tuple=True),
+                                cross_attn_WO_in=ModuleAccessor(block.attn2.to_out[0],f"unet_up_block_attn{i}_cross_attn_WO_in",IOType.INPUT),
+                                cross_attn_WO_out=ModuleAccessor(block.attn2.to_out[0],f"unet_up_block_attn{i}_cross_attn_WO_out",IOType.OUTPUT, returns_tuple=True),
                                 ))
+                        i+=1
 
     def summary(self) -> str:
         s = "UNet:\n"
