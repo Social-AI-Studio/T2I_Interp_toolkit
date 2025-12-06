@@ -1,6 +1,7 @@
-from typing import Optional, Callable
-import torch
+from collections.abc import Callable
+
 import einops
+import torch
 
 
 class SAETrainer:
@@ -114,9 +115,9 @@ def remove_gradient_parallel_to_decoder_directions(
 def get_lr_schedule(
     total_steps: int,
     warmup_steps: int,
-    decay_start: Optional[int] = None,
-    resample_steps: Optional[int] = None,
-    sparsity_warmup_steps: Optional[int] = None,
+    decay_start: int | None = None,
+    resample_steps: int | None = None,
+    sparsity_warmup_steps: int | None = None,
 ) -> Callable[[int], float]:
     """
     Creates a learning rate schedule function with linear warmup followed by an optional decay phase.
@@ -135,15 +136,15 @@ def get_lr_schedule(
         Function that computes LR scale factor for a given step
     """
     if decay_start is not None:
-        assert resample_steps is None, (
-            "decay_start and resample_steps are currently mutually exclusive."
-        )
+        assert (
+            resample_steps is None
+        ), "decay_start and resample_steps are currently mutually exclusive."
         assert 0 <= decay_start < total_steps, "decay_start must be >= 0 and < steps."
         assert decay_start > warmup_steps, "decay_start must be > warmup_steps."
         if sparsity_warmup_steps is not None:
-            assert decay_start > sparsity_warmup_steps, (
-                "decay_start must be > sparsity_warmup_steps."
-            )
+            assert (
+                decay_start > sparsity_warmup_steps
+            ), "decay_start must be > sparsity_warmup_steps."
 
     assert 0 <= warmup_steps < total_steps, "warmup_steps must be >= 0 and < steps."
 
@@ -170,7 +171,7 @@ def get_lr_schedule(
 
 
 def get_sparsity_warmup_fn(
-    total_steps: int, sparsity_warmup_steps: Optional[int] = None
+    total_steps: int, sparsity_warmup_steps: int | None = None
 ) -> Callable[[int], float]:
     """
     Return a function that computes a scale factor for sparsity penalty at a given step.
@@ -180,9 +181,9 @@ def get_sparsity_warmup_fn(
     """
 
     if sparsity_warmup_steps is not None:
-        assert 0 <= sparsity_warmup_steps < total_steps, (
-            "sparsity_warmup_steps must be >= 0 and < steps."
-        )
+        assert (
+            0 <= sparsity_warmup_steps < total_steps
+        ), "sparsity_warmup_steps must be >= 0 and < steps."
 
     def scale_fn(step: int) -> float:
         if not sparsity_warmup_steps:

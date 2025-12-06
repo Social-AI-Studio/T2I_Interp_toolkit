@@ -16,6 +16,8 @@ limitations under the License.
 import asyncio
 import io
 import json
+import logging
+import multiprocessing as mp
 import os
 import random
 import signal
@@ -23,16 +25,12 @@ import sys
 import time
 import warnings
 from multiprocessing import Process, Queue, Value
-from typing import Optional
 
-import einops
 import aiohttp
 import boto3
+import einops
 import torch
 import torch.nn as nn
-import multiprocessing as mp
-import warnings
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -61,12 +59,10 @@ async def download_chunks(session, url, total_size, chunk_size):
     tries_left = 5
     while tries_left > 0:
         chunks = [
-            (i, min(i + chunk_size - 1, total_size - 1))
-            for i in range(0, total_size, chunk_size)
+            (i, min(i + chunk_size - 1, total_size - 1)) for i in range(0, total_size, chunk_size)
         ]
         tasks = [
-            asyncio.create_task(request_chunk(session, url, start, end))
-            for start, end in chunks
+            asyncio.create_task(request_chunk(session, url, start, end)) for start, end in chunks
         ]
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -75,9 +71,7 @@ async def download_chunks(session, url, total_size, chunk_size):
         for response in responses:
             if isinstance(response, Exception):
                 logger.error(f"Error occurred: {response}")
-                logger.error(
-                    f"Session: {session}, URL: {url}, Tries left: {tries_left}"
-                )
+                logger.error(f"Session: {session}, URL: {url}, Tries left: {tries_left}")
                 tries_left -= 1
                 retry = True
                 break
@@ -108,9 +102,7 @@ def download_loop(*args):
 
 def compile(byte_buffers, shuffle=True, seed=None, return_ids=False):
     """Compile downloaded chunks into a tensor."""
-    combined_bytes = b"".join(
-        chunk for _, chunk in sorted(byte_buffers, key=lambda x: x[0])
-    )
+    combined_bytes = b"".join(chunk for _, chunk in sorted(byte_buffers, key=lambda x: x[0]))
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -119,9 +111,7 @@ def compile(byte_buffers, shuffle=True, seed=None, return_ids=False):
         # t = torch.frombuffer(combined_bytes, dtype=dtype) # torch.float32
         buffer = io.BytesIO(combined_bytes)
         t = torch.load(buffer)
-        if (
-            isinstance(t, dict) and "states" in t and not return_ids
-        ):  # backward compatibility
+        if isinstance(t, dict) and "states" in t and not return_ids:  # backward compatibility
             t = t["states"]  # ignore input_ids
         buffer.close()
 
@@ -142,13 +132,9 @@ def shuffle_megabatch_tokens(t, seed=None):
     Returns:
     torch.Tensor: Shuffled tensor of the same shape as input
     """
-    original_shape = (
-        t.shape
-    )  # (batch_size * batches_per_file, sequence_length, d_in + 1)
+    original_shape = t.shape  # (batch_size * batches_per_file, sequence_length, d_in + 1)
 
-    total_tokens = (
-        original_shape[0] * original_shape[1]
-    )  # reshape to (total_tokens, d_in + 1)
+    total_tokens = original_shape[0] * original_shape[1]  # reshape to (total_tokens, d_in + 1)
     t_reshaped = t.reshape(total_tokens, -1)
 
     rng = torch.Generator()
@@ -201,9 +187,7 @@ async def _async_download(
             with file_index.get_lock():
                 url = s3_paths[file_index.value]
                 file_index.value += 1
-            bytes_results = await download_chunks(
-                session, url, bytes_per_file, chunk_size
-            )
+            bytes_results = await download_chunks(session, url, bytes_per_file, chunk_size)
             if bytes_results is not None:
                 try:
                     t = compile(bytes_results, shuffle, seed, return_ids)
@@ -229,9 +213,7 @@ class S3RCache:
     """A cache that reads data from Amazon S3."""
 
     @classmethod
-    def from_credentials(
-        self, aws_access_key_id, aws_secret_access_key, *args, **kwargs
-    ):
+    def from_credentials(self, aws_access_key_id, aws_secret_access_key, *args, **kwargs):
         s3_client = boto3.client(
             "s3",
             aws_access_key_id=aws_access_key_id,
@@ -291,9 +273,7 @@ class S3RCache:
             target_prefix = self.s3_prefix[0]
         else:
             target_prefix = self.s3_prefix
-        response = self.s3_client.get_object(
-            Bucket=bucket_name, Key=_metadata_path(target_prefix)
-        )
+        response = self.s3_client.get_object(Bucket=bucket_name, Key=_metadata_path(target_prefix))
         content = response["Body"].read()
         self.metadata = json.loads(content)
         # self.metadata["bytes_per_file"] = 1612711320
@@ -369,9 +349,7 @@ class S3RCache:
         combined_config = None
 
         # Handle single prefix case for backward compatibility
-        prefixes = (
-            [self.s3_prefix] if isinstance(self.s3_prefix, str) else self.s3_prefix
-        )
+        prefixes = [self.s3_prefix] if isinstance(self.s3_prefix, str) else self.s3_prefix
 
         # Process each prefix
         for prefix in prefixes:
@@ -389,9 +367,7 @@ class S3RCache:
                 )
                 config = json.loads(config_response["Body"].read())
             except Exception as e:
-                logger.warning(
-                    f"Warning: Could not load config for prefix {prefix}: {e}"
-                )
+                logger.warning(f"Warning: Could not load config for prefix {prefix}: {e}")
                 config = {}
 
             # Initialize combined metadata and config from first prefix
@@ -409,7 +385,7 @@ class S3RCache:
                         f"Incompatible shapes between datasets: {metadata['shape']} vs {combined_metadata['shape']}"
                     )
                 if metadata["dtype"] != combined_metadata["dtype"]:
-                    raise ValueError(f"Incompatible dtypes between datasets")
+                    raise ValueError("Incompatible dtypes between datasets")
 
             # Accumulate config fields
             combined_config["total_tokens"] += config.get("total_tokens", 0)
@@ -456,9 +432,7 @@ class S3RCache:
         self._reset()
 
         if self._running_processes:
-            raise ValueError(
-                "Cannot iterate over cache a second time while it is downloading"
-            )
+            raise ValueError("Cannot iterate over cache a second time while it is downloading")
 
         if len(self._s3_paths) > self._initial_file_index:
             while len(self._running_processes) < self.n_workers:
@@ -467,9 +441,7 @@ class S3RCache:
                     args=(
                         self.buffer,
                         self._file_index,
-                        self._s3_paths[
-                            self._initial_file_index :
-                        ],  # Start from the initial index
+                        self._s3_paths[self._initial_file_index :],  # Start from the initial index
                         self._stop,
                         self.readable_tensors,
                         self.writeable_tensors,
@@ -574,15 +546,13 @@ def ensure_spawn_context():
         try:
             mp.set_start_method("spawn", force=True)
         except RuntimeError:
-            warnings.warn(
-                "Multiprocessing start method is not 'spawn'. This may cause issues."
-            )
+            warnings.warn("Multiprocessing start method is not 'spawn'. This may cause issues.")
 
 
 def create_s3_client(
-    access_key_id: Optional[str] = None,
-    secret_access_key: Optional[str] = None,
-    endpoint_url: Optional[str] = None,
+    access_key_id: str | None = None,
+    secret_access_key: str | None = None,
+    endpoint_url: str | None = None,
 ) -> boto3.client:
     """Create an S3 client configured for S3-compatible storage services.
 
@@ -690,9 +660,7 @@ class ActivaultS3ActivationBuffer:
             unreads = (~self.read_mask).nonzero().squeeze()
             if unreads.ndim == 0:
                 unreads = unreads.unsqueeze(0)
-            selected = unreads[
-                torch.randperm(len(unreads), device=self.device)[: self.batch_size]
-            ]
+            selected = unreads[torch.randperm(len(unreads), device=self.device)[: self.batch_size]]
             self.read_mask[selected] = True
             return self.states[selected]
 
@@ -707,9 +675,7 @@ class ActivaultS3ActivationBuffer:
         states = next_batch["states"].to(self.device)  # [B, L, D]
         flat_states = einops.rearrange(states, "b l d -> (b l) d").contiguous()
         self.states = flat_states
-        self.read_mask = torch.zeros(
-            flat_states.shape[0], dtype=torch.bool, device=self.device
-        )
+        self.read_mask = torch.zeros(flat_states.shape[0], dtype=torch.bool, device=self.device)
 
     def close(self):
         if hasattr(self.cache, "finalize"):
@@ -739,6 +705,4 @@ if __name__ == "__main__":
         n_workers=2,
     )
 
-    s3_buffer = ActivaultS3ActivationBuffer(
-        cache, batch_size=sae_batch_size, device=device, io=io
-    )
+    s3_buffer = ActivaultS3ActivationBuffer(cache, batch_size=sae_batch_size, device=device, io=io)

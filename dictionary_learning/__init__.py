@@ -13,6 +13,7 @@ try:
 except NameError:
     __path__ = list(getattr(_inner, "__path__", []))
 
+
 def __getattr__(name):
     if hasattr(_inner, name):
         return getattr(_inner, name)

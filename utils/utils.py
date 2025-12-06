@@ -1,20 +1,26 @@
 from __future__ import annotations
-from datasets import load_dataset
-import zstandard as zstd
+
 import io
 import json
 import os
-from nnsight import LanguageModel
-from pydantic import BaseModel
-from enum import Enum
-import torch
-from nnsight.modeling.diffusion import DiffusionModel
-from itertools import islice
-from typing import Iterable, Iterator, List, TypeVar, Tuple, Any, Mapping
-from torchvision import transforms
-import numpy as np
-from typing import Iterable, Iterator, List, TypeVar, Optional, Callable, Tuple, Union, Dict
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from enum import Enum
+from itertools import islice
+from typing import (
+    Any,
+    TypeVar,
+)
+
+import numpy as np
+import torch
+import zstandard as zstd
+from datasets import load_dataset
+from nnsight import LanguageModel
+from nnsight.modeling.diffusion import DiffusionModel
+from pydantic import BaseModel
+from torchvision import transforms
+
 # from utils.text_image_buffer import TextImageActivationBuffer
 
 T = TypeVar("T")
@@ -30,8 +36,8 @@ T = TypeVar("T")
 #     JumpReluAutoEncoder,
 # )
 
-from typing import Any, Mapping, Sequence
 from pathlib import Path
+
 
 def reshape_like(vec, x):
     """
@@ -43,6 +49,7 @@ def reshape_like(vec, x):
         raise ValueError(f"vec.numel()={v.numel()} != x.numel()={x.numel()}")
     # .reshape handles non-contiguous; .view requires contiguity
     return v.reshape(x.shape)
+
 
 def _to_jsonable(x: Any) -> Any:
     # Fast path for JSON primitives
@@ -70,6 +77,7 @@ def _to_jsonable(x: Any) -> Any:
     # NumPy scalars / arrays
     try:
         import numpy as np
+
         if isinstance(x, np.generic):
             return x.item()
         if isinstance(x, np.ndarray):
@@ -80,8 +88,14 @@ def _to_jsonable(x: Any) -> Any:
     # PyTorch tensors / dtypes / devices
     try:
         import torch as th
+
         if isinstance(x, th.Tensor):
-            return {"__tensor__": True, "shape": list(x.shape), "dtype": str(x.dtype), "device": str(x.device)}
+            return {
+                "__tensor__": True,
+                "shape": list(x.shape),
+                "dtype": str(x.dtype),
+                "device": str(x.device),
+            }
         if isinstance(x, (th.dtype, th.device)):
             return str(x)
     except Exception:
@@ -167,10 +181,14 @@ def get_nested_folders(path: str) -> list[str]:
 
 #     return dictionary, config
 
-def encode_prompt(prompt:str, model:DiffusionModel):  
-    prompt_embeds, negative_prompt_embeds = model.pipeline.encode_prompt(prompt, model.device, 1, True, None) #tokens for empty prompt
+
+def encode_prompt(prompt: str, model: DiffusionModel):
+    prompt_embeds, negative_prompt_embeds = model.pipeline.encode_prompt(
+        prompt, model.device, 1, True, None
+    )  # tokens for empty prompt
     prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
     return prompt_embeds
+
 
 def get_submodule(model: LanguageModel, layer: int):
     """Gets the residual stream submodule"""
@@ -187,29 +205,28 @@ def get_submodule(model: LanguageModel, layer: int):
     else:
         raise ValueError(f"Please add submodule for model {model_name}")
 
+
 class FieldModel(BaseModel):
-    
     class FieldType(Enum):
-        
-        string = 'string'
-        float = 'float'
-        integer = 'integer'
-    
+        string = "string"
+        float = "float"
+        integer = "integer"
+
     name: str
-    
+
     type: FieldModel.FieldType
 
 
 class InterventionModel(BaseModel):
-
     name: str
 
-    fields: List[FieldModel] = []
-    
+    fields: list[FieldModel] = []
+
     num_instances: int = 0
-    
-    instances: List = []    
-    
+
+    instances: list = []
+
+
 class FunctionModule(torch.nn.Module):
     def __init__(self, func: Callable, **bound_kwargs: Any):
         super().__init__()
@@ -219,8 +236,9 @@ class FunctionModule(torch.nn.Module):
     def forward(self, *args, **kwargs):
         # kwargs at call-time override the bound ones
         merged = {**self.bound_kwargs, **kwargs}
-        return self.func(*args, **merged)    
-    
+        return self.func(*args, **merged)
+
+
 # def batchify(source: Iterable[T], batch_size: int, *, drop_last: bool = False) -> Iterator[List[T]]:
 #     it = iter(source)
 #     while True:
@@ -232,19 +250,19 @@ class FunctionModule(torch.nn.Module):
 #         yield batch
 
 
-
-class BatchIterator(Iterator[List[T]]):
+class BatchIterator(Iterator[list[T]]):
     """
     Batches items from a (re-iterable) source. Each __iter__ starts a fresh pass.
     If your source is a one-shot iterator, pass source_factory to recreate it.
     """
+
     def __init__(
         self,
         source: Iterable[T] | Iterator[T],
         batch_size: int,
         drop_last: bool = False,
         *,
-        source_factory: Optional[Callable[[], Iterable[T] | Iterator[T]]] = None,
+        source_factory: Callable[[], Iterable[T] | Iterator[T]] | None = None,
     ):
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
@@ -252,14 +270,14 @@ class BatchIterator(Iterator[List[T]]):
         self._batch_size = int(batch_size)
         self._drop_last = bool(drop_last)
         self._factory = source_factory
-        self._it: Optional[Iterator[T]] = None
+        self._it: Iterator[T] | None = None
         self.reset()  # ready for first pass
 
-    def __iter__(self) -> "BatchIterator[T]":
+    def __iter__(self) -> BatchIterator[T]:
         self.reset()
         return self
 
-    def __next__(self) -> List[T]:
+    def __next__(self) -> list[T]:
         it = self._it
         if it is None:
             raise StopIteration
@@ -283,32 +301,33 @@ class BatchIterator(Iterator[List[T]]):
             # If _src is a one-shot iterator and no factory is provided,
             # reset() cannot rewind it.
             if hasattr(self._src, "reset"):
-                self._src.reset() 
+                self._src.reset()
             self._it = iter(self._src)
 
 
-        
 def preprocess_image(image, target_size=512):
     """
     Preprocess PIL image for VAE encoder.
-    
+
     Parameters:
     -----------
     image : PIL.Image
         Input image
     target_size : int
         Target size (will resize to target_size x target_size)
-    
+
     Returns:
     --------
     torch.Tensor : Preprocessed image tensor [1, 3, H, W] in range [-1, 1]
     """
-    transform = transforms.Compose([
-        transforms.Resize((target_size, target_size)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5])  # Scale to [-1, 1]
-    ])
-    return transform(image) #.unsqueeze(0)   
+    transform = transforms.Compose(
+        [
+            transforms.Resize((target_size, target_size)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5]),  # Scale to [-1, 1]
+        ]
+    )
+    return transform(image)  # .unsqueeze(0)
 
 
 # class ActivationMemmapWriter:
@@ -342,24 +361,26 @@ def preprocess_image(image, target_size=512):
 #         self.flush()
 #         del self.mm
 
+
 class ShardedActivationMemmapDataset:
     """
     Stateful, batch-yielding iterator over sharded activation memmaps.
     Uses a shuffled index list to avoid re-reading. Not thread-safe.
     """
+
     def __init__(
         self,
         memmap_dir: str,
         # batch_size: int = 1024,
         # device: Optional[str] = None,      # e.g., "cuda" or "cpu"; None -> leave on CPU
         # dtype: t.dtype = t.float32,        # dtype returned to the caller
-        pin_memory: bool = False,          # pin only if device is CUDA and you'll H2D copy later
+        pin_memory: bool = False,  # pin only if device is CUDA and you'll H2D copy later
         shuffle: bool = False,
-        keep_open_shard: bool = True,       # keep one shard mapped to reduce reopen overhead
+        keep_open_shard: bool = True,  # keep one shard mapped to reduce reopen overhead
         **kwargs,
     ):
         man_p = os.path.join(memmap_dir, "manifest.json")
-        with open(man_p, "r") as f:
+        with open(man_p) as f:
             man = json.load(f)
 
         self.memmap_dir = memmap_dir
@@ -369,19 +390,19 @@ class ShardedActivationMemmapDataset:
         self.batch_size = int(kwargs.get("out_batch_size", 1))
         self.device = kwargs.get("data_device", None)
         self.dtype = kwargs.get("autocast_dtype", torch.float32)
-        
+
         self.pin_memory = bool(pin_memory)
         self.shuffle = bool(shuffle)
         self.keep_open_shard = bool(keep_open_shard)
 
         self.feature_dim = int(man["feature_dim"])
-        self.shards_meta: List[Tuple[str,int]] = [
+        self.shards_meta: list[tuple[str, int]] = [
             (os.path.join(memmap_dir, sh["path"]), int(sh["rows_written"]))
             for sh in man["shards"]
             if int(sh["rows_written"]) > 0
         ]
         self.total_rows = int(man["total_rows"])
-        self._dtype_np = np.dtype(man["dtype"])       # storage dtype
+        self._dtype_np = np.dtype(man["dtype"])  # storage dtype
         self._prefix = np.cumsum([0] + [n for _, n in self.shards_meta])  # row offsets
 
         # iteration state
@@ -414,7 +435,7 @@ class ShardedActivationMemmapDataset:
             raise StopIteration
 
         end = min(self._cursor + self.batch_size, self.total_rows)
-        idxs = self._order[self._cursor:end]
+        idxs = self._order[self._cursor : end]
         self._cursor = end
 
         batch = self._load_indices(idxs)  # torch float32 by default (configurable)
@@ -450,7 +471,7 @@ class ShardedActivationMemmapDataset:
             self._open_mm = mm
         return mm
 
-    def _row_to_shard(self, global_idx: int) -> Tuple[int, int]:
+    def _row_to_shard(self, global_idx: int) -> tuple[int, int]:
         """Map a global row index -> (shard_id, row_in_shard)."""
         # prefix is [0, n0, n0+n1, ...]; find rightmost prefix <= idx
         s = int(np.searchsorted(self._prefix, global_idx, side="right") - 1)
@@ -474,10 +495,10 @@ class ShardedActivationMemmapDataset:
             mm = self._open_shard(s)
             rows = np.asarray(rows, dtype=np.int64)
             # fancy index into memmap -> NumPy array (copy)
-            arr = mm[rows, :]                             # shape [k, D], dtype storage
+            arr = mm[rows, :]  # shape [k, D], dtype storage
             # to torch
-            tens = torch.from_numpy(arr.copy())               # avoid view aliasing on memmap
-            tens = tens.to(self.dtype)             # cast to requested dtype
+            tens = torch.from_numpy(arr.copy())  # avoid view aliasing on memmap
+            tens = tens.to(self.dtype)  # cast to requested dtype
             if self.pin_memory:
                 tens = tens.pin_memory()
             parts.append(tens)
@@ -485,14 +506,14 @@ class ShardedActivationMemmapDataset:
         batch = torch.cat(parts, dim=0) if len(parts) > 1 else parts[0]
         return batch
 
-    
+
 def convert_buffer_to_memap(
-    buffer,                      # your TextImageActivationBuffer-like object
-    memmap_dir: str = "./data",             # directory to put shards + manifest
-    D: Optional[int] = None,     # feature dimension; if None inferred from first batch
-    shard_rows: int = 100,     # rows per shard (tune to your RAM/IO)
-    dtype=np.float16             # stored dtype,
-    , **kwargs                   # passed to ShardedActivationMemmapDataset
+    buffer,  # your TextImageActivationBuffer-like object
+    memmap_dir: str = "./data",  # directory to put shards + manifest
+    D: int | None = None,  # feature dimension; if None inferred from first batch
+    shard_rows: int = 100,  # rows per shard (tune to your RAM/IO)
+    dtype=np.float16,  # stored dtype,
+    **kwargs,  # passed to ShardedActivationMemmapDataset
 ):
     """
     Stream all unread activations from `buffer` into sharded numpy.memmap files on disk.
@@ -510,15 +531,15 @@ def convert_buffer_to_memap(
         return path, mm
 
     total_rows = 0
-    shard_id   = 0
-    shard_pos  = 0
+    shard_id = 0
+    shard_pos = 0
     shard_path = None
-    shard_mm   = None
+    shard_mm = None
     inferred_D = D
     manifest = {
         "dtype": str(np.dtype(dtype)),
         "shard_rows": shard_rows,
-        "shards": [],   # list of {"path": str, "rows_written": int, "shape": [rows, D]}
+        "shards": [],  # list of {"path": str, "rows_written": int, "shape": [rows, D]}
         "total_rows": 0,
         "feature_dim": None,
     }
@@ -539,18 +560,20 @@ def convert_buffer_to_memap(
             _ensure_shard()
             capacity = shard_rows - shard_pos
             take = min(capacity, N - start)
-            shard_mm[shard_pos:shard_pos+take, :] = arr_np[start:start+take]
+            shard_mm[shard_pos : shard_pos + take, :] = arr_np[start : start + take]
             shard_pos += take
             total_rows += take
             start += take
             # if shard filled, flush & record and open a new one on next write
             if shard_pos >= shard_rows:
                 shard_mm.flush()
-                manifest["shards"].append({
-                    "path": os.path.basename(shard_path),
-                    "rows_written": shard_rows,
-                    "shape": [shard_rows, inferred_D],
-                })
+                manifest["shards"].append(
+                    {
+                        "path": os.path.basename(shard_path),
+                        "rows_written": shard_rows,
+                        "shape": [shard_rows, inferred_D],
+                    }
+                )
                 shard_id += 1
                 shard_mm = None
                 shard_path = None
@@ -559,8 +582,8 @@ def convert_buffer_to_memap(
     # Iterate until buffer is exhausted
     while True:
         try:
-            batch = next(buffer)              # expects [B, D] (or [B, ...])
-        except StopIteration as e:
+            batch = next(buffer)  # expects [B, D] (or [B, ...])
+        except StopIteration:
             break
 
         if not isinstance(batch, torch.Tensor):
@@ -572,7 +595,9 @@ def convert_buffer_to_memap(
                         batch = v
                         break
             else:
-                raise TypeError("Expected tensor or dict with a tensor value from buffer.__next__().")
+                raise TypeError(
+                    "Expected tensor or dict with a tensor value from buffer.__next__()."
+                )
 
         # Flatten to [B, D] if needed
         if batch.dim() > 2:
@@ -613,11 +638,13 @@ def convert_buffer_to_memap(
     # Flush last (possibly partial) shard
     if shard_mm is not None:
         shard_mm.flush()
-        manifest["shards"].append({
-            "path": os.path.basename(shard_path),
-            "rows_written": shard_pos,                  # may be < shard_rows
-            "shape": [shard_rows, inferred_D],          # file shape; only first rows_written valid
-        })
+        manifest["shards"].append(
+            {
+                "path": os.path.basename(shard_path),
+                "rows_written": shard_pos,  # may be < shard_rows
+                "shape": [shard_rows, inferred_D],  # file shape; only first rows_written valid
+            }
+        )
 
     manifest["total_rows"] = total_rows
     manifest["feature_dim"] = inferred_D
@@ -626,8 +653,9 @@ def convert_buffer_to_memap(
     with open(os.path.join(memmap_dir, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
 
-    memap_buffer = ShardedActivationMemmapDataset(memmap_dir,**kwargs)
+    memap_buffer = ShardedActivationMemmapDataset(memmap_dir, **kwargs)
     return memap_buffer
+
 
 class CachedActivationIterator:
     """
@@ -643,12 +671,15 @@ class CachedActivationIterator:
             ...
         buf = it.buffer          # CPU cache (N, D), dtype=cpu_dtype
     """
+
     def __init__(self, it: Iterable[torch.Tensor], **kwargs) -> None:
         # config (all via kwargs)
         self.out_batch_size: int = kwargs.get("out_batch_size", 1024)
         self.cpu_dtype: torch.dtype = kwargs.get("cpu_dtype", torch.float16)
         self.cpu_device: str = kwargs.get("cpu_device", "cpu")
-        self.gpu_device: Optional[str] = kwargs.get("gpu_device", None)  # e.g., "cuda" or None to keep on CPU
+        self.gpu_device: str | None = kwargs.get(
+            "gpu_device", None
+        )  # e.g., "cuda" or None to keep on CPU
         self.pin_memory: bool = kwargs.get("pin_memory", True)
         self.non_blocking: bool = kwargs.get("non_blocking", True)
 
@@ -657,7 +688,7 @@ class CachedActivationIterator:
         self._i = 0  # iteration cursor
 
     # -------- public API --------
-    def __iter__(self) -> "CachedActivationIterator":
+    def __iter__(self) -> CachedActivationIterator:
         self._i = 0
         return self
 
@@ -665,7 +696,7 @@ class CachedActivationIterator:
         if self._i >= self.N:
             raise StopIteration
         j = min(self._i + self.out_batch_size, self.N)
-        batch = self.buffer[self._i:j]
+        batch = self.buffer[self._i : j]
         if self.pin_memory:
             batch = batch.pin_memory()
         if self.gpu_device is not None:
@@ -692,8 +723,8 @@ class CachedActivationIterator:
 
     # -------- internals --------
     def _build_cache(self, it: Iterable[torch.Tensor]) -> None:
-        chunks: List[torch.Tensor] = []
-        D: Optional[int] = None
+        chunks: list[torch.Tensor] = []
+        D: int | None = None
 
         for x in it:
             x = x.detach()
@@ -715,10 +746,11 @@ class CachedActivationIterator:
             self.D = 0
             return
 
-        cpu_cat = torch.cat(chunks, dim=0)                # (N, D) CPU
+        cpu_cat = torch.cat(chunks, dim=0)  # (N, D) CPU
         self._buffer = cpu_cat.to(self.cpu_device, dtype=self.cpu_dtype)
         self.N, self.D = self._buffer.size(0), self._buffer.size(1)
         self._i = 0
+
 
 def gen_images_from_prompts(model, prompts, **kwargs):
     generate_kwargs = {}
@@ -726,25 +758,28 @@ def gen_images_from_prompts(model, prompts, **kwargs):
     seed = kwargs.get("seed", None)
     generate_kwargs = {"num_inference_steps": num_inference_steps, "seed": seed}
     if "guidance_scale" in kwargs:
-            generate_kwargs["guidance_scale"] = kwargs["guidance_scale"]        
+        generate_kwargs["guidance_scale"] = kwargs["guidance_scale"]
     with model.generate(prompts, **generate_kwargs):
         output = model.output.save()
-    return output.images    
+    return output.images
 
-def cache_path(dataset: str, accessor_name: str, split: str, subset: Optional[str|int]) -> str:
+
+def cache_path(dataset: str, accessor_name: str, split: str, subset: str | int | None) -> str:
     base = Path("data") / dataset / accessor_name / split
     return str(base / str(subset) if subset is not None else base)
+
 
 def is_tensor(x) -> bool:
     return isinstance(x, torch.Tensor)
 
+
 def is_tuple_of_tensors(x) -> bool:
     return isinstance(x, tuple) and all(is_tensor(y) for y in x)
 
+
 def normalize_gt_batch(
-    gt: Union[torch.Tensor, List[Any], Tuple[Any, ...]],
-    device: str
-) -> Union[torch.Tensor, List[torch.Tensor]]:
+    gt: torch.Tensor | list[Any] | tuple[Any, ...], device: str
+) -> torch.Tensor | list[torch.Tensor]:
     """
     Accepts:
       - Tensor -> moves to device
@@ -764,17 +799,21 @@ def normalize_gt_batch(
         if all_tuple_tensor:
             # zip(*gt) transposes list-of-tuples
             heads = []
-            for t in zip(*gt):
+            for t in zip(*gt, strict=False):
                 heads.append(torch.stack(list(t), dim=0).to(device))
             return heads
 
     # fallthrough: empty list/tuple or unsupported
     return gt
 
+
 def last_token_indices(tokenizer, prompts):
     enc = tokenizer(
-        prompts, padding="max_length", truncation=True,
-        max_length=tokenizer.model_max_length, return_tensors="pt"
+        prompts,
+        padding="max_length",
+        truncation=True,
+        max_length=tokenizer.model_max_length,
+        return_tensors="pt",
     )
     ids, mask = enc["input_ids"], enc["attention_mask"]
     last_by_mask = mask.sum(dim=1) - 1
@@ -783,11 +822,12 @@ def last_token_indices(tokenizer, prompts):
     if eos_id is None:
         return last_by_mask
 
-    eos_mask = (ids == eos_id)
+    eos_mask = ids == eos_id
     has_eos = eos_mask.any(dim=1)
     # first EOS position (works even if EOS is repeated to the end)
     eos_pos_first = eos_mask.int().argmax(dim=1)
     return torch.where(has_eos, eos_pos_first, last_by_mask)
+
 
 @dataclass
 class ActivationConfig:
@@ -797,7 +837,7 @@ class ActivationConfig:
     lr: float = 1e-5
     training_device: str = "cpu"
     autocast_dtype: torch.dtype = torch.float32  # set to th.float16 for CUDA AMP
-    grad_clip_norm: Optional[float] = None
+    grad_clip_norm: float | None = None
     # data/buffers
     # d_submodule: Optional[int] = None
     # use_val: bool = False
@@ -807,7 +847,6 @@ class ActivationConfig:
     # subset: Optional[Union[str, int]] = None
     out_batch_size: int = 1
     # namespaced kwargs to avoid collisions
-    data_loader_kwargs: Dict[str, Any] = field(default_factory=dict)
-    buffer_kwargs: Dict[str, Any] = field(default_factory=dict)
+    data_loader_kwargs: dict[str, Any] = field(default_factory=dict)
+    buffer_kwargs: dict[str, Any] = field(default_factory=dict)
     # pipe_kwargs: Dict[str, Any]   = field(default_factory=dict)
-    

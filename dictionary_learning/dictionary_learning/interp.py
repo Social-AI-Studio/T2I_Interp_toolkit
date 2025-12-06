@@ -1,11 +1,12 @@
 import random
-from circuitsvis.activations import text_neuron_activations
-from einops import rearrange
-import torch as t
 from collections import namedtuple
-import umap
+
 import pandas as pd
 import plotly.express as px
+import torch as t
+import umap
+from circuitsvis.activations import text_neuron_activations
+from einops import rearrange
 
 
 def feature_effect(
@@ -82,7 +83,6 @@ def feature_effect(
 def examine_dimension(
     model, submodule, buffer, dictionary=None, max_length=128, n_inputs=512, dim_idx=None, k=30
 ):
-
     tracer_kwargs = {
         "scan": False,
         "validate": False,
@@ -130,11 +130,11 @@ def examine_dimension(
     token_indices = topk_indices % activations.shape[1]
     tokens = [
         tokens[batch_idx, : token_idx + 1].tolist()
-        for batch_idx, token_idx in zip(batch_indices, token_indices)
+        for batch_idx, token_idx in zip(batch_indices, token_indices, strict=False)
     ]
     activations = [
         activations[batch_idx, : token_id + 1, None, None]
-        for batch_idx, token_id in zip(batch_indices, token_indices)
+        for batch_idx, token_id in zip(batch_indices, token_indices, strict=False)
     ]
     decoded_tokens = _list_decode(tokens)
     top_contexts = text_neuron_activations(decoded_tokens, activations)
@@ -142,7 +142,9 @@ def examine_dimension(
     top_affected = feature_effect(
         model, submodule, dictionary, dim_idx, tokens, max_length=max_length, k=k
     )
-    top_affected = [(model.tokenizer.decode(tok), prob.item()) for tok, prob in zip(*top_affected)]
+    top_affected = [
+        (model.tokenizer.decode(tok), prob.item()) for tok, prob in zip(*top_affected, strict=False)
+    ]
 
     return namedtuple("featureProfile", ["top_contexts", "top_tokens", "top_affected"])(
         top_contexts, top_tokens, top_affected

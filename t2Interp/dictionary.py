@@ -1,6 +1,6 @@
-from sdxl-unbox.SAE.sae import SparseAutoencoder
-from dictionary_learning.dictionary import Dictionary
-import torch
+# from sdxl-unbox.SAE.sae import SparseAutoencoder
+# from dictionary_learning.dictionary import Dictionary
+# import torch
 
 # class SDXL_SAE(Dictionary,SparseAutoencoder):
 #     def __init__(self,
@@ -9,14 +9,14 @@ import torch
 #         k: int,
 #         auxk: int | None,
 #         dead_steps_threshold: int,):
-        
+
 #         super().__init__(self,
 #         n_dirs_local: int,
 #         d_model: int,
 #         k: int,
 #         auxk: int | None,
 #         dead_steps_threshold: int,)
-        
+
 #     def encode(self, x):
 #         x = x - self.pre_bias
 #         latents_pre_act = self.encoder(x) + self.latent_bias
@@ -25,8 +25,8 @@ import torch
 #             latents_pre_act,
 #             k=self.k,
 #             dim=-1
-#         )   
-        
+#         )
+
 #         latents = torch.zeros_like(latents_pre_act)
 #         latents.scatter_(-1, inds, torch.relu(vals))
 
@@ -91,10 +91,10 @@ import torch
 #             "auxk_vals": auxk_vals,
 #         }
 
-    
+
 #     def decode_sparse(self, inds, vals):
 #         rows, cols = inds.shape[0], self.n_dirs
-        
+
 #         row_indices = torch.arange(rows).unsqueeze(1).expand(-1, inds.shape[1]).reshape(-1)
 #         vals = vals.reshape(-1)
 #         inds = inds.reshape(-1)
@@ -105,6 +105,5 @@ import torch
 
 #         recons = torch.sparse.mm(sparse_tensor, self.decoder.weight.T) + self.pre_bias
 #         return recons
-        
-        
-        
+
+

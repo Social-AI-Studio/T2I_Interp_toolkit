@@ -1,10 +1,11 @@
 # pip install diffusers==0.30.0 transformers accelerate safetensors
-import torch, math
+import math
+import os
+
+import torch
 from diffusers import StableDiffusionPipeline
 from diffusers.utils.torch_utils import randn_tensor
-import os
-import torch, math
-from diffusers import StableDiffusionPipeline
+
 
 def _randn_like(x: torch.Tensor, generator=None):
     return torch.randn(x.shape, device=x.device, dtype=x.dtype, generator=generator)
@@ -38,9 +39,9 @@ def generate_with_cads_batch(
         do_classifier_free_guidance=True,
         negative_prompt=negative_prompt,
         prompt_embeds=None,
-        negative_prompt_embeds=None
+        negative_prompt_embeds=None,
     )
-    uncond_embeds, cond_embeds = prompt_embeds.chunk(2, dim=0)   # shapes: [B, seq, dim] each
+    uncond_embeds, cond_embeds = prompt_embeds.chunk(2, dim=0)  # shapes: [B, seq, dim] each
     ref_std = float(cond_embeds.float().std().clamp(min=1e-6))
 
     # Timesteps & initial latents (B images)
@@ -49,17 +50,25 @@ def generate_with_cads_batch(
 
     latents = randn_tensor(
         (B, pipe.unet.in_channels, height // pipe.vae_scale_factor, width // pipe.vae_scale_factor),
-        generator=generator, device=device, dtype=dtype
+        generator=generator,
+        device=device,
+        dtype=dtype,
     )
     latents = latents * pipe.scheduler.init_noise_sigma
 
     def _scale_latents(latents, t):
-        return pipe.scheduler.scale_model_input(latents, t) if hasattr(pipe.scheduler, "scale_model_input") else latents
+        return (
+            pipe.scheduler.scale_model_input(latents, t)
+            if hasattr(pipe.scheduler, "scale_model_input")
+            else latents
+        )
 
     cutoff = int(math.ceil(cads_early_frac * num_inference_steps))
+
     def decay(i):
-        if i >= cutoff: return 0.0
-        x = 1.0 - (i / max(1, cutoff-1))
+        if i >= cutoff:
+            return 0.0
+        x = 1.0 - (i / max(1, cutoff - 1))
         return 0.5 * (1 - math.cos(math.pi * x)) if cads_schedule == "cosine" else x
 
     for step_idx, t in enumerate(timesteps):
@@ -70,8 +79,8 @@ def generate_with_cads_batch(
         else:
             cond_step = cond_embeds
 
-        embeds_step = torch.cat([uncond_embeds, cond_step], dim=0)    # [2B, seq, dim]
-        latent_in = torch.cat([latents, latents], dim=0)              # [2B, C, H, W]
+        embeds_step = torch.cat([uncond_embeds, cond_step], dim=0)  # [2B, seq, dim]
+        latent_in = torch.cat([latents, latents], dim=0)  # [2B, C, H, W]
         latent_in = _scale_latents(latent_in, t)
 
         noise = pipe.unet(latent_in, t, encoder_hidden_states=embeds_step).sample
@@ -88,13 +97,12 @@ def generate_with_cads_batch(
     return pil_images  # list of PIL.Image
 
 
-
 # ---------------- Example usage ----------------
 if __name__ == "__main__":
     model_id = "CompVis/stable-diffusion-v1-4"
     pipe = StableDiffusionPipeline.from_pretrained(
-    "runwayml/stable-diffusion-v1-5", torch_dtype=torch.float16
-).to("cuda")
+        "runwayml/stable-diffusion-v1-5", torch_dtype=torch.float16
+    ).to("cuda")
 
 g = torch.Generator(device=pipe.device).manual_seed(12345)
 images = generate_with_cads_batch(
@@ -104,7 +112,7 @@ images = generate_with_cads_batch(
     num_inference_steps=30,
     guidance_scale=6.5,
     num_images_per_prompt=4,
-    generator=g,                 # or a list of Generators for per-image seeds
+    generator=g,  # or a list of Generators for per-image seeds
     cads_sigma0=0.06,
     cads_early_frac=0.33,
     cads_schedule="linear",
@@ -112,4 +120,3 @@ images = generate_with_cads_batch(
 os.makedirs("./output", exist_ok=True)
 for i, im in enumerate(images):
     im.save(f"./output/doctor_cads_{i}.png")
-

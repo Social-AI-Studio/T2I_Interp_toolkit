@@ -1,26 +1,26 @@
-from datasets import load_dataset
-import zstandard as zstd
 import io
 import json
 import os
-from transformers import AutoModelForCausalLM
-from fractions import Fraction
 import random
-from transformers import AutoTokenizer
-import torch as t
-from typing import Optional, List, Generator, Callable, Tuple, Iterator
+from collections.abc import Callable, Iterator
+from fractions import Fraction
+from itertools import islice
 
-from dictionary_learning.trainers.top_k import AutoEncoderTopK
-from dictionary_learning.trainers.batch_top_k import BatchTopKSAE
-from dictionary_learning.trainers.matryoshka_batch_top_k import MatryoshkaBatchTopKSAE
+import torch as t
+import zstandard as zstd
+from datasets import load_dataset
+from PIL import Image as PILImage
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from dictionary_learning.dictionary import (
     AutoEncoder,
-    GatedAutoEncoder,
     AutoEncoderNew,
+    GatedAutoEncoder,
     JumpReluAutoEncoder,
 )
-from itertools import islice
-from PIL import Image as PILImage
+from dictionary_learning.trainers.batch_top_k import BatchTopKSAE
+from dictionary_learning.trainers.matryoshka_batch_top_k import MatryoshkaBatchTopKSAE
+from dictionary_learning.trainers.top_k import AutoEncoderTopK
 
 # def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
 #     if isinstance(dataset, str):
@@ -32,14 +32,14 @@ from PIL import Image as PILImage
 #         raise TypeError("`dataset_column` must be a non-empty list/tuple of column names.")
 #     if isinstance(cols, str):
 #         cols = [cols]
-    
+
 #     subset = kwargs.get("subset", None)
 
 #     def stringify(ex):
 #         out = {}
 #         for k, v in ex.items():
 #             if isinstance(v, PILImage.Image):
-#                 out[k] = v 
+#                 out[k] = v
 #             elif isinstance(v, (str, bytes)):
 #                 out[k] = v if isinstance(v, str) else v.decode("utf-8", "ignore")
 #             else:
@@ -70,10 +70,13 @@ from PIL import Image as PILImage
 
 #     return gen()
 
+
 def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
-    preprocess_fn: Optional[Callable] = kwargs.get("preprocess_fn", None)
+    preprocess_fn: Callable | None = kwargs.get("preprocess_fn", None)
     cols = kwargs.get("dataset_column", None)
-    if not isinstance(cols, (list, tuple, str)) or (isinstance(cols, (list, tuple)) and len(cols) == 0):
+    if not isinstance(cols, (list, tuple, str)) or (
+        isinstance(cols, (list, tuple)) and len(cols) == 0
+    ):
         raise TypeError("`dataset_column` must be a non-empty list/tuple/str.")
     if isinstance(cols, str):
         cols = [cols]
@@ -85,9 +88,10 @@ def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
 
     class _HFStreamingEpochs:
         """Re-iterable AND iterator; supports for-loops and next(obj)."""
+
         def __init__(self):
             self._epoch = 0
-            self._it: Optional[Iterator] = None  # current epoch iterator
+            self._it: Iterator | None = None  # current epoch iterator
 
         def _stringify(self, ex):
             out = {}
@@ -101,7 +105,11 @@ def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
             return out
 
         def _build_iter(self) -> Iterator:
-            ds = load_dataset(dataset, split=split, streaming=streaming) if isinstance(dataset, str) else dataset
+            ds = (
+                load_dataset(dataset, split=split, streaming=streaming)
+                if isinstance(dataset, str)
+                else dataset
+            )
             if shuffle:
                 ds = ds.shuffle(seed=seed + self._epoch, buffer_size=shuffle_buffer_size)
             ds = ds.map(self._stringify).with_format("python")
@@ -167,9 +175,7 @@ def zst_to_generator(data_path):
     return generator()
 
 
-def randomly_remove_system_prompt(
-    text: str, freq: float, system_prompt: str | None = None
-) -> str:
+def randomly_remove_system_prompt(text: str, freq: float, system_prompt: str | None = None) -> str:
     if system_prompt and random.random() < freq:
         assert system_prompt in text
         text = text.replace(system_prompt, "")
@@ -272,9 +278,7 @@ def hf_mixed_dataset_to_generator(
                     samples = "".join(samples)
                     yield samples
                 else:
-                    sample = tokenizer.apply_chat_template(
-                        next(chat_ds)[chat_key], tokenize=False
-                    )
+                    sample = tokenizer.apply_chat_template(next(chat_ds)[chat_key], tokenize=False)
                     sample = randomly_remove_system_prompt(
                         sample, system_prompt_removal_freq, system_prompt_to_remove
                     )
@@ -373,7 +377,7 @@ def load_dictionary(base_path: str, device: str) -> tuple:
     ae_path = f"{base_path}/ae.pt"
     config_path = f"{base_path}/config.json"
 
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config = json.load(f)
 
     dict_class = config["trainer"]["dict_class"]

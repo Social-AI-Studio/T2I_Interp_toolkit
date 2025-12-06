@@ -1,7 +1,8 @@
-import torch as th
-from t2Interp.accessors import ModuleAccessor, AttentionAccessor, IOType
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, List, Tuple
+
+import torch as th
+
+from t2Interp.accessors import IOType, ModuleAccessor
 from t2Interp.blocks import TransformerBlock
 
 
@@ -32,47 +33,48 @@ class SingleStreamBlock(TransformerBlock):
       - attn.k         ← maps to 'attn.to_k'
       - attn.v         ← maps to 'attn.to_v'
     """
-    in_: Optional[ModuleAccessor] = None
-    out_: Optional[ModuleAccessor] = None
-    
+
+    in_: ModuleAccessor | None = None
+    out_: ModuleAccessor | None = None
+
     # MLP slots
-    mlp_up_in: Optional[ModuleAccessor] = None 
-    mlp_up_out: Optional[ModuleAccessor] = None    
-    mlp_act_in: Optional[ModuleAccessor] = None   
-    mlp_act_out: Optional[ModuleAccessor] = None       
-    mlp_down_in: Optional[ModuleAccessor] = None 
-    mlp_down_out: Optional[ModuleAccessor] = None
-    out_: Optional[ModuleAccessor] = None
-    in_: Optional[ModuleAccessor] = None
+    mlp_up_in: ModuleAccessor | None = None
+    mlp_up_out: ModuleAccessor | None = None
+    mlp_act_in: ModuleAccessor | None = None
+    mlp_act_out: ModuleAccessor | None = None
+    mlp_down_in: ModuleAccessor | None = None
+    mlp_down_out: ModuleAccessor | None = None
+    out_: ModuleAccessor | None = None
+    in_: ModuleAccessor | None = None
 
     # Attention slots
-    attn_in: Optional[ModuleAccessor] = None
-    attn_out: Optional[ModuleAccessor] = None
-    q_in: Optional[ModuleAccessor] = None
-    q_out: Optional[ModuleAccessor] = None
-    k_in: Optional[ModuleAccessor] = None
-    k_out: Optional[ModuleAccessor] = None
-    v_in: Optional[ModuleAccessor] = None
-    v_out: Optional[ModuleAccessor] = None
-    
+    attn_in: ModuleAccessor | None = None
+    attn_out: ModuleAccessor | None = None
+    q_in: ModuleAccessor | None = None
+    q_out: ModuleAccessor | None = None
+    k_in: ModuleAccessor | None = None
+    k_out: ModuleAccessor | None = None
+    v_in: ModuleAccessor | None = None
+    v_out: ModuleAccessor | None = None
+
     def __init__(self, module: th.nn.Module):
-        self.in_ = ModuleAccessor(module,"single_stream_input",IOType.INPUT)
-        self.out_ = ModuleAccessor(module,"single_stream_output",IOType.OUTPUT)
-        self.mlp_up_in = ModuleAccessor(module.mlp_up,"mlp_up_input",IOType.INPUT)
-        self.mlp_up_out = ModuleAccessor(module.mlp_up,"mlp_up_output",IOType.OUTPUT)
-        self.mlp_act_in = ModuleAccessor(module.mlp_act,"mlp_act_input",IOType.INPUT)
-        self.mlp_act_out = ModuleAccessor(module.mlp_act,"mlp_act_output",IOType.OUTPUT)
-        self.mlp_down_in = ModuleAccessor(module.mlp_down,"mlp_down_input",IOType.INPUT)
-        self.mlp_down_out = ModuleAccessor(module.mlp_down,"mlp_down_output",IOType.OUTPUT)
-        self.attn_in = ModuleAccessor(module.attn,"attn_input",IOType.INPUT)
-        self.attn_out = ModuleAccessor(module.attn,"attn_output",IOType.OUTPUT)
-        self.q_in = ModuleAccessor(module.attn.q,"attn_q_input",IOType.INPUT)
-        self.q_out = ModuleAccessor(module.attn.q,"attn_q_output",IOType.OUTPUT)
-        self.k_in = ModuleAccessor(module.attn.k,"attn_k_input",IOType.INPUT)
-        self.k_out = ModuleAccessor(module.attn.k,"attn_k_output",IOType.OUTPUT)
-        self.v_in = ModuleAccessor(module.attn.v,"attn_v_input",IOType.INPUT)
-        self.v_out = ModuleAccessor(module.attn.v,"attn_v_output",IOType.OUTPUT)
-        
+        self.in_ = ModuleAccessor(module, "single_stream_input", IOType.INPUT)
+        self.out_ = ModuleAccessor(module, "single_stream_output", IOType.OUTPUT)
+        self.mlp_up_in = ModuleAccessor(module.mlp_up, "mlp_up_input", IOType.INPUT)
+        self.mlp_up_out = ModuleAccessor(module.mlp_up, "mlp_up_output", IOType.OUTPUT)
+        self.mlp_act_in = ModuleAccessor(module.mlp_act, "mlp_act_input", IOType.INPUT)
+        self.mlp_act_out = ModuleAccessor(module.mlp_act, "mlp_act_output", IOType.OUTPUT)
+        self.mlp_down_in = ModuleAccessor(module.mlp_down, "mlp_down_input", IOType.INPUT)
+        self.mlp_down_out = ModuleAccessor(module.mlp_down, "mlp_down_output", IOType.OUTPUT)
+        self.attn_in = ModuleAccessor(module.attn, "attn_input", IOType.INPUT)
+        self.attn_out = ModuleAccessor(module.attn, "attn_output", IOType.OUTPUT)
+        self.q_in = ModuleAccessor(module.attn.q, "attn_q_input", IOType.INPUT)
+        self.q_out = ModuleAccessor(module.attn.q, "attn_q_output", IOType.OUTPUT)
+        self.k_in = ModuleAccessor(module.attn.k, "attn_k_input", IOType.INPUT)
+        self.k_out = ModuleAccessor(module.attn.k, "attn_k_output", IOType.OUTPUT)
+        self.v_in = ModuleAccessor(module.attn.v, "attn_v_input", IOType.INPUT)
+        self.v_out = ModuleAccessor(module.attn.v, "attn_v_output", IOType.OUTPUT)
+
     def summary(self) -> str:
         return (
             f"SingleStreamBlock(layer={self.layer}, "
@@ -85,5 +87,3 @@ class SingleStreamBlock(TransformerBlock):
             f"k_in={self.k_in}, k_out={self.k_out}, "
             f"v_in={self.v_in}, v_out={self.v_out})"
         )
-        
-

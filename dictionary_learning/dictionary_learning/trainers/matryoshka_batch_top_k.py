@@ -1,17 +1,15 @@
+from collections import namedtuple
+from math import isclose
+
 import torch as t
 import torch.nn as nn
-import torch.nn.functional as F
-import einops
-from collections import namedtuple
-from typing import Optional
-from math import isclose
 
 from ..dictionary import Dictionary
 from ..trainers.trainer import (
     SAETrainer,
     get_lr_schedule,
-    set_decoder_norm_to_unit_norm,
     remove_gradient_parallel_to_decoder_directions,
+    set_decoder_norm_to_unit_norm,
 )
 
 
@@ -35,9 +33,7 @@ def apply_temperature(probabilities: list[float], temperature: float) -> list[fl
 
 
 class MatryoshkaBatchTopKSAE(Dictionary, nn.Module):
-    def __init__(
-        self, activation_dim: int, dict_size: int, k: int, group_sizes: list[int]
-    ):
+    def __init__(self, activation_dim: int, dict_size: int, k: int, group_sizes: list[int]):
         super().__init__()
         self.activation_dim = activation_dim
         self.dict_size = dict_size
@@ -57,9 +53,7 @@ class MatryoshkaBatchTopKSAE(Dictionary, nn.Module):
 
         self.W_enc = nn.Parameter(t.empty(activation_dim, dict_size))
         self.b_enc = nn.Parameter(t.zeros(dict_size))
-        self.W_dec = nn.Parameter(
-            t.nn.init.kaiming_uniform_(t.empty(dict_size, activation_dim))
-        )
+        self.W_dec = nn.Parameter(t.nn.init.kaiming_uniform_(t.empty(dict_size, activation_dim)))
         self.b_dec = nn.Parameter(t.zeros(activation_dim))
 
         # We must transpose because we are using nn.Parameter, not nn.Linear
@@ -68,17 +62,11 @@ class MatryoshkaBatchTopKSAE(Dictionary, nn.Module):
         ).T
         self.W_enc.data = self.W_dec.data.clone().T
 
-    def encode(
-        self, x: t.Tensor, return_active: bool = False, use_threshold: bool = True
-    ):
-        post_relu_feat_acts_BF = nn.functional.relu(
-            (x - self.b_dec) @ self.W_enc + self.b_enc
-        )
+    def encode(self, x: t.Tensor, return_active: bool = False, use_threshold: bool = True):
+        post_relu_feat_acts_BF = nn.functional.relu((x - self.b_dec) @ self.W_enc + self.b_enc)
 
         if use_threshold:
-            encoded_acts_BF = post_relu_feat_acts_BF * (
-                post_relu_feat_acts_BF > self.threshold
-            )
+            encoded_acts_BF = post_relu_feat_acts_BF * (post_relu_feat_acts_BF > self.threshold)
         else:
             # Flatten and perform batch top-k
             flattened_acts = post_relu_feat_acts_BF.flatten()
@@ -118,9 +106,7 @@ class MatryoshkaBatchTopKSAE(Dictionary, nn.Module):
             self.threshold *= scale
 
     @classmethod
-    def from_pretrained(
-        cls, path, k=None, device=None, **kwargs
-    ) -> "MatryoshkaBatchTopKSAE":
+    def from_pretrained(cls, path, k=None, device=None, **kwargs) -> "MatryoshkaBatchTopKSAE":
         state_dict = t.load(path)
         activation_dim, dict_size = state_dict["W_enc"].shape
         if k is None:
@@ -147,19 +133,19 @@ class MatryoshkaBatchTopKTrainer(SAETrainer):
         layer: int,
         lm_name: str,
         group_fractions: list[float],
-        group_weights: Optional[list[float]] = None,
+        group_weights: list[float] | None = None,
         dict_class: type = MatryoshkaBatchTopKSAE,
-        lr: Optional[float] = None,
+        lr: float | None = None,
         auxk_alpha: float = 1 / 32,
         warmup_steps: int = 1000,
-        decay_start: Optional[int] = None,  # when does the lr decay start
+        decay_start: int | None = None,  # when does the lr decay start
         threshold_beta: float = 0.999,
         threshold_start_step: int = 1000,
-        k_anneal_steps: Optional[int] = None,
-        seed: Optional[int] = None,
-        device: Optional[str] = None,
+        k_anneal_steps: int | None = None,
+        seed: int | None = None,
+        device: str | None = None,
         wandb_name: str = "BatchTopKSAE",
-        submodule_name: Optional[str] = None,
+        submodule_name: str | None = None,
     ):
         super().__init__(seed)
         assert layer is not None and lm_name is not None
@@ -188,9 +174,9 @@ class MatryoshkaBatchTopKTrainer(SAETrainer):
         if group_weights is None:
             group_weights = [(1.0 / len(group_sizes))] * len(group_sizes)
 
-        assert len(group_sizes) == len(group_weights), (
-            "group_sizes and group_weights must have the same length"
-        )
+        assert len(group_sizes) == len(
+            group_weights
+        ), "group_sizes and group_weights must have the same length"
 
         self.group_fractions = group_fractions
         self.group_sizes = group_sizes
@@ -214,9 +200,7 @@ class MatryoshkaBatchTopKTrainer(SAETrainer):
         self.dead_feature_threshold = 10_000_000
         self.top_k_aux = activation_dim // 2  # Heuristic from B.1 of the paper
 
-        self.optimizer = t.optim.Adam(
-            self.ae.parameters(), lr=self.lr, betas=(0.9, 0.999)
-        )
+        self.optimizer = t.optim.Adam(self.ae.parameters(), lr=self.lr, betas=(0.9, 0.999))
 
         lr_fn = get_lr_schedule(steps, warmup_steps, decay_start, resample_steps=None)
         self.scheduler = t.optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=lr_fn)
@@ -232,15 +216,13 @@ class MatryoshkaBatchTopKTrainer(SAETrainer):
         self.pre_norm_auxk_loss = -1
 
     def update_annealed_k(
-        self, step: int, activation_dim: int, k_anneal_steps: Optional[int] = None
+        self, step: int, activation_dim: int, k_anneal_steps: int | None = None
     ) -> None:
         """Update k buffer in-place with annealed value"""
         if k_anneal_steps is None:
             return
 
-        assert 0 <= k_anneal_steps < self.steps, (
-            "k_anneal_steps must be >= 0 and < steps."
-        )
+        assert 0 <= k_anneal_steps < self.steps, "k_anneal_steps must be >= 0 and < steps."
         # self.k is the target k set for the trainer, not the dictionary's current k
         assert activation_dim > self.k, "activation_dim must be greater than k"
 
@@ -264,28 +246,19 @@ class MatryoshkaBatchTopKTrainer(SAETrainer):
             auxk_acts, auxk_indices = auxk_latents.topk(k_aux, sorted=False)
 
             auxk_buffer_BF = t.zeros_like(post_relu_acts_BF)
-            auxk_acts_BF = auxk_buffer_BF.scatter_(
-                dim=-1, index=auxk_indices, src=auxk_acts
-            )
+            auxk_acts_BF = auxk_buffer_BF.scatter_(dim=-1, index=auxk_indices, src=auxk_acts)
 
             # We don't want to apply the bias
             x_reconstruct_aux = auxk_acts_BF @ self.ae.W_dec
             l2_loss_aux = (
-                (residual_BD.float() - x_reconstruct_aux.float())
-                .pow(2)
-                .sum(dim=-1)
-                .mean()
+                (residual_BD.float() - x_reconstruct_aux.float()).pow(2).sum(dim=-1).mean()
             )
 
             self.pre_norm_auxk_loss = l2_loss_aux
 
             # normalization from OpenAI implementation: https://github.com/openai/sparse_autoencoder/blob/main/sparse_autoencoder/kernels.py#L614
-            residual_mu = residual_BD.mean(dim=0)[None, :].broadcast_to(
-                residual_BD.shape
-            )
-            loss_denom = (
-                (residual_BD.float() - residual_mu.float()).pow(2).sum(dim=-1).mean()
-            )
+            residual_mu = residual_BD.mean(dim=0)[None, :].broadcast_to(residual_BD.shape)
+            loss_denom = (residual_BD.float() - residual_mu.float()).pow(2).sum(dim=-1).mean()
             normalized_auxk_loss = l2_loss_aux / loss_denom
 
             return normalized_auxk_loss.nan_to_num(0.0)
@@ -332,9 +305,7 @@ class MatryoshkaBatchTopKTrainer(SAETrainer):
             acts_slice = f_chunks[i]
             x_reconstruct = x_reconstruct + acts_slice @ W_dec_slice
 
-            l2_loss = (x - x_reconstruct).pow(2).sum(
-                dim=-1
-            ).mean() * self.group_weights[i]
+            l2_loss = (x - x_reconstruct).pow(2).sum(dim=-1).mean() * self.group_weights[i]
             total_l2_loss += l2_loss
             l2_losses = t.cat([l2_losses, l2_loss.unsqueeze(0)])
 
@@ -350,9 +321,7 @@ class MatryoshkaBatchTopKTrainer(SAETrainer):
         self.num_tokens_since_fired += num_tokens_in_step
         self.num_tokens_since_fired[did_fire] = 0
 
-        auxk_loss = self.get_auxiliary_loss(
-            (x - x_reconstruct).detach(), post_relu_acts_BF
-        )
+        auxk_loss = self.get_auxiliary_loss((x - x_reconstruct).detach(), post_relu_acts_BF)
         loss = mean_l2_loss + self.auxk_alpha * auxk_loss
 
         if not logging:

@@ -1,13 +1,8 @@
 # stitcher.py
 from __future__ import annotations
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
-import copy
-import inspect
-import re
+
 import torch as th
 import torch.nn as nn
-from t2Interp.T2I import T2IModel
 
 # class Mapper(nn.Module):
 #     """
@@ -17,7 +12,8 @@ from t2Interp.T2I import T2IModel
 #     # mapper training
 #     def train():
 #         pass
-    
+
+
 class AffineMapper(nn.Module):
     def __init__(self, input_dim: int):
         super().__init__()
@@ -26,7 +22,8 @@ class AffineMapper(nn.Module):
 
     def forward(self, x: th.Tensor) -> th.Tensor:
         return x * self.scale + self.shift
-    
+
+
 class MLPMapper(nn.Module):
     def __init__(self, input_dim: int, output_dim: int, hidden_dim: int = 512):
         super().__init__()
@@ -43,15 +40,16 @@ class MLPMapper(nn.Module):
             return next(self.parameters()).device
         except StopIteration:  # no params? fall back to CPU or a buffer (if you add one)
             return th.device("cpu")
-        
+
     def forward(self, x: th.Tensor) -> th.Tensor:
         return self.network(x)
-    
+
+
 class MLPMapperTwoHeads(nn.Module):
     def __init__(
         self,
         input_dim: int,
-        output_dims: list[int],     # must be length 2
+        output_dims: list[int],  # must be length 2
         hidden_dim: int = 512,
         activation: nn.Module = nn.ReLU(),
         dropout: float = 0.0,
@@ -82,4 +80,4 @@ class MLPMapperTwoHeads(nn.Module):
         h = self.trunk(x)
         y1 = self.head1(h)
         y2 = self.head2(h)
-        return y1, y2   
+        return y1, y2

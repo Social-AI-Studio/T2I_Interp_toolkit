@@ -1,8 +1,10 @@
-import torch as th
-from t2Interp.accessors import ModuleAccessor, AttentionAccessor, IOType
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, List, Tuple
+
+import torch as th
+
+from t2Interp.accessors import IOType, ModuleAccessor
 from t2Interp.blocks import TransformerBlock
+
 
 @dataclass
 class DualStreamBlock(TransformerBlock):
@@ -26,61 +28,99 @@ class DualStreamBlock(TransformerBlock):
     """
 
     # per-stream norms
-    image_pre_norm_in:  Optional[ModuleAccessor] = None
-    image_pre_norm_out: Optional[ModuleAccessor] = None
-    text_pre_norm_in:   Optional[ModuleAccessor] = None
-    text_pre_norm_out:  Optional[ModuleAccessor] = None
-    image_post_norm_in: Optional[ModuleAccessor] = None
-    image_post_norm_out:Optional[ModuleAccessor] = None
-    text_post_norm_in:  Optional[ModuleAccessor] = None
-    
+    image_pre_norm_in: ModuleAccessor | None = None
+    image_pre_norm_out: ModuleAccessor | None = None
+    text_pre_norm_in: ModuleAccessor | None = None
+    text_pre_norm_out: ModuleAccessor | None = None
+    image_post_norm_in: ModuleAccessor | None = None
+    image_post_norm_out: ModuleAccessor | None = None
+    text_post_norm_in: ModuleAccessor | None = None
 
     # image-stream MLP slots
-    mlp_image_up_in:   Optional[ModuleAccessor] = None
-    mlp_image_up_out:  Optional[ModuleAccessor] = None
-    mlp_image_act_in:  Optional[ModuleAccessor] = None
-    mlp_image_act_out: Optional[ModuleAccessor] = None
-    mlp_image_down_in: Optional[ModuleAccessor] = None
-    mlp_image_down_out:Optional[ModuleAccessor] = None
+    mlp_image_up_in: ModuleAccessor | None = None
+    mlp_image_up_out: ModuleAccessor | None = None
+    mlp_image_act_in: ModuleAccessor | None = None
+    mlp_image_act_out: ModuleAccessor | None = None
+    mlp_image_down_in: ModuleAccessor | None = None
+    mlp_image_down_out: ModuleAccessor | None = None
 
     # text-stream MLP slots
-    mlp_text_up_in:   Optional[ModuleAccessor] = None
-    mlp_text_up_out:  Optional[ModuleAccessor] = None
-    mlp_text_act_in:  Optional[ModuleAccessor] = None
-    mlp_text_act_out: Optional[ModuleAccessor] = None
-    mlp_text_down_in: Optional[ModuleAccessor] = None
-    mlp_text_down_out: Optional[ModuleAccessor] = None
+    mlp_text_up_in: ModuleAccessor | None = None
+    mlp_text_up_out: ModuleAccessor | None = None
+    mlp_text_act_in: ModuleAccessor | None = None
+    mlp_text_act_out: ModuleAccessor | None = None
+    mlp_text_down_in: ModuleAccessor | None = None
+    mlp_text_down_out: ModuleAccessor | None = None
 
     def __init__(self, module: th.nn.Module):
-        self.in_ = ModuleAccessor(module,"dual_stream_input",IOType.INPUT)
-        self.out_ = ModuleAccessor(module,"dual_stream_output",IOType.OUTPUT)
-        
+        self.in_ = ModuleAccessor(module, "dual_stream_input", IOType.INPUT)
+        self.out_ = ModuleAccessor(module, "dual_stream_output", IOType.OUTPUT)
+
         # norms
-        self.image_pre_norm_in = ModuleAccessor(module.norm1, "dual_stream_image_pre_norm", IOType.INPUT)
-        self.image_pre_norm_out = ModuleAccessor(module.norm1, "dual_stream_image_pre_norm", IOType.OUTPUT)
-        self.text_pre_norm_in = ModuleAccessor(module.norm1_context, "dual_stream_text_pre_norm", IOType.INPUT)
-        self.text_pre_norm_out = ModuleAccessor(module.norm1_context, "dual_stream_text_pre_norm", IOType.OUTPUT)
-        self.image_post_norm_in = ModuleAccessor(module.norm2, "dual_stream_image_post_norm", IOType.INPUT)
-        self.image_post_norm_out = ModuleAccessor(module.norm2, "dual_stream_image_post_norm", IOType.OUTPUT)
-        self.text_post_norm_in = ModuleAccessor(module.norm2_context, "dual_stream_text_post_norm", IOType.INPUT)
-        self.text_post_norm_out = ModuleAccessor(module.norm2_context, "dual_stream_text_post_norm", IOType.OUTPUT)
-        
+        self.image_pre_norm_in = ModuleAccessor(
+            module.norm1, "dual_stream_image_pre_norm", IOType.INPUT
+        )
+        self.image_pre_norm_out = ModuleAccessor(
+            module.norm1, "dual_stream_image_pre_norm", IOType.OUTPUT
+        )
+        self.text_pre_norm_in = ModuleAccessor(
+            module.norm1_context, "dual_stream_text_pre_norm", IOType.INPUT
+        )
+        self.text_pre_norm_out = ModuleAccessor(
+            module.norm1_context, "dual_stream_text_pre_norm", IOType.OUTPUT
+        )
+        self.image_post_norm_in = ModuleAccessor(
+            module.norm2, "dual_stream_image_post_norm", IOType.INPUT
+        )
+        self.image_post_norm_out = ModuleAccessor(
+            module.norm2, "dual_stream_image_post_norm", IOType.OUTPUT
+        )
+        self.text_post_norm_in = ModuleAccessor(
+            module.norm2_context, "dual_stream_text_post_norm", IOType.INPUT
+        )
+        self.text_post_norm_out = ModuleAccessor(
+            module.norm2_context, "dual_stream_text_post_norm", IOType.OUTPUT
+        )
+
         # image MLP
-        self.mlp_image_up_in = ModuleAccessor(module.mlp_image.up, "dual_stream_mlp_image_up", IOType.INPUT)
-        self.mlp_image_up_out = ModuleAccessor(module.mlp_image.up.proj, "dual_stream_mlp_image_up", IOType.OUTPUT)
-        self.mlp_image_act_in = ModuleAccessor(module.mlp_image.act, "dual_stream_mlp_image_act", IOType.INPUT)
-        self.mlp_image_act_out = ModuleAccessor(module.mlp_image.act, "dual_stream_mlp_image_act", IOType.OUTPUT)
-        self.mlp_image_down_in = ModuleAccessor(module.mlp_image.down, "dual_stream_mlp_image_down", IOType.INPUT)
-        self.mlp_image_down_out = ModuleAccessor(module.mlp_image.down, "dual_stream_mlp_image_down", IOType.OUTPUT)
-        
+        self.mlp_image_up_in = ModuleAccessor(
+            module.mlp_image.up, "dual_stream_mlp_image_up", IOType.INPUT
+        )
+        self.mlp_image_up_out = ModuleAccessor(
+            module.mlp_image.up.proj, "dual_stream_mlp_image_up", IOType.OUTPUT
+        )
+        self.mlp_image_act_in = ModuleAccessor(
+            module.mlp_image.act, "dual_stream_mlp_image_act", IOType.INPUT
+        )
+        self.mlp_image_act_out = ModuleAccessor(
+            module.mlp_image.act, "dual_stream_mlp_image_act", IOType.OUTPUT
+        )
+        self.mlp_image_down_in = ModuleAccessor(
+            module.mlp_image.down, "dual_stream_mlp_image_down", IOType.INPUT
+        )
+        self.mlp_image_down_out = ModuleAccessor(
+            module.mlp_image.down, "dual_stream_mlp_image_down", IOType.OUTPUT
+        )
+
         # text MLP
-        self.mlp_text_up_in = ModuleAccessor(module.mlp_text.up, "dual_stream_mlp_text_up", IOType.INPUT)
-        self.mlp_text_up_out = ModuleAccessor(module.mlp_text.up, "dual_stream_mlp_text_up", IOType.OUTPUT)
-        self.mlp_text_act_in = ModuleAccessor(module.mlp_text.act, "dual_stream_mlp_text_act", IOType.INPUT)
-        self.mlp_text_act_out = ModuleAccessor(module.mlp_text.act, "dual_stream_mlp_text_act", IOType.OUTPUT)
-        self.mlp_text_down_in = ModuleAccessor(module.mlp_text.down, "dual_stream_mlp_text_down", IOType.INPUT)
-        self.mlp_text_down_out = ModuleAccessor(module.mlp_text.down, "dual_stream_mlp_text_down", IOType.OUTPUT)
-      
+        self.mlp_text_up_in = ModuleAccessor(
+            module.mlp_text.up, "dual_stream_mlp_text_up", IOType.INPUT
+        )
+        self.mlp_text_up_out = ModuleAccessor(
+            module.mlp_text.up, "dual_stream_mlp_text_up", IOType.OUTPUT
+        )
+        self.mlp_text_act_in = ModuleAccessor(
+            module.mlp_text.act, "dual_stream_mlp_text_act", IOType.INPUT
+        )
+        self.mlp_text_act_out = ModuleAccessor(
+            module.mlp_text.act, "dual_stream_mlp_text_act", IOType.OUTPUT
+        )
+        self.mlp_text_down_in = ModuleAccessor(
+            module.mlp_text.down, "dual_stream_mlp_text_down", IOType.INPUT
+        )
+        self.mlp_text_down_out = ModuleAccessor(
+            module.mlp_text.down, "dual_stream_mlp_text_down", IOType.OUTPUT
+        )
 
     def summary(self) -> str:
         return (

@@ -1,16 +1,32 @@
-import torch as t
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
-from dataclasses import dataclass
-from utils.buffer import t2IActivationBuffer
-from utils.text_img_util import  _prep_prompts_images, CaptureInputHook, CaptureOutputHook, flatten_batch, run_with_hook
-from t2Interp.T2I import T2IModel
-from t2Interp.accessors import ModuleAccessor, IOType
-from utils.utils import cache_path, convert_buffer_to_memap,ActivationConfig, ShardedActivationMemmapDataset, CachedActivationIterator
 import os
+from collections.abc import Callable
+from typing import Any
+
+import torch as t
+
+from t2Interp.accessors import IOType, ModuleAccessor
+from t2Interp.T2I import T2IModel
+from utils.buffer import t2IActivationBuffer
+from utils.text_img_util import (
+    CaptureInputHook,
+    CaptureOutputHook,
+    _prep_prompts_images,
+    flatten_batch,
+    run_with_hook,
+)
+from utils.utils import (
+    ActivationConfig,
+    CachedActivationIterator,
+    ShardedActivationMemmapDataset,
+    cache_path,
+    convert_buffer_to_memap,
+)
+
 Tensor = t.Tensor
 # ---- Your class imports assumed available ----
 # from t2Interp.T2I import T2IModel
 # from dictionary_learning.buffer import NNsightActivationBuffer
+
 
 class TextImageActivationBuffer(t2IActivationBuffer):
     """
@@ -22,25 +38,32 @@ class TextImageActivationBuffer(t2IActivationBuffer):
 
     def __init__(
         self,
-        data,                              # iterator / generator yielding samples
+        data,  # iterator / generator yielding samples
         model: T2IModel,
         submodule: ModuleAccessor,
-        d_submodule: Optional[int] = None,
+        d_submodule: int | None = None,
         n_ctxs: int = int(3e4),
         refresh_batch_size: int = 512,
         out_batch_size: int = 512,
         data_device: str = "cpu",
-        denoiser_steps: list[int] =[0],     # 0-based call index; None = capture on any (first/last managed by policy)
-        reduce_fn: Optional[Callable[[Tensor], Tensor]] = None,
-        **kwargs: Optional[Dict[str, Any]],  # default kwargs passed to pipeline(...)
+        denoiser_steps: list[int] = [
+            0
+        ],  # 0-based call index; None = capture on any (first/last managed by policy)
+        reduce_fn: Callable[[Tensor], Tensor] | None = None,
+        **kwargs: dict[str, Any] | None,  # default kwargs passed to pipeline(...)
     ):
         super().__init__(
-            data=data, model=model, submodule=submodule, d_submodule=d_submodule,
-            n_ctxs=n_ctxs, refresh_batch_size=refresh_batch_size,
-            out_batch_size=out_batch_size, data_device=data_device
+            data=data,
+            model=model,
+            submodule=submodule,
+            d_submodule=d_submodule,
+            n_ctxs=n_ctxs,
+            refresh_batch_size=refresh_batch_size,
+            out_batch_size=out_batch_size,
+            data_device=data_device,
         )
         self.capture = submodule.io_type
-        self.denoiser_steps= denoiser_steps
+        self.denoiser_steps = denoiser_steps
         self.reduce_fn = reduce_fn
         self.pipeline_kwargs = kwargs if kwargs is not None else {}
 
@@ -80,7 +103,11 @@ class TextImageActivationBuffer(t2IActivationBuffer):
             pipe_kwargs = dict(self.pipeline_kwargs)
 
             # If all prompts empty, avoid CFG pulling toward text by mistake
-            if "prompt" in io and isinstance(io["prompt"], list) and all(p == "" for p in io["prompt"]):
+            if (
+                "prompt" in io
+                and isinstance(io["prompt"], list)
+                and all(p == "" for p in io["prompt"])
+            ):
                 pipe_kwargs.setdefault("guidance_scale", 1.0)
 
             # build the appropriate capture hook
@@ -91,8 +118,12 @@ class TextImageActivationBuffer(t2IActivationBuffer):
                 device=self.device,
                 reduce_fn=self.reduce_fn,
             )
-            
-            cap = CaptureOutputHook(**common) if self.capture == IOType.OUTPUT else CaptureInputHook(**common)
+
+            cap = (
+                CaptureOutputHook(**common)
+                if self.capture == IOType.OUTPUT
+                else CaptureInputHook(**common)
+            )
 
             # run pipeline once with the hook; we don't use the return value here
             _ = run_with_hook(
@@ -100,10 +131,10 @@ class TextImageActivationBuffer(t2IActivationBuffer):
                 batch=batch_raw,
                 module=self._target_module,
                 hook_obj=cap,
-                io_type=self.capture,            # IOType.OUTPUT or IOType.INPUT
-                **self.pipeline_kwargs,          # forwarded as-is
+                io_type=self.capture,  # IOType.OUTPUT or IOType.INPUT
+                **self.pipeline_kwargs,  # forwarded as-is
             )
-            
+
             if cap.last is None:
                 # Probably wrong submodule or step_index out of range for this submodule in this call.
                 # Skip this mini-batch and continue.
@@ -118,30 +149,35 @@ class TextImageActivationBuffer(t2IActivationBuffer):
             # reset read mask
             self.read = t.zeros(len(self.activations), dtype=t.bool, device=self.device)
 
-def _build_buffer(
-        ds, model, accessor, dataset, split: str, cfg: ActivationConfig
-    ):
-        """Create activation buffer for a split, possibly memmapped and/or cached."""
-        # live iterator
-        if not cfg.data_loader_kwargs.get("use_memmap", False):
-            buf = TextImageActivationBuffer(
-                ds, model, accessor,
-                # d_submodule=cfg.data_loader_kwargs.get("d_submodule", None),
-                **cfg.data_loader_kwargs
-            )
-        else:
-            mm_dir = cache_path(dataset,accessor.attr_name, split, cfg.data_loader_kwargs.get("subset", None))
-            if os.path.exists(mm_dir):
-                buf = ShardedActivationMemmapDataset(mm_dir, **cfg.data_loader_kwargs)
-            else:
-                live = TextImageActivationBuffer(
-                    ds, model, accessor,
-                    # d_submodule=cfg.data_loader_kwargs.get("d_submodule", None),
-                    **cfg.data_loader_kwargs
-                )
-                
-                buf = convert_buffer_to_memap(live, memmap_dir=mm_dir, **cfg.data_loader_kwargs)
 
-        if cfg.data_loader_kwargs.get("cache_activations", False):
-            buf = CachedActivationIterator(buf, **cfg.data_loader_kwargs)
-        return buf
+def _build_buffer(ds, model, accessor, dataset, split: str, cfg: ActivationConfig):
+    """Create activation buffer for a split, possibly memmapped and/or cached."""
+    # live iterator
+    if not cfg.data_loader_kwargs.get("use_memmap", False):
+        buf = TextImageActivationBuffer(
+            ds,
+            model,
+            accessor,
+            # d_submodule=cfg.data_loader_kwargs.get("d_submodule", None),
+            **cfg.data_loader_kwargs,
+        )
+    else:
+        mm_dir = cache_path(
+            dataset, accessor.attr_name, split, cfg.data_loader_kwargs.get("subset", None)
+        )
+        if os.path.exists(mm_dir):
+            buf = ShardedActivationMemmapDataset(mm_dir, **cfg.data_loader_kwargs)
+        else:
+            live = TextImageActivationBuffer(
+                ds,
+                model,
+                accessor,
+                # d_submodule=cfg.data_loader_kwargs.get("d_submodule", None),
+                **cfg.data_loader_kwargs,
+            )
+
+            buf = convert_buffer_to_memap(live, memmap_dir=mm_dir, **cfg.data_loader_kwargs)
+
+    if cfg.data_loader_kwargs.get("cache_activations", False):
+        buf = CachedActivationIterator(buf, **cfg.data_loader_kwargs)
+    return buf

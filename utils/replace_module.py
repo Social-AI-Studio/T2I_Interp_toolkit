@@ -1,10 +1,12 @@
 import copy
 import fnmatch
-from typing import Callable, Union, Tuple, List
+from collections.abc import Callable
+from typing import Union
+
 import torch.nn as nn
-from ..hooked_modules.hooked_attention import HookedCrossAttention,Dummy
 
 ModuleOrFactory = Union[nn.Module, Callable[[nn.Module, str], nn.Module]]
+
 
 def _parent_and_attr(model: nn.Module, dotted: str):
     """
@@ -17,23 +19,26 @@ def _parent_and_attr(model: nn.Module, dotted: str):
         parent = getattr(parent, p)
     return parent, parts[-1]
 
+
 def _all_named_modules(model: nn.Module):
     """Stable snapshot of named_modules so we can mutate safely later."""
     return list(model.named_modules())  # (name, module), includes root as ("", model)
+
 
 def _device_dtype_of(mod: nn.Module):
     for t in list(mod.parameters()) + list(mod.buffers()):
         return t.device, t.dtype
     return None, None
 
+
 def replace_modules(
     model: nn.Module,
-    module_to_replace: Union[type, Tuple[type, ...], str, List[str]],
+    module_to_replace: type | tuple[type, ...] | str | list[str],
     new_module: ModuleOrFactory,
     *,
     copy_state: bool = True,
     strict_state: bool = False,
-    name_scope: str = "",     # optional: only replace under this prefix (glob supported)
+    name_scope: str = "",  # optional: only replace under this prefix (glob supported)
 ) -> int:
     """
     Replace modules in `model`.
@@ -58,7 +63,7 @@ def replace_modules(
     # Gather targets
     named = _all_named_modules(model)
     # Build the set of (name, module) to replace
-    targets: List[Tuple[str, nn.Module]] = []
+    targets: list[tuple[str, nn.Module]] = []
 
     def _match_name(n: str) -> bool:
         if not name_scope:

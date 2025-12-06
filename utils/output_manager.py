@@ -1,16 +1,23 @@
 from __future__ import annotations
-from dataclasses import dataclass, asdict, field
+
+import datetime
+import json
+import shutil
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Union, Mapping
-import json, os, shutil, datetime, hashlib
-from utils.output import Output
-from utils.utils import _to_jsonable
+from typing import Any
+
+import torch
+
 from reporting.config_loader import load_config
 from reporting.wandb import WandbReporter
-import torch
+from utils.output import Output
+from utils.utils import _to_jsonable
+
 
 def _ts():
     return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat()
+
 
 # def _safe_json(obj: Any):
 #     def default(o):
@@ -21,7 +28,6 @@ def _ts():
 #     return json.dumps(obj, default=default, ensure_ascii=False, indent=2)
 
 
-
 @dataclass
 # class OutputManagerConfig:
 #     root_dir: Union[str, Path] = "./runs"
@@ -30,12 +36,12 @@ def _ts():
 class OutputManager:
     # cfg: OutputManagerConfig
     run_dir: Path = field(init=False)
-    paths: Dict[str, Path] = field(init=False, default_factory=dict)
+    paths: dict[str, Path] = field(init=False, default_factory=dict)
 
     def __init__(self, **kwargs):
         assert kwargs.get("workflow") is not None, "OutputManager requires a workflow argument"
         assert kwargs.get("run_name") is not None, "OutputManager requires a run_name argument"
-        
+
         self.root_dir = kwargs.get("root_dir", "./runs")
         root = Path(self.root_dir)
         self.workflow = kwargs.get("workflow")
@@ -75,10 +81,10 @@ class OutputManager:
         tmp.replace(p)
         return p
 
-    def save_best_ckpt(self,out: Output, **kwargs):
+    def save_best_ckpt(self, out: Output, **kwargs):
         torch.save(out.best_ckpt, self.paths["artifacts"] / "best_ckpt.pt")
         return
-    
+
     def write_to_wandb(self, out: Output, **kwargs):
         wb_cfg = kwargs.get("wandb_init_kwargs", load_config("reporting/config.yaml"))
         reporter = WandbReporter(init_kwargs=wb_cfg)
@@ -92,14 +98,16 @@ class OutputManager:
         tmp.replace(p)
         return p
 
-    def copy_in(self, src: Union[str, Path], rel_dst: str) -> Path:
+    def copy_in(self, src: str | Path, rel_dst: str) -> Path:
         src = Path(src)
         dst = self.run_dir / rel_dst
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         return dst
 
-    def register_artifact(self, local_path: Union[str, Path], *, subdir: str = "artifacts", name: Optional[str] = None) -> Path:
+    def register_artifact(
+        self, local_path: str | Path, *, subdir: str = "artifacts", name: str | None = None
+    ) -> Path:
         src = Path(local_path)
         name = name or src.name
         return self.copy_in(src, f"{subdir}/{name}")

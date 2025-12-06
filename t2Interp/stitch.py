@@ -1,36 +1,39 @@
 # stitcher.py
 from __future__ import annotations
+
+from collections.abc import Callable, Generator
+from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union, Generator
-import copy
-import inspect
-import re
+from itertools import tee
+from typing import Any
+
 import torch as th
 import torch.nn as nn
-from t2Interp.T2I import T2IModel
-from utils.output import Output
+
 from dictionary_learning.utils import hf_dataset_to_generator
+from t2Interp.T2I import T2IModel
 from utils.buffer import t2IActivationBuffer
-from tqdm import tqdm
-from contextlib import nullcontext
+from utils.output import Output
 from utils.runningstats import TrainUpdate
-from itertools import tee
+
 
 @dataclass
 class StitchResult(Output):
-    model: Optional[T2IModel] = None  
-    info: Dict[str, Any] = None
+    model: T2IModel | None = None
+    info: dict[str, Any] = None
 
 
 class MaskSpec:
-    module:nn.Module
+    module: nn.Module
     value: Any
-    
+
     def __repr__(self):
         return f"MaskSpec(module={self.module}, value={self.value})"
-    
+
+
 # ModuleSpec = Union[str, nn.Module]
 # MaybeModels = Union[nn.Module, Sequence[nn.Module]]
+
 
 class Stitcher:
     """
@@ -59,22 +62,20 @@ class Stitcher:
         """
         with model.trace(prompt):
             module_to_skip.skip(replacement.output)
-            skipped_out=model.output.save()
+            skipped_out = model.output.save()
 
-        
         info = {"skipped_module": str(module_to_skip), "skipped_With": str(replacement)}
         return StitchResult(info=info, preds=skipped_out)
 
-    
     def run_diffusion_lens(
         self,
         prompt: str,
         model: T2IModel,
-        module_list: List[nn.Module],
+        module_list: list[nn.Module],
         final_module: nn.Module,
         # masked_module: Optional[nn.Module] = None,
-        masks: Optional[List[MaskSpec]] = None,
-        final_norm : Optional[nn.Module] = None,
+        masks: list[MaskSpec] | None = None,
+        final_norm: nn.Module | None = None,
         **kwargs,
     ) -> StitchResult:
         """
@@ -84,9 +85,9 @@ class Stitcher:
         Requirements:
           - `model` has a __call__ that accepts `callback` and `callback_steps` (most HF diffusion pipelines).
           - For decoded collection, model.vae must be present or you pass `decode_fn(model, latents)`.
-        """     
-        # info=[]  
-        preds=[]  
+        """
+        # info=[]
+        preds = []
         for m in module_list:
             with model.generate(
                 prompt,
@@ -95,11 +96,11 @@ class Stitcher:
                 if masks:
                     for mask in masks:
                         mask.module.output = mask.value
-                        
+
                 if final_norm:
-                    final_norm.value = m.value #m.output[0]
+                    final_norm.value = m.value  # m.output[0]
                 else:
-                    final_module.value = m.value #m.output[0]
+                    final_module.value = m.value  # m.output[0]
 
                 output = model.output.save()
                 # info.append({"module": m, "image": image, "masks": masks})
@@ -117,28 +118,26 @@ class Stitcher:
         Join two models at specified modules.
         - model_a: first model (gets module_b inserted)
         - model_b: second model (source of module_b)"""
-        
+
         # implement "Distilling Diversity and Control in Diffusion Models"
         # code to be adapted from - https://github.com/rohitgandikota/distillation/blob/32f59eaba3f04a73c53462f291805adcbf0354e3/utils/utils.py
 
         info = {
             "model_a_path": module_a,
             "model_b_path": module_b,
-           
         }
         return StitchResult(info=info)
-    
+
     def map(
         self,
         model_a: T2IModel,
-        model_b: Optional[T2IModel],
+        model_b: T2IModel | None,
         module_a: str,
         module_b: str,
         mapper: nn.Module,
         prompt: str,
         **kwargs,
     ) -> StitchResult:
-        
         if model_b:
             with model_a.generate(prompt, **kwargs) as tracer:
                 output_a = model_a.output.save()
@@ -150,10 +149,10 @@ class Stitcher:
         else:
             with model_a.generate(prompt, **kwargs) as tracer:
                 output_a = model_a.output.save()
-                input_b= mapper(output_a)
+                input_b = mapper(output_a)
                 module_b.input = input_b
                 model_out = model_a.output.save()
-            
+
         return StitchResult(info={"mapped_output": model_out})
 
     def train_mapper(
@@ -164,37 +163,46 @@ class Stitcher:
         module_a: str,
         module_b: str,
         mapper: nn.Module,
-        optimizers: List[th.optim.Optimizer],
-        model_b: Optional[T2IModel] = None,
-        training_device:str="cuda",
-        data_device:str="cpu",
+        optimizers: list[th.optim.Optimizer],
+        model_b: T2IModel | None = None,
+        training_device: str = "cuda",
+        data_device: str = "cpu",
         autocast_dtype: th.dtype = th.float32,
-        loss_fn: Optional[Callable] = None,
+        loss_fn: Callable | None = None,
         **kwargs,
-        ) -> Generator[TrainUpdate, None, nn.Module]:
-
-        generator = hf_dataset_to_generator(hf_dataset,**kwargs)
+    ) -> Generator[TrainUpdate, None, nn.Module]:
+        generator = hf_dataset_to_generator(hf_dataset, **kwargs)
         gen_a, gen_b = tee(generator)
         d_sub = kwargs.pop("d_submodule_a", kwargs.pop("d_submodule", None))
-        buffer_a = t2IActivationBuffer(gen_a, model_a, module_a,d_submodule=d_sub, **kwargs)
+        buffer_a = t2IActivationBuffer(gen_a, model_a, module_a, d_submodule=d_sub, **kwargs)
         d_sub = kwargs.pop("d_submodule_b", d_sub)
-        buffer_b = t2IActivationBuffer(gen_b, model_b if model_b is not None else model_a, module_b,d_submodule=d_sub, **kwargs)
-        
-        log_steps = kwargs.get("log_steps", 100)  
-        autocast_context = nullcontext() if training_device == "cpu" else th.autocast(device_type=training_device, dtype=autocast_dtype)
-        
-        for step, (act_a, act_b) in enumerate(zip(buffer_a,buffer_b)):
+        buffer_b = t2IActivationBuffer(
+            gen_b,
+            model_b if model_b is not None else model_a,
+            module_b,
+            d_submodule=d_sub,
+            **kwargs,
+        )
+
+        log_steps = kwargs.get("log_steps", 100)
+        autocast_context = (
+            nullcontext()
+            if training_device == "cpu"
+            else th.autocast(device_type=training_device, dtype=autocast_dtype)
+        )
+
+        for step, (act_a, act_b) in enumerate(zip(buffer_a, buffer_b, strict=False)):
             with autocast_context:
                 # if loss_fn:
                 #     mapped,loss = mapper(act_a,loss_fn=loss_fn)
                 # else:
-                mapped = mapper(act_a) 
+                mapped = mapper(act_a)
                 if loss_fn:
                     loss = loss_fn(mapped, act_b)
-                else:   
+                else:
                     loss = th.nn.functional.mse_loss(mapped, act_b)
                 loss.backward()
-                        
+
                 for opt in optimizers:
                     opt.step()
                     opt.zero_grad()
@@ -202,13 +210,11 @@ class Stitcher:
                 if log_steps and step % log_steps == 0:
                     update = TrainUpdate(step=step, parts={"loss": loss.item()})
                     yield update
-                
+
             if step >= steps:
                 break
-        return mapper    
-                
-                
-    
+        return mapper
+
 
 # if __name__ == "__main__":
 #     # Minimal smoke test on toy modules (no diffusers dependency).

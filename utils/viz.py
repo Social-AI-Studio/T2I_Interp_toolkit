@@ -1,17 +1,19 @@
-from typing import List, Optional, Union
-from pathlib import Path
 import math
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
-from utils.output import Output   
+
+from utils.output import Output
+
 
 def visualize_outputs(
-    outputs: Union[Output, List[Output]],
+    outputs: Output | list[Output],
     metric_name: str = "clip_score",
-    labels: Optional[List[str]] = None,
+    labels: list[str] | None = None,
     cols: int = 4,
     show: bool = True,
-    save_dir: Optional[Union[str, Path]] = None,
+    save_dir: str | Path | None = None,
     dpi: int = 100,
 ):
     """
