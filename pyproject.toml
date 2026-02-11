@@ -37,6 +37,8 @@ dependencies = [
     "datasets>=2.14.0",
     "zstandard>=0.21.0",
     "pyyaml>=6.0",
+    "torchvision>=0.24.1",
+    "einops>=0.8.2",
 ]
 
 [project.optional-dependencies]

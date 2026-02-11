@@ -1,8 +1,6 @@
 import random
 
 import torch as t
-from nnsight import LanguageModel
-
 from dictionary_learning.buffer import ActivationBuffer
 from dictionary_learning.dictionary import (
     AutoEncoder,
@@ -16,6 +14,7 @@ from dictionary_learning.utils import (
     hf_dataset_to_generator,
     load_dictionary,
 )
+from nnsight import LanguageModel
 
 EXPECTED_RESULTS = {
     "AutoEncoderTopK": {

@@ -9,8 +9,8 @@ from typing import Any
 
 import torch as th
 import torch.nn as nn
-
 from dictionary_learning.utils import hf_dataset_to_generator
+
 from t2Interp.T2I import T2IModel
 from utils.buffer import t2IActivationBuffer
 from utils.output import Output

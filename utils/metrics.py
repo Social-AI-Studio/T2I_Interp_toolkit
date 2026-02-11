@@ -2,7 +2,6 @@ from collections.abc import Sequence
 
 import torch
 from PIL import Image
-from PIL.Image import Image
 from transformers import CLIPModel, CLIPProcessor
 
 from utils.output import Output

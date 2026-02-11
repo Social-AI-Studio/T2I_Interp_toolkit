@@ -14,9 +14,9 @@ def test_mlp_mapper_initialization():
 
     mapper = MLPMapper(input_dim=input_dim, hidden_dim=hidden_dim, output_dim=output_dim)
 
-    assert mapper.input_dim == input_dim
-    assert mapper.hidden_dim == hidden_dim
-    assert mapper.output_dim == output_dim
+    # MLPMapper stores network as nn.Sequential, not individual dims
+    assert mapper.network is not None
+    assert len(list(mapper.parameters())) > 0
 
 
 def test_mlp_mapper_forward_pass():
@@ -52,15 +52,17 @@ def test_mlp_mapper_gradient_flow():
 
 def test_mlp_mapper_two_heads_initialization():
     """Test MLPMapperTwoHeads initialization."""
+    # Uses output_dims as a list, not output_dim_1/output_dim_2
     mapper = MLPMapperTwoHeads(
         input_dim=100,
         hidden_dim=50,
-        output_dim_1=7,
-        output_dim_2=3,
+        output_dims=[7, 3],
     )
 
-    assert mapper.output_dim_1 == 7
-    assert mapper.output_dim_2 == 3
+    # Check the heads exist
+    assert mapper.head1 is not None
+    assert mapper.head2 is not None
+    assert mapper.trunk is not None
 
 
 def test_mlp_mapper_two_heads_forward():
@@ -69,8 +71,7 @@ def test_mlp_mapper_two_heads_forward():
     mapper = MLPMapperTwoHeads(
         input_dim=100,
         hidden_dim=50,
-        output_dim_1=7,
-        output_dim_2=3,
+        output_dims=[7, 3],
     )
 
     x = torch.randn(batch_size, 100)
@@ -118,3 +119,31 @@ def test_mlp_mapper_device_placement():
         x_cuda = torch.randn(2, 100).cuda()
         output_cuda = mapper_cuda(x_cuda)
         assert output_cuda.device.type == "cuda"
+
+
+def test_mlp_mapper_device_property():
+    """Test MLPMapper.device property."""
+    mapper = MLPMapper(input_dim=100, hidden_dim=50, output_dim=10)
+    assert mapper.device == torch.device("cpu")
+
+
+def test_mlp_mapper_two_heads_device_property():
+    """Test MLPMapperTwoHeads.device property."""
+    mapper = MLPMapperTwoHeads(input_dim=100, hidden_dim=50, output_dims=[7, 3])
+    assert mapper.device == torch.device("cpu")
+
+
+def test_mlp_mapper_two_heads_with_dropout():
+    """Test MLPMapperTwoHeads with dropout enabled."""
+    mapper = MLPMapperTwoHeads(
+        input_dim=100,
+        hidden_dim=50,
+        output_dims=[7, 3],
+        dropout=0.1,
+    )
+
+    x = torch.randn(4, 100)
+    output1, output2 = mapper(x)
+
+    assert output1.shape == (4, 7)
+    assert output2.shape == (4, 3)

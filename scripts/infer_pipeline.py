@@ -6,8 +6,8 @@ from itertools import tee
 from typing import Any
 
 import torch as th
-
 from dictionary_learning.utils import hf_dataset_to_generator
+
 from reporting.config_loader import load_config, wandb_init_kwargs
 from t2Interp.accessors import ModuleAccessor
 from t2Interp.concept_search import CAA, KSteer

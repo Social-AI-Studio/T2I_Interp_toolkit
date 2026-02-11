@@ -1,16 +1,17 @@
 # from transformers import AutoModelForCausalLM, AutoTokenizer
 import os
+import warnings
 from collections import defaultdict
 from functools import partial
 
 import torch as t
 import torch.nn as nn
-
 from dictionary_learning.dictionary import Dictionary
 from dictionary_learning.training import trainSAE
 
 # from datasets import load_dataset
 from dictionary_learning.utils import hf_dataset_to_generator
+
 from t2Interp.accessors import IOType, ModuleAccessor
 from t2Interp.blocks import SAEBlock
 from t2Interp.T2I import T2IModel
@@ -21,7 +22,25 @@ from utils.utils import FunctionModule
 
 
 class SAEManager:
+    """
+    DEPRECATED: Use SAEManagerEdit instead for a cleaner .edit() based approach.
+
+    This hook-based SAE manager is kept for backwards compatibility.
+    New code should use:
+
+        from t2Interp.sae_edit import SAEManagerEdit
+        manager = SAEManagerEdit(model)
+        sae_block = manager.add_sae(target, sae, name)
+    """
+
     def __init__(self, model):
+        warnings.warn(
+            "SAEManager is deprecated. Use SAEManagerEdit instead:\n"
+            "  from t2Interp.sae_edit import SAEManagerEdit\n"
+            "  manager = SAEManagerEdit(model)",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.model: T2IModel = model
         self.registry_mod = {}  # dict: hook_name -> SAE module
         self._handles = []  # list of hook handles

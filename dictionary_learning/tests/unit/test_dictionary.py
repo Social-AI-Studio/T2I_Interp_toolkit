@@ -1,6 +1,5 @@
 import pytest
 import torch as t
-
 from dictionary_learning.dictionary import (
     AutoEncoder,
     AutoEncoderNew,

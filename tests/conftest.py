@@ -4,6 +4,17 @@ import pytest
 import torch
 
 
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+    )
+    config.addinivalue_line(
+        "markers",
+        "integration: marks tests as integration tests (deselect with '-m \"not integration\"')",
+    )
+
+
 @pytest.fixture
 def device():
     """Return CPU device for testing (avoid GPU requirements)."""
