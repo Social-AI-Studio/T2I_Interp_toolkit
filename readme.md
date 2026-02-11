@@ -4,8 +4,9 @@ A **text-to-image interpretation** toolkit for analyzing and steering diffusion 
 
 ## Features
 
-- **Activation Steering**: Learn mappers/classifiers from UNet activations and apply interventions
-- **SAE Analysis**: Train and analyze sparse autoencoders on diffusion model activations  
+- **SAE Analysis**: Train and analyze sparse autoencoders on diffusion model activations using the new `.edit()` based `SAEManagerEdit`
+- **Activation Steering**: Learn mappers/classifiers from model activations and apply interventions
+- **Feature Scaling**: Ablate or amplify individual SAE features with `SAEFeatureScalingIntervention`
 - **Flexible Hooks**: Hook into any layer of diffusion models (UNet, FLUX transformers, encoders)
 - **Clean Workflows**: Generator-based training API with live logging (tqdm, W&B, file logs)
 - **Organized Outputs**: Structured run folders with metadata, checkpoints, and artifacts
@@ -24,7 +25,7 @@ make install
 # Or manually with uv
 uv sync --extra dev
 
-# Activate the virtual environment (optional - you can use 'uv run' instead)
+# Activate the virtual environment
 source .venv/bin/activate
 ```
 
@@ -34,32 +35,72 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-## Using uv
-
-**Option 1: Activate the environment** (traditional way)
-```bash
-source .venv/bin/activate
-# Now you can run commands directly
-ruff check .
-pytest tests/
-```
-
-**Option 2: Use `uv run`** (no activation needed)
-```bash
-uv run ruff check .
-uv run pytest tests/
-```
-
-The Makefile uses `uv run` so you can use `make` commands without activating the environment.
-
 ### Optional: Authentication
 
 ```bash
-huggingface-cli login  # For dataset access
+huggingface-cli login  # For model/dataset access
 wandb login            # For experiment tracking
 ```
 
 ## Quick Start
+
+### Using SAEManagerEdit (recommended)
+
+```python
+from t2Interp import T2IModel, SAEManagerEdit
+
+# Load model
+model = T2IModel("stabilityai/sdxl-turbo", device="cuda", dtype="float16")
+
+# Create SAE manager and add a trained SAE
+manager = SAEManagerEdit(model)
+sae_block = manager.add_sae(
+    target_accessor=model.unet.mid_block.attentions[0],
+    sae=my_trained_sae,
+    name="mid_attn_sae",
+)
+
+# Apply edits to wire SAE into computation flow
+manager.apply_edits()
+
+# Trace SAE activations during generation
+with manager.edited_model.generate("A mountain landscape", validate=False, scan=False):
+    encoder_out = sae_block.encoder_out.value.save()
+
+# encoder_out now contains the SAE feature activations
+print(encoder_out.shape)
+```
+
+### Feature Ablation / Amplification
+
+```python
+from t2Interp import SAEFeatureScalingIntervention, run_intervention
+
+# Ablate specific features (set to 0)
+ablation = SAEFeatureScalingIntervention(
+    model=model,
+    accessors=[sae_block.encoder_out],
+    feature_indices=[42, 128, 256],
+    scale=0.0,  # 0.0 = ablate, >1.0 = amplify
+)
+
+# Run with intervention
+output = run_intervention(model, ["A mountain"], interventions=[ablation])
+```
+
+### Backward-compatible API
+
+```python
+# Old SAEManager interface still works via SAEManagerEdit
+manager = SAEManagerEdit(model)
+blocks = manager.add_saes_to_model(
+    sae_list=[(model.unet.conv_out, sae, "conv_sae")],
+    diff=True,  # SAE processes (output - input) residuals
+)
+
+# Run with cache
+cache = manager.run_with_cache("A mountain", num_inference_steps=1, seed=42)
+```
 
 ### Training a Steering Vector
 
@@ -84,37 +125,23 @@ python -m scripts.train_pipeline \
   --wandb_config reporting/config.yaml
 ```
 
-### Using the Training Script
-
-For training on multiple layers, use `scripts/train_pipeline.sh`:
-
-```bash
-bash scripts/train_pipeline.sh
-```
-
 ## Development
-
-### Setup Development Environment
-
-```bash
-make install  # Installs all dependencies including dev tools
-```
 
 ### Running Tests
 
 ```bash
-make test           # Run all tests
-make test-unit      # Run unit tests only
-make test-integration  # Run integration tests only
-make test-cov       # Run tests with coverage report
+make test              # Run all tests
+make test-unit         # Run unit tests only
+make test-integration  # Run integration tests only (requires GPU/model)
+make test-cov          # Run tests with coverage report
 ```
 
 ### Code Quality
 
 ```bash
-make lint           # Run ruff linter
-make format         # Format code with ruff
-make check          # Run all checks (lint + type check)
+make lint              # Run ruff linter
+make format            # Format code with ruff
+make check             # Run all checks (lint + type check)
 ```
 
 ### Running Experiments
@@ -123,7 +150,7 @@ make check          # Run all checks (lint + type check)
 # Training experiment
 make train DATASET=nirmalendu01/fairface-trainval-race-balanced-200
 
-# Inference experiment  
+# Inference experiment
 make infer RUN_NAME=my_experiment
 ```
 
@@ -131,51 +158,77 @@ make infer RUN_NAME=my_experiment
 
 ```
 .
-├── t2Interp/              # Core library
-│   ├── T2I.py            # Main model wrapper
-│   ├── accessors.py      # Layer access utilities
-│   ├── intervention.py   # Steering interventions
-│   ├── sae.py            # Sparse autoencoder
-│   └── ...
-├── utils/                # Utilities
-│   ├── buffer.py         # Activation buffers
-│   ├── training.py       # Training loops
-│   └── ...
-├── reporting/            # Logging and tracking
-│   ├── base.py          # Base updater interface
-│   └── wandb.py         # W&B integration
-├── scripts/             # Training scripts
+├── t2Interp/                # Core library
+│   ├── T2I.py               # Main T2IModel wrapper
+│   ├── accessors.py         # ModuleAccessor for layer I/O access
+│   ├── blocks.py            # SAEBlock, TransformerBlock, UnetTransformerBlock
+│   ├── intervention.py      # Intervention classes (steering, scaling, feature ablation)
+│   ├── sae_edit.py          # SAEManagerEdit (.edit() based - recommended)
+│   ├── sae.py               # SAEManager (hook-based - deprecated)
+│   ├── mapper.py            # MLPMapper, MLPMapperTwoHeads
+│   ├── concept_search.py    # KSteer, CAA steering classes
+│   ├── unet.py              # UNet component wrappers
+│   ├── clip_encoder.py      # CLIP encoder wrapper
+│   ├── t5_encoder.py        # T5 encoder wrapper
+│   └── flux_*.py            # FLUX transformer support
+├── utils/                   # Utilities
+│   ├── buffer.py            # Activation buffers
+│   ├── training.py          # Training loops
+│   ├── inference.py         # Inference utilities
+│   └── output_manager.py    # Output management
+├── reporting/               # Logging and tracking
+│   ├── base.py              # Base updater interface
+│   └── wandb.py             # W&B integration
+├── scripts/                 # Training/inference scripts
 │   ├── train_pipeline.py
 │   └── infer_pipeline.py
-├── tests/               # Test suite
-└── config/              # Model configurations
+├── tests/                   # Test suite
+│   ├── unit/                # Unit tests (no model required)
+│   └── integration/         # Integration tests (requires model)
+├── notebooks/               # Example walkthroughs
+│   ├── walkthrough.ipynb    # Original walkthrough
+│   └── walkthrough-2.ipynb  # SAEManagerEdit walkthrough
+├── config/                  # Model configurations
+└── dictionary_learning/     # SAE training submodule
 ```
 
 ## Core Concepts
 
+### SAEManagerEdit vs SAEManager
+
+| Feature | SAEManagerEdit (new) | SAEManager (deprecated) |
+|---------|---------------------|------------------------|
+| Approach | `.edit()` based | Hook-based |
+| Tracing | Direct value access | Separate activation dict |
+| Interventions | All intervention classes | Hook-only interventions |
+| Diff mode | Supported | Supported |
+| Multiple SAEs | Supported | Supported |
+
+### Interventions
+
+| Class | Description | Compatible with SAEManagerEdit |
+|-------|-------------|-------------------------------|
+| `SAEFeatureScalingIntervention` | Scale/ablate specific SAE features | Yes (recommended) |
+| `AddVectorIntervention` | Add steering vector to activations | Yes |
+| `ReplaceIntervention` | Replace activations with a vector | Yes |
+| `ScalingAttentionIntervention` | Scale attention heads | Yes |
+| `EncoderAttentionIntervention` | Intervene on encoder attention | Yes |
+| `FeatureIntervention` | Scale features via hooks | No (use SAEFeatureScaling) |
+
 ### Accessors
 
-Accessors are dotted paths to model submodules:
-- `model.unet_2.down_attn_blocks[0].self_attn_out`
-- `model.unet_2.mid_cross_attn_out`
-
-See `t2Interp/accessors.py` for the full API.
-
-### Workflows
-
-All workflows expose a consistent API:
+ModuleAccessors provide unified I/O access to model submodules:
 
 ```python
-def fit(...) -> Generator[TrainUpdate, None, Output]:
-    """
-    Yields: TrainUpdate objects with step metrics
-    Returns: Output object with final results and checkpoints
-    """
-```
+from t2Interp import ModuleAccessor, IOType
 
-Available workflows:
-- `KSteer.fit` - Steering vector training
-- `SAE.fit` - Sparse autoencoder training
+# Access the output of a module
+accessor = ModuleAccessor(model.unet.conv_out, "conv_out", IOType.OUTPUT)
+
+# In a trace context:
+value = accessor.value       # read
+accessor.value = new_value   # write
+```
 
 ### Output Structure
 
@@ -185,9 +238,9 @@ Each run creates a structured directory:
 runs/<run_name>/
 ├── run_metadata.json    # Hyperparameters, config
 ├── logs/
-│   └── run.log         # Training logs
-├── artifacts/          # Checkpoints, models
-└── viz/                # Visualizations (optional)
+│   └── run.log          # Training logs
+├── artifacts/           # Checkpoints, models
+└── viz/                 # Visualizations (optional)
 ```
 
 ## Tips
@@ -196,6 +249,7 @@ runs/<run_name>/
 - **Batch Sizes**: Increase `--out_batch_size` for better GPU utilization
 - **Unique Run Names**: Append layer names to `--run_name` for easier tracking
 - **File Logs**: Check `runs/<run_name>/logs/run.log` for detailed per-run logs
+- **Mac/MPS**: The toolkit supports MPS devices for Mac development
 
 ## License
 
