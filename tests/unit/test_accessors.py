@@ -19,7 +19,7 @@ class DummyModule(nn.Module):
 def test_module_accessor_creation():
     """Test that ModuleAccessor can be created."""
     # This is a placeholder - update with actual accessor imports
-    # from t2Interp.accessors import ModuleAccessor, IOType
+    # from t2i_interp.accessors.accessor import ModuleAccessor, IOType
 
     # module = DummyModule()
     # accessor = ModuleAccessor(module, io_type=IOType.OUTPUT)

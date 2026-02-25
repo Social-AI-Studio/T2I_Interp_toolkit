@@ -2,7 +2,7 @@
 
 import torch
 
-from utils.output import Output
+from t2i_interp.utils.output import Output
 
 
 def test_output_creation():

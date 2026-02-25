@@ -1,0 +1,15 @@
+train_steps: 1000
+lr: 1.0e-4
+log_steps: 10
+training_device: "cuda"
+autocast_dtype: "float32"
+grad_clip_norm: 1.0
+data_loader_kwargs:
+  out_batch_size: 32
+  use_val: true
+  val_split: "validation"
+  use_memmap: false
+  cache_activations: false
+  streaming: true
+  dataset_batch_size: 10
+columns: ["label"]

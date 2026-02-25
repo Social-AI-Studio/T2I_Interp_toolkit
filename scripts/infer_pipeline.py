@@ -8,18 +8,18 @@ from typing import Any
 import torch as th
 
 from dictionary_learning.utils import hf_dataset_to_generator
-from reporting.config_loader import load_config, wandb_init_kwargs
-from t2Interp.accessors import ModuleAccessor
-from t2Interp.concept_search import CAA, KSteer
-from t2Interp.mapper import MLPMapper
-from t2Interp.T2I import T2IModel
-from utils.inference import Inference, InferenceSpec
-from utils.output import Output
-from utils.output_manager import OutputManager
-from utils.runningstats import SimpleFileLogger, Update, WandbUpdater
-from utils.text_image_buffer import _build_buffer
-from utils.text_img_util import OutputAlterHook, replace_policy, run_with_hook
-from utils.utils import ActivationConfig, BatchIterator, gen_images_from_prompts
+from t2i_interp.reporting.config_loader import load_config, wandb_init_kwargs
+from t2i_interp.accessors.accessor import ModuleAccessor
+from t2i_interp.concept_search import CAA, KSteer
+from t2i_interp.mapper import MLPMapper
+from t2i_interp.t2i import T2IModel
+from t2i_interp.utils.inference import Inference, InferenceSpec
+from t2i_interp.utils.output import Output
+from t2i_interp.utils.output_manager import OutputManager
+from t2i_interp.utils.runningstats import SimpleFileLogger, Update, WandbUpdater
+from t2i_interp.utils.text_image_buffer import _build_buffer
+from t2i_interp.utils.text_img_util import OutputAlterHook, replace_policy, run_with_hook
+from t2i_interp.utils.utils import ActivationConfig, BatchIterator, gen_images_from_prompts
 
 RACE_LABELS = {
     "East Asian": "East Asian",

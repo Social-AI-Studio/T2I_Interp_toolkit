@@ -1,0 +1,7 @@
+LOW_RESOURCE = False
+NUM_DIFFUSION_STEPS = 50
+GUIDANCE_SCALE = 7.5
+MAX_NUM_WORDS = 77
+
+glob_seed = 42
+neurons_cnt = 50

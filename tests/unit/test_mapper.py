@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from t2Interp.mapper import MLPMapper, MLPMapperTwoHeads
+from t2i_interp.mapper import MLPMapper, MLPMapperTwoHeads
 
 
 def test_mlp_mapper_initialization():

@@ -68,7 +68,7 @@ test-integration:
 	uv run pytest tests/integration/ -v
 
 test-cov:
-	uv run pytest tests/ --cov=t2Interp --cov=utils --cov-report=html --cov-report=term-missing
+	uv run pytest tests/ --cov=t2i_interp --cov=utils --cov-report=html --cov-report=term-missing
 	@echo "Coverage report generated in htmlcov/index.html"
 
 # Experiment targets
@@ -95,7 +95,7 @@ train:
 		--autocast_dtype bfloat16 \
 		--preprocess_fn scripts.train_pipeline:preprocess_fn \
 		--gt_processing_fn scripts.train_pipeline:race_processing_fn \
-		--wandb_config reporting/config.yaml
+		--wandb_config t2i_interp/reporting/config.yaml
 
 train-script:
 	bash scripts/train_pipeline.sh

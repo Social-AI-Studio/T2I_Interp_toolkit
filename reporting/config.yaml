@@ -1,9 +1,0 @@
-wandb:
-  project: T2I-interp-toolkit_test
-  entity: nirmalendu12345-sutd-singapore-university-of-technology-          # or your team name
-  run_name: null
-  job_type: eval
-  tags: null
-  group: null
-  mode: online          # online | offline | disabled
-  extra_init_kwargs: {} # forwarded to wandb.init

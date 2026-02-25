@@ -25,7 +25,7 @@ classifiers = [
 dependencies = [
     "diffusers>=0.34.0",
     "transformers>=4.55.0",
-    "nnsight>=0.5.3",
+
     "torch>=2.0.0",
     "accelerate>=1.10.0",
     "pillow>=10.0.0",
@@ -62,7 +62,7 @@ Repository = "https://github.com/yourusername/T2I_Interp_toolkit"
 Issues = "https://github.com/yourusername/T2I_Interp_toolkit/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["t2Interp", "utils", "reporting", "hooked_modules"]
+packages = ["t2i_interp", "dictionary_learning"]
 
 [tool.ruff]
 line-length = 100
@@ -124,8 +124,7 @@ python_functions = ["test_*"]
 addopts = [
     "--strict-markers",
     "--tb=short",
-    "--cov=t2Interp",
-    "--cov=utils",
+    "--cov=t2i_interp",
     "--cov-report=term-missing",
     "--cov-report=html",
 ]

@@ -1,7 +1,0 @@
-# Feed-forward (gated) sublayer
-mlp:
-  discover: "**.text_encoder_2.encoder.block.*.layer.1.DenseReluDense"
-  slots:
-    up_a: "wi_0"                       # gated up-proj part A
-    up_b: "wi_1"                       # gated up-proj part B
-    down:  "wo"                         # down-proj

@@ -7,13 +7,13 @@ from typing import Any
 
 import torch as th
 
-from reporting.config_loader import load_config, wandb_init_kwargs
-from t2Interp.concept_search import KSteer
-from t2Interp.mapper import MLPMapper, MLPMapperTwoHeads
-from t2Interp.T2I import T2IModel
-from utils.output_manager import OutputManager
-from utils.runningstats import SimpleFileLogger, WandbUpdater
-from utils.training import Training, TrainingSpec
+from t2i_interp.reporting.config_loader import load_config, wandb_init_kwargs
+from t2i_interp.concept_search import KSteer
+from t2i_interp.mapper import MLPMapper, MLPMapperTwoHeads
+from t2i_interp.t2i import T2IModel
+from t2i_interp.utils.output_manager import OutputManager
+from t2i_interp.utils.runningstats import SimpleFileLogger, WandbUpdater
+from t2i_interp.utils.training import Training, TrainingSpec
 
 # RACE_LABELS = {
 #     "East Asian": 0, "Indian": 1, "Black": 2, "White": 3,
@@ -246,7 +246,7 @@ def main():
     p.add_argument("--no_symlink_latest", action="store_true", default=False)
 
     # Updaters
-    p.add_argument("--wandb_config", type=str, default="reporting/config.yaml")
+    p.add_argument("--wandb_config", type=str, default="t2i_interp/reporting/config.yaml")
     p.add_argument("--wandb_run_name", type=str, default=None)
     p.add_argument(
         "--updaters", action="append", default=["file"], help="Add a logger: wandb | file "

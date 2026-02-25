@@ -1,0 +1,5 @@
+# list of regex patterns or substrings to match module names against
+patterns:
+  - "down_blocks"
+  - "up_blocks"
+  - "mid_block"
