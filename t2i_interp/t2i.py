@@ -206,10 +206,64 @@ class T2IModel:
         with TraceDict(list(hooks.keys()), hooks):
             yield self
     
+    def run_with_hooks(
+        self,
+        prompt: str | list[str],
+        hooks: dict[str | torch.nn.Module, Any],
+        return_images: bool = True,
+        **pipeline_kwargs,
+    ):
+        """Run the pipeline with intervention hooks applied.
+
+        Unlike :meth:`run_with_cache` (which captures outputs), this method
+        applies *alter* hooks (or any hook with a ``.hook`` method) that can
+        modify activations in-place during generation.
+
+        Args:
+            prompt: Single prompt string or list of prompts.
+            hooks: Mapping of ``module → hook_obj``.  Keys may be either:
+                   - ``nn.Module`` instances (used directly), or
+                   - ``str`` accessor paths resolved via :meth:`resolve_accessor`
+                     (e.g. ``"unet.conv_out"``).
+                   Each value must have a callable ``.hook(module, inputs, output)``
+                   attribute (any :class:`BaseHook` subclass works).
+            return_images: If True (default) return a list of PIL images.
+                           If False return the full pipeline output object.
+            **pipeline_kwargs: Forwarded to the pipeline call (e.g.
+                               ``num_inference_steps``, ``guidance_scale``).
+
+        Returns:
+            List of PIL images (or pipeline output if ``return_images=False``).
+
+        Example::
+
+            alter = UNetAlterHook(policy=my_fn)
+            imgs  = model.run_with_hooks(
+                prompts,
+                hooks={"unet.conv_out": alter},
+                num_inference_steps=30,
+                guidance_scale=7.5,
+            )
+        """
+        # Resolve string accessor paths to module objects
+        resolved: dict[torch.nn.Module, Any] = {}
+        for key, hook_obj in hooks.items():
+            if isinstance(key, str):
+                mod = self.resolve_accessor(key).module
+            else:
+                mod = key
+            resolved[mod] = hook_obj
+
+        with torch.no_grad():
+            with TraceDict(list(resolved.keys()), resolved):
+                output = self.pipeline(prompt, **pipeline_kwargs)
+
+        return output.images if return_images else output
+
     def run_with_cache(
-        self, 
-        prompt, 
-        accessors: list[ModuleAccessor] | None = None, 
+        self,
+        prompt,
+        accessors: list[ModuleAccessor] | None = None,
         all_steps: bool = True,
         return_output: bool = False,
         reduce_fn: Callable[[torch.Tensor], torch.Tensor] | None = None,
