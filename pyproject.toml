@@ -25,7 +25,6 @@ classifiers = [
 dependencies = [
     "diffusers>=0.34.0",
     "transformers>=4.55.0",
-
     "torch>=2.0.0",
     "accelerate>=1.10.0",
     "pillow>=10.0.0",
@@ -37,6 +36,8 @@ dependencies = [
     "datasets>=2.14.0",
     "zstandard>=0.21.0",
     "pyyaml>=6.0",
+    "hydra-core>=1.3.0",
+    "omegaconf>=2.3.0",
 ]
 
 [project.optional-dependencies]
@@ -56,13 +57,24 @@ notebook = [
     "matplotlib>=3.7.0",
 ]
 
+[project.scripts]
+t2i-steer     = "scripts.run_steer:main"
+t2i-stitch    = "scripts.run_stitch:main"
+t2i-sae       = "scripts.run_sae:main"
+t2i-localise  = "scripts.run_localisation:main"
+
 [project.urls]
 Homepage = "https://github.com/yourusername/T2I_Interp_toolkit"
 Repository = "https://github.com/yourusername/T2I_Interp_toolkit"
 Issues = "https://github.com/yourusername/T2I_Interp_toolkit/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["t2i_interp", "dictionary_learning"]
+packages = ["t2i_interp", "dictionary_learning", "scripts", "config"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# Ensure __init__.py stubs are included in config subpackages
+"config/__init__.py"            = "config/__init__.py"
+"scripts/__init__.py"           = "scripts/__init__.py"
 
 [tool.ruff]
 line-length = 100

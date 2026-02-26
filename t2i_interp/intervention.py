@@ -237,4 +237,4 @@ def run_intervention(
              # Assuming pipeline call returns object with .images
              output = pipeline(prompts, **kwargs)
     
-    return Output(preds=output.images)
+    return output.images

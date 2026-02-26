@@ -1,0 +1,43 @@
+# ── Localisation workflow config ───────────────────────────────────────────────
+# Run: python scripts/run_localisation.py
+# Override: python scripts/run_localisation.py factor=0.5 sweep_all_layers=true
+
+defaults:
+  - _self_
+  - /wandb@wandb
+
+# Model
+model_key: CompVis/stable-diffusion-v1-4
+device: cuda:0
+dtype: float16
+
+# Target layer (key in model.unet.accessors — underscore-sanitised attn2 output)
+target_layer: down_blocks_1_attentions_0_transformer_blocks_0_attn2_out
+# Specific heads to ablate — null means sweep ALL heads in the target layer
+target_heads: null   # e.g. [0, 3, 7]
+
+# Intervention
+factor: 0.0          # 0.0 = zero-ablate; 100.0 = amplify
+start_step: 0
+end_step: 50
+
+# Whether to sweep every cross-attn layer (slower) or just target_layer
+sweep_all_layers: false
+
+# Generation
+prompt: "unicorn"
+num_inference_steps: 50
+guidance_scale: 7.5
+seed: 40
+
+# Output
+output_dir: ./output_images/localisation
+
+# Hydra
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  job_logging:
+    root:
+      level: WARNING

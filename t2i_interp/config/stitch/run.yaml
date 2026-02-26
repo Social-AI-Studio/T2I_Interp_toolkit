@@ -1,0 +1,52 @@
+# ── Stitch workflow config ─────────────────────────────────────────────────────
+# Run: python scripts/run_stitch.py
+# Override: python scripts/run_stitch.py dataset_name=my/dataset num_steps=2000
+
+defaults:
+  - _self_
+
+# Model
+model_key: runwayml/stable-diffusion-v1-5
+device: cuda:0
+dtype: float16
+
+# Dataset
+dataset_name: nirmalendu01/spectacles-bias-prompts
+prompt_col_a: base_prompt
+prompt_col_b: with_spectacles_prompt
+
+# Latent collection
+layer_a: text_encoder.text_model.final_layer_norm
+layer_b: unet.conv_out
+save_dir: ./latents_cache/mapper
+batch_size: 4
+guidance_scale: 7.5
+conditional_only: true
+
+# Mapper architecture
+input_dim: 59136   # 77 * 768  (text encoder final hidden)
+hidden_dim: 8448   # 11 * 768
+output_dim: 16384  # 4 * 64 * 64  (conv_out spatial)
+
+# Training
+num_steps: 1000
+lr: 1.0e-4
+log_steps: 100
+loader_batch_size: 16
+
+# Inference
+inject_steps: [0]
+num_inference_steps: 50
+output_dir: ./output_images/stitch
+prompts:
+  - "a photo of a person"
+  - "a photo of a woman"
+
+# Hydra
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  job_logging:
+    root:
+      level: WARNING

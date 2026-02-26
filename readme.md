@@ -1,201 +1,181 @@
 # T2I-Interp Toolkit
 
-A **text-to-image interpretation** toolkit for analyzing and steering diffusion models using Sparse Autoencoders (SAEs) and activation steering.
+A **text-to-image interpretation** toolkit for analyzing and steering diffusion models using Sparse Autoencoders (SAEs), activation steering, stitching, and layer-wise localization.
 
 ## Features
 
-- **Activation Steering**: Learn mappers/classifiers from UNet activations and apply interventions
-- **SAE Analysis**: Train and analyze sparse autoencoders on diffusion model activations  
-- **Flexible Hooks**: Hook into any layer of diffusion models (UNet, FLUX transformers, encoders)
-- **Clean Workflows**: Generator-based training API with live logging (tqdm, W&B, file logs)
-- **Organized Outputs**: Structured run folders with metadata, checkpoints, and artifacts
+- **Activation Steering**: Learn concept mappers/classifiers from UNet activations and apply targeted interventions.
+- **SAE Analysis**: Train and analyze sparse autoencoders on diffusion model activations.
+- **Latent Stitching**: Collect and stitch latents from different layers to manipulate generated outputs.
+- **Localization Sweeps**: Sweep through UNet cross-attention heads and trace perturbations via hooking.
+- **Hydra Configuration**: Easily manage configurations, multi-run sweeps, and dynamic architecture parameters via `hydra-core`.
+- **Organized Outputs**: Fully structured local run configurations bundled securely as an installable Python package.
+
+---
 
 ## Installation
 
-### Using uv (recommended)
+The T2I-Interp toolkit is completely pip-installable, ensuring all executable workflows are immediately available from the terminal.
+
+### Global Editable Installation (Recommended)
+
+To install the toolkit and all subpackages (`t2i_interp`, `config`, `scripts`) into your active Python environment:
 
 ```bash
-# Install uv if you haven't already
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install all dependencies (including dev tools like ruff, pytest)
-make install
-
-# Or manually with uv
-uv sync --extra dev
-
-# Activate the virtual environment (optional - you can use 'uv run' instead)
-source .venv/bin/activate
+# From the repository root
+pip install -e .
 ```
 
-### Using pip
+This registers the local configurations and exposes the four primary workflow commands globally via console script entrypoints.
 
-```bash
-pip install -e ".[dev]"
-```
+### Authentication
 
-## Using uv
-
-**Option 1: Activate the environment** (traditional way)
-```bash
-source .venv/bin/activate
-# Now you can run commands directly
-ruff check .
-pytest tests/
-```
-
-**Option 2: Use `uv run`** (no activation needed)
-```bash
-uv run ruff check .
-uv run pytest tests/
-```
-
-The Makefile uses `uv run` so you can use `make` commands without activating the environment.
-
-### Optional: Authentication
+If evaluating on HF datasets or pushing your own logged sweeps:
 
 ```bash
 huggingface-cli login  # For dataset access
 wandb login            # For experiment tracking
 ```
 
-## Quick Start
+---
 
-### Training a Steering Vector
+## Workflows and Executables
 
-```bash
-python -m scripts.train_pipeline \
-  --training_fn KSteer.fit \
-  --run_name steer_fairface_test \
-  --dataset nirmalendu01/fairface-trainval-race-balanced-200 \
-  --accessor_path 'model.unet_2.down_attn_blocks[0].self_attn_out' \
-  --input_dim 1310720 \
-  --hidden_dim 4096 \
-  --output_dim 7 \
-  --steps 1000 \
-  --lr 1e-5 \
-  --refresh_batch_size 64 \
-  --out_batch_size 16 \
-  --training_device cuda:0 \
-  --data_device cpu \
-  --autocast_dtype bfloat16 \
-  --preprocess_fn scripts.train_pipeline:preprocess_fn \
-  --gt_processing_fn scripts.train_pipeline:race_processing_fn \
-  --wandb_config reporting/config.yaml
-```
+Leveraging the power of Hydra, this toolkit runs four primary configurable scripts. All YAML configurations are locally contained within the `config/` directory. 
 
-### Using the Training Script
+### Experiment Tracking with Weights & Biases (W&B)
 
-For training on multiple layers, use `scripts/train_pipeline.sh`:
+All 4 workflows natively support pushing their generated grids, images, and config dictionaries up to a W&B Dashboard. To enable this, simply override `wandb.project` when executing any run:
 
 ```bash
-bash scripts/train_pipeline.sh
+# Single run tracking
+t2i-localise wandb.project="attention-ablation" wandb.name="baseline-sweep"
+
+# Multi-run sweeps tracked into W&B automatically
+t2i-steer -m steer_module="model.unet.down_blocks_1_attentions_0_out","model.unet.mid_block_attentions_0_out" wandb.project="steer-module-sweep"
 ```
 
-## Development
+*Note: W&B initialization defaults can also be permanently saved inside `config/wandb.yaml`.*
 
-### Setup Development Environment
+### 1. Concept Steering (`t2i-steer`)
+
+Train and apply targeted MLP steering maps.
 
 ```bash
-make install  # Installs all dependencies including dev tools
-```
+# Run with default config
+t2i-steer
 
-### Running Tests
+# Override prompt and batch size
+t2i-steer prompt="a cinematic shot of a happy professor" refresh_batch_size=64
+
+# Hydra Multi-run Sweeping over target modules
+t2i-steer -m steer_module="model.unet.down_blocks_1_attentions_0_out","model.unet.mid_block_attentions_0_out"
+```
+**Config path:** `config/steer/run.yaml`
+
+### 2. Stitching (`t2i-stitch`)
+
+Collect latents across multiple layers, train an `MLPMapper` to stitch them together, and run modified generation.
 
 ```bash
-make test           # Run all tests
-make test-unit      # Run unit tests only
-make test-integration  # Run integration tests only
-make test-cov       # Run tests with coverage report
-```
+# Run with default config
+t2i-stitch
 
-### Code Quality
+# Override the specific concept prompt
+t2i-stitch prompt="A red car turning into a blue car"
+```
+**Config path:** `config/stitch/run.yaml`
+
+### 3. Sparse Autoencoders (`t2i-sae`)
+
+Explore activation landscapes and generate grid-visualizations of structural concepts automatically discovered via imported SAE checkpoints.
 
 ```bash
-make lint           # Run ruff linter
-make format         # Format code with ruff
-make check          # Run all checks (lint + type check)
-```
+# Run with default config
+t2i-sae
 
-### Running Experiments
+# Override the number of plotted features and inference steps
+t2i-sae n_top_features=6 num_inference_steps=2
+```
+*Note: Any loaded SAE checkpoints and spatial dimensions can be freely modified or swapped out from `config/sae/run.yaml` via the `saes` dict structure.*
+
+### 4. Attention Localization (`t2i-localise`)
+
+Apply concept-erasure perturbation loops across model cross-attention heads, generating individual verification grids per layer sweep.
 
 ```bash
-# Training experiment
-make train DATASET=nirmalendu01/fairface-trainval-race-balanced-200
+# Run with default config
+t2i-localise
 
-# Inference experiment  
-make infer RUN_NAME=my_experiment
+# Run a sweep generating varied guidance scales
+t2i-localise -m guidance_scale=0.0,2.0,5.0
 ```
+**Config path:** `config/localisation/run.yaml`
+
+---
+
+## Interactive Notebooks
+
+All workflows have complimentary **Jupyter Notebooks** available in the `notebooks/` directory. These are beneficial for learning how the lower-level PyTorch modules (`T2IModel`, `UNetAlterHook`, `SAEManager`, `Stitcher`, etc.) compose the backend interpretation loops.
+
+- `steer.ipynb` - Step-by-step steering verification and logic.
+- `stitch.ipynb` - Pipeline demonstration mapping layers pairwise.
+- `sae.ipynb` - Interactive activation capturing and grid creation.
+- `walkthrough.ipynb` / `localisation.ipynb` - Demonstration of altering UNet attention modules dynamically.
+
+Before running notebooks directly, verify the package has been fully installed or ensure your kernel is instantiated from the repository root.
+
+---
 
 ## Project Structure
 
 ```
-.
-├── t2Interp/              # Core library
-│   ├── T2I.py            # Main model wrapper
-│   ├── accessors.py      # Layer access utilities
-│   ├── intervention.py   # Steering interventions
-│   ├── sae.py            # Sparse autoencoder
-│   └── ...
-├── utils/                # Utilities
-│   ├── buffer.py         # Activation buffers
-│   ├── training.py       # Training loops
-│   └── ...
-├── reporting/            # Logging and tracking
-│   ├── base.py          # Base updater interface
-│   └── wandb.py         # W&B integration
-├── scripts/             # Training scripts
-│   ├── train_pipeline.py
-│   └── infer_pipeline.py
-├── tests/               # Test suite
-└── config/              # Model configurations
+T2I_Interp_toolkit/
+├── config/              # Hydra YAML configurations
+│   ├── steer/run.yaml
+│   ├── stitch/run.yaml
+│   ├── sae/run.yaml
+│   └── localisation/run.yaml
+├── scripts/             # Core execution entry points
+│   ├── run_steer.py     # mapped to 't2i-steer'
+│   ├── run_stitch.py    # mapped to 't2i-stitch'
+│   ├── run_sae.py       # mapped to 't2i-sae'
+│   └── run_localisation.py # mapped to 't2i-localise'
+├── t2i_interp/          # Core model logic and hook wrappers
+│   ├── T2I.py           # Base text-to-image framework
+│   ├── intervention.py  # Alteration hooks and MLP manipulation
+│   └── sae.py           # SAE abstraction layers
+├── notebooks/           # Interactive learning examples
+└── pyproject.toml       # Package metadata and entry points
 ```
 
-## Core Concepts
+---
 
-### Accessors
+## Contributing
 
-Accessors are dotted paths to model submodules:
-- `model.unet_2.down_attn_blocks[0].self_attn_out`
-- `model.unet_2.mid_cross_attn_out`
+We welcome community feedback, pull requests, and ideas for extending the core Text-To-Image interpretability structures.
 
-See `t2Interp/accessors.py` for the full API.
+### Development Setup
 
-### Workflows
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/T2I_Interp_toolkit.git
+cd T2I_Interp_toolkit
 
-All workflows expose a consistent API:
-
-```python
-def fit(...) -> Generator[TrainUpdate, None, Output]:
-    """
-    Yields: TrainUpdate objects with step metrics
-    Returns: Output object with final results and checkpoints
-    """
+# Install in editable mode with development tools
+pip install -e ".[dev]"
 ```
 
-Available workflows:
-- `KSteer.fit` - Steering vector training
-- `SAE.fit` - Sparse autoencoder training
+Please run standardized formatting mechanisms (like `ruff`) and execute included tests (`pytest`) before attempting to open PRs.
 
-### Output Structure
+---
 
-Each run creates a structured directory:
+## Open Issues
 
-```
-runs/<run_name>/
-├── run_metadata.json    # Hyperparameters, config
-├── logs/
-│   └── run.log         # Training logs
-├── artifacts/          # Checkpoints, models
-└── viz/                # Visualizations (optional)
-```
-
-## Tips
-
-- **Precision**: Use `--autocast_dtype bfloat16` for stable mixed-precision training
-- **Batch Sizes**: Increase `--out_batch_size` for better GPU utilization
-- **Unique Run Names**: Append layer names to `--run_name` for easier tracking
-- **File Logs**: Check `runs/<run_name>/logs/run.log` for detailed per-run logs
+*(Placeholder for future tracking)*
+- [ ] Incorporate comprehensive unit-tests for the text-to-image steering pipelines.
+- [ ] Expand mapping algorithms alongside default MLPMapper methodologies.
+- [ ] Implement integrated experiment dashboard outputs for Hydra multi-run generation grids.
 
 ## License
 
