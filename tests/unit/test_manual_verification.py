@@ -5,7 +5,7 @@ import shutil
 from t2i_interp.t2i import T2IModel
 from t2i_interp.accessors.accessor import IOType, ModuleAccessor
 from t2i_interp.intervention import AddVectorIntervention, run_intervention
-from t2i_interp.utils.buffer import t2IActivationBuffer
+from t2i_interp.utils.T2I.buffer import t2IActivationBuffer
 
 def test_t2i_hooks():
     print("Testing T2IModel hooks...")

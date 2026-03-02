@@ -17,7 +17,7 @@ from t2i_interp.accessors.accessor import IOType, ModuleAccessor
 # from t2i_interp.accessors.blocks import SAEBlock # removed if unused
 from t2i_interp.t2i import T2IModel
 from t2i_interp.config.train_config import sae_trainer_config
-from t2i_interp.utils.buffer import t2IActivationBuffer
+from t2i_interp.utils.T2I.buffer import t2IActivationBuffer
 from t2i_interp.utils.output import Output
 from t2i_interp.utils.utils import FunctionModule
 from t2i_interp.utils.generic import _extract_tensor_and_rebuild
