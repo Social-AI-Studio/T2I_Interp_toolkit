@@ -129,12 +129,14 @@ def preprocess_image_for_vae(image, target_size=512):
     --------
     torch.Tensor : Preprocessed image tensor [1, 3, H, W] in range [-1, 1]
     """
-    transform = transforms.Compose([
-        transforms.Resize((target_size, target_size)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.5], [0.5])  # Scale to [-1, 1]
-    ])
-    return transform(image).unsqueeze(0)
+    import numpy as np
+    from PIL import Image
+    
+    image = image.convert("RGB").resize((target_size, target_size), resample=Image.BILINEAR)
+    arr = np.array(image, dtype=np.float32) / 255.0
+    arr = np.transpose(arr, (2, 0, 1))
+    tensor = t.from_numpy(arr)
+    return ((tensor - 0.5) / 0.5).unsqueeze(0)
 
 
 def build_loss(loss: Union[str, Dict[str, Any], nn.Module] = "mse", **kwargs) -> nn.Module:

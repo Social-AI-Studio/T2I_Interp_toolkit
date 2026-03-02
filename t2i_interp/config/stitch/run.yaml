@@ -1,12 +1,33 @@
+# @package _global_
 # ── Stitch workflow config ─────────────────────────────────────────────────────
 # Run: python scripts/run_stitch.py
 # Override: python scripts/run_stitch.py dataset_name=my/dataset num_steps=2000
 
 defaults:
   - _self_
+  - /wandb@wandb
+
+wandb:
+  sweep_report_type: stitch_steer
 
 # Model
 model_key: runwayml/stable-diffusion-v1-5
+model_key_b: null   # set to a different model key to enable cross-model stitching; null = same as model_key
+
+# Optional LoRA adapter for model_b (e.g. LCM-LoRA).
+# Loads model_key_b as base, applies LoRA weights and fuses them.
+# pipe.load_lora_weights(repo) + pipe.fuse_lora()
+lora_b:
+  repo: null        # e.g. "latent-consistency/lcm-lora-sdv1-5"
+  scheduler: null   # e.g. "LCMScheduler"
+
+# Optional custom UNet checkpoint for model_b (e.g. DMD2 distilled).
+# Only used when lora_b.repo is null.
+unet_b:
+  repo: null        # e.g. "tianweiy/DMD2"
+  filename: null    # e.g. "dmd2_sdxl_4step_unet_fp16.bin"
+  scheduler: null   # e.g. "LCMScheduler"
+
 device: cuda:0
 dtype: float16
 
@@ -14,6 +35,7 @@ dtype: float16
 dataset_name: nirmalendu01/spectacles-bias-prompts
 prompt_col_a: base_prompt
 prompt_col_b: with_spectacles_prompt
+max_samples: 1000
 
 # Latent collection
 layer_a: text_encoder.text_model.final_layer_norm
@@ -22,6 +44,9 @@ save_dir: ./latents_cache/mapper
 batch_size: 4
 guidance_scale: 7.5
 conditional_only: true
+capture_step_index: 0       # which denoising step to capture activations from
+num_inference_steps_a: 1    # steps to run for model_a during collection (1 = fast, just fires step 0)
+num_inference_steps_b: 1    # steps to run for model_b during collection (set to 4 for 4-step distilled)
 
 # Mapper architecture
 input_dim: 59136   # 77 * 768  (text encoder final hidden)
@@ -33,20 +58,63 @@ num_steps: 1000
 lr: 1.0e-4
 log_steps: 100
 loader_batch_size: 16
+collect_to_memory: true  # skip tar files — collect activations directly into GPU tensors (practical up to ~10k samples)
+use_gpu_cache: false      # (tar-file path only) load tars into GPU RAM after collection
+gpu_cache_dtype: float16  # dtype for in-memory tensors: float16 (~8 GB/20k), float32 (~16 GB/20k)
 
 # Inference
 inject_steps: [0]
 num_inference_steps: 50
+# Separate guidance scale for model_b generation (steer_contrast / steer_transfer / stitch).
+# Set to the correct value for model_b — e.g. 1.0 for LCM-LoRA, 7.5 for SD1.5.
+# null = fall back to guidance_scale above.
+guidance_scale_b: null
 output_dir: ./output_images/stitch
 prompts:
   - "a photo of a person"
   - "a photo of a woman"
 
+# Mode: "train"           = train mapper then run stitch inference
+#        "steer_transfer"  = load mapper + load pre-computed steering vector .pt, inject into model_b
+#        "steer_contrast"  = load mapper, compute steering direction from contrast prompts on model_a, inject into model_b
+mode: train
+
+# Shared steer settings (used by steer_transfer and steer_contrast)
+mapper_path: null        # path to mapper.pt saved by a previous "train" run
+steer_alpha: 1.0         # steering strength (negative = reverse direction)
+steer_baseline: true     # also generate unsteered baseline images for side-by-side comparison
+
+# steer_transfer specific
+steer_vec_path: null     # path to a .pt flat steering vector in model_a's space
+ref_act_path: null       # optional: path to mean reference activation .pt; zeros if null
+
+# steer_contrast specific (compute direction from prompts on model_a on-the-fly)
+# For multiple pairs use Hydra -m multirun — one job per pair, WandbMultirunCallback
+# collects all results and assembles a combined grid automatically.
+steer_pos_prompts: []    # e.g. ["photo of a black man"]
+steer_neg_prompts: []    # e.g. ["photo of a white man"]
+steer_apply_prompts: []  # prompts to generate steered images for; falls back to cfg.prompts if empty
+
 # Hydra
+metrics:
+  clip:
+    _target_: t2i_interp.utils.metrics.clip_score.CLIPScorer
+  lpips:
+    _target_: t2i_interp.utils.metrics.lpips_score.LPIPSScorer
+  fid:
+    _target_: t2i_interp.utils.metrics.fid_score.FIDScorer
+
 hydra:
   output_subdir: null
   run:
     dir: .
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: .
   job_logging:
     root:
       level: WARNING
+
+  callbacks:
+    wandb_sweeper:
+      _target_: t2i_interp.reporting.wandb_callback.WandbMultirunCallback

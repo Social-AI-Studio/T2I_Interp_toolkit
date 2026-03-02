@@ -401,6 +401,120 @@ def plot_image_heatmap(output, sparse_maps, feature):
     return heatmap_with_transparency
 
 
+def make_steer_grid(
+    pairs_results: list[dict],
+    cell_size: float = 4.0,
+    dpi: int = 120,
+) -> "Image.Image":
+    """Build a steer grid with Baseline and Steered columns.
+
+    Layout (N rows × 2 columns)::
+
+                   Baseline              Steered
+                   ─────────────────     ─────────────────
+        row 0:     [  base img  ]        [  steer img  ]
+                   "apply prompt"        pos → neg
+                   ─────────────────     ─────────────────
+        row 1:     [  base img  ]        [  steer img  ]
+                   "apply prompt"        pos → neg
+
+    - Column header above first row: ``"Baseline"`` / ``"Steered"``
+    - Caption below each image via ``set_xlabel``:
+      baseline column → apply prompt; steered column → ``pos → neg``
+
+    Args:
+        pairs_results: List of dicts, one per contrast pair::
+
+            {
+              "pos":      str,
+              "neg":      str,
+              "apply":    list[str],
+              "steered":  list[PIL.Image],
+              "baseline": list[PIL.Image],
+            }
+
+        cell_size: Inches per image cell.
+        dpi: Resolution of the saved PNG.
+
+    Returns:
+        A PIL Image of the rendered grid.
+    """
+    import io
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from PIL import Image
+
+    def _clean_ax(ax):
+        """Hide spines and ticks but keep title / xlabel / ylabel."""
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+    # Flatten to one row per (pair × apply-prompt)
+    rows: list[dict] = []
+    for pair in pairs_results:
+        pos      = pair.get("pos", "")
+        neg      = pair.get("neg", "")
+        apply    = pair.get("apply", [""]) or [""]
+        steered  = pair.get("steered",  []) or []
+        baseline = pair.get("baseline", []) or []
+        for ai, ap in enumerate(apply):
+            rows.append({
+                "pos":      pos,
+                "neg":      neg,
+                "apply":    ap,
+                "steered":  steered[ai]  if ai < len(steered)  else None,
+                "baseline": baseline[ai] if ai < len(baseline) else None,
+            })
+
+    has_baseline = any(r["baseline"] is not None for r in rows)
+    n_cols = 2 if has_baseline else 1
+    n_rows = len(rows)
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(n_cols * cell_size, n_rows * cell_size),
+        squeeze=False,
+        gridspec_kw={"hspace": 0.35, "wspace": 0.05},
+    )
+
+    for ri, row in enumerate(rows):
+        ax_base  = axes[ri][0]
+        ax_steer = axes[ri][1] if has_baseline else axes[ri][0]
+
+        # ── column headers on the first row ─────────────────────────────────
+        if ri == 0:
+            if has_baseline:
+                ax_base.set_title("Baseline", fontsize=11, fontweight="bold", pad=8)
+            ax_steer.set_title("Steered", fontsize=11, fontweight="bold", pad=8)
+
+        # ── baseline image + caption below ──────────────────────────────────
+        if has_baseline:
+            if row["baseline"] is not None:
+                ax_base.imshow(np.asarray(row["baseline"]))
+            else:
+                ax_base.set_facecolor("#eeeeee")
+            ax_base.set_xlabel(f'"{row["apply"]}"', fontsize=8, labelpad=6)
+            _clean_ax(ax_base)
+
+        # ── steered image + caption below ───────────────────────────────────
+        if row["steered"] is not None:
+            ax_steer.imshow(np.asarray(row["steered"]))
+        else:
+            ax_steer.set_facecolor("#eeeeee")
+        ax_steer.set_xlabel(f'{row["pos"]} → {row["neg"]}', fontsize=8, labelpad=6)
+        _clean_ax(ax_steer)
+
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=dpi)
+    plt.close(fig)
+    buf.seek(0)
+    return Image.open(buf).copy()
+
+
 def show_grid(images, labels, cols=3):
     """
     Plots a list of images in a grid with corresponding labels.

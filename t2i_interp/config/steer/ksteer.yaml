@@ -1,0 +1,68 @@
+# @package _global_
+# ── Steer workflow config ──────────────────────────────────────────────────────
+# Run: python scripts/run_steer.py --config-name=steer/ksteer
+# Override example: python scripts/run_steer.py --config-name=steer/ksteer model_key=CompVis/stable-diffusion-v1-4 device=cuda:1
+
+defaults:
+  - _self_
+  - /wandb@wandb
+
+# Model
+model_key: runwayml/stable-diffusion-v1-5
+device: cuda:0
+dtype: float16
+
+# Dataset
+dataset_name: nirmalendu01/spectacles-bias-prompts-headshot-captioned
+prompt_col: caption
+label_col: with_specs
+pos_labels: [1]
+neg_labels: [0]
+max_samples: 100
+
+# Latent collection
+layer_names:  # KSteer uses the first layer in this list.
+  - unet.down_blocks.2.attentions.1.transformer_blocks.0.attn2
+save_dir: ./latents_cache/ksteer_steering
+batch_size: 4
+guidance_scale: 7.5
+conditional_only: true
+delete_cache: true  # delete each layer's tar files after its steering vector is fitted
+
+# Training
+train_steps: 100
+lr: 1.0e-4
+
+# Inference
+use_baseline: true
+steer_type: ksteer
+alpha: 10
+steer_steps: 5
+output_dir: ./output_images/ksteer_steer
+prompts:
+  - "A photo of Jack Sparrow"
+  - "A photo of Simba"
+  - "A photo of a cat"
+
+metrics:
+  clip:
+    _target_: t2i_interp.utils.metrics.clip_score.CLIPScorer
+  lpips:
+    _target_: t2i_interp.utils.metrics.lpips_score.LPIPSScorer
+  fid:
+    _target_: t2i_interp.utils.metrics.fid_score.FIDScorer
+
+# Hydra — run in-place, no log dirs
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: .
+  job_logging:
+    root:
+      level: WARNING
+  callbacks:
+    wandb_sweeper:
+      _target_: t2i_interp.reporting.wandb_callback.WandbMultirunCallback

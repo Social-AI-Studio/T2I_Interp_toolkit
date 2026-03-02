@@ -1,0 +1,6 @@
+# W&B configuration
+project: "t2i-interp"
+entity: nirmalendu12345-sutd-singapore-university-of-technology- 
+name: null
+tags: []
+sweep_report_type: "steer"

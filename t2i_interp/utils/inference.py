@@ -6,7 +6,6 @@ from typing import Any
 
 import torch
 
-from t2i_interp.utils.metrics import MetricBase
 from t2i_interp.utils.output import Output
 from t2i_interp.utils.runningstats import (
     Updater,
@@ -20,8 +19,8 @@ InferenceFn = Callable[[torch.nn.Module, dict[str, Any]], dict[str, Any]]
 class InferenceSpec:
     inference_fn: InferenceFn
     stats_updaters: Sequence[Updater] | None = field(default_factory=list[Updater])
-    metric_fns: Sequence[MetricBase.compute] | None = field(
-        default_factory=list[MetricBase.compute]
+    metric_fns: Sequence[Any] | None = field(
+        default_factory=list
     )
     callback_fns: Sequence[Callable] | None = field(default_factory=list[Callable])
     name: str | None = None

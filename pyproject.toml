@@ -58,10 +58,11 @@ notebook = [
 ]
 
 [project.scripts]
-t2i-steer     = "scripts.run_steer:main"
-t2i-stitch    = "scripts.run_stitch:main"
-t2i-sae       = "scripts.run_sae:main"
-t2i-localise  = "scripts.run_localisation:main"
+t2i           = "t2i_interp.cli:main"
+t2i-steer     = "t2i_interp.scripts.run_steer:main"
+t2i-stitch    = "t2i_interp.scripts.run_stitch:main"
+t2i-sae       = "t2i_interp.scripts.run_sae:main"
+t2i-localise  = "t2i_interp.scripts.run_localisation:main"
 
 [project.urls]
 Homepage = "https://github.com/yourusername/T2I_Interp_toolkit"
@@ -69,12 +70,12 @@ Repository = "https://github.com/yourusername/T2I_Interp_toolkit"
 Issues = "https://github.com/yourusername/T2I_Interp_toolkit/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["t2i_interp", "dictionary_learning", "scripts", "config"]
+packages = ["t2i_interp", "dictionary_learning"]
 
 [tool.hatch.build.targets.wheel.force-include]
 # Ensure __init__.py stubs are included in config subpackages
-"config/__init__.py"            = "config/__init__.py"
-"scripts/__init__.py"           = "scripts/__init__.py"
+"t2i_interp/config/__init__.py"            = "t2i_interp/config/__init__.py"
+"t2i_interp/scripts/__init__.py"           = "t2i_interp/scripts/__init__.py"
 
 [tool.ruff]
 line-length = 100

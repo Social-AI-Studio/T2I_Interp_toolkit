@@ -1,8 +1,10 @@
+# @package _global_
 # ── Localisation workflow config ───────────────────────────────────────────────
 # Run: python scripts/run_localisation.py
 # Override: python scripts/run_localisation.py factor=0.5 sweep_all_layers=true
 
 defaults:
+  - /wandb@wandb
   - _self_
 
 # Model
@@ -14,14 +16,13 @@ dtype: float16
 target_layer: down_blocks_1_attentions_0_transformer_blocks_0_attn2_out
 # Specific heads to ablate — null means sweep ALL heads in the target layer
 target_heads: null   # e.g. [0, 3, 7]
+max_samples: 1000
 
 # Intervention
 factor: 0.0          # 0.0 = zero-ablate; 100.0 = amplify
 start_step: 0
 end_step: 50
 
-# Whether to sweep every cross-attn layer (slower) or just target_layer
-sweep_all_layers: false
 
 # Generation
 prompt: "unicorn"
@@ -33,10 +34,29 @@ seed: 40
 output_dir: ./output_images/localisation
 
 # Hydra
+metrics:
+  clip:
+    _target_: t2i_interp.utils.metrics.clip_score.CLIPScorer
+  lpips:
+    _target_: t2i_interp.utils.metrics.lpips_score.LPIPSScorer
+  fid:
+    _target_: t2i_interp.utils.metrics.fid_score.FIDScorer
+
 hydra:
   output_subdir: null
   run:
     dir: .
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: .
   job_logging:
     root:
       level: WARNING
+
+  callbacks:
+    wandb_sweeper:
+      _target_: t2i_interp.reporting.wandb_callback.WandbMultirunCallback
+
+# Specific sweep typing for the callback
+wandb:
+  sweep_report_type: localise

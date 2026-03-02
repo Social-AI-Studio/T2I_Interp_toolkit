@@ -1,0 +1,78 @@
+# @package _global_
+# ── LoReFT on CLIP text-encoder layers ────────────────────────────────────────
+# Captures pre-extracted hidden states from CLIP transformer layers and trains
+# a LoReFT adapter to map base_prompt activations → with_spectacles_prompt activations.
+#
+# Run single layer:
+#   t2i-steer --config-name=steer/loreft_clip
+#
+# Sweep over layers:
+#   t2i-steer --config-name=steer/loreft_clip -m \
+#     "layer_names=[text_encoder.text_model.encoder.layers.0],[text_encoder.text_model.encoder.layers.5],[text_encoder.text_model.encoder.layers.11],[text_encoder.text_model.final_layer_norm]"
+
+defaults:
+  - _self_
+  - /wandb@wandb
+
+# Model
+model_key: runwayml/stable-diffusion-v1-5
+device: cuda:0
+dtype: float16
+
+# Dataset
+dataset_name: nirmalendu01/spectacles-bias-prompts-headshot
+prompt_cols: ["base_prompt", "with_spectacles_prompt"]
+max_samples: 100
+
+# Latent collection — text encoder runs once per prompt, no diffusion steps needed.
+# guidance_scale=1.0 disables CFG so the encoder runs a single forward pass (no doubling).
+target_module: clip
+layer_names:
+  - text_encoder.text_model.final_layer_norm
+save_dir: ./latents_cache/loreft_clip
+batch_size: 8
+guidance_scale: 1.0
+conditional_only: false
+capture_step_index: 0
+num_inference_steps: 1
+delete_cache: true
+
+# LoReFT Params
+lora_rank: 16
+
+# Training
+train_steps: 200
+lr: 1.0e-3
+
+# Inference
+use_baseline: true
+steer_type: loreft
+steer_steps: 30
+output_dir: ./output_images/loreft_clip_steer
+prompts:
+  - "A photo of Jack Sparrow"
+  - "A photo of Simba"
+  - "A photo of a cat"
+
+metrics:
+  clip:
+    _target_: t2i_interp.utils.metrics.clip_score.CLIPScorer
+  lpips:
+    _target_: t2i_interp.utils.metrics.lpips_score.LPIPSScorer
+  fid:
+    _target_: t2i_interp.utils.metrics.fid_score.FIDScorer
+
+# Hydra — run in-place, no log dirs
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: .
+  job_logging:
+    root:
+      level: WARNING
+  callbacks:
+    wandb_sweeper:
+      _target_: t2i_interp.reporting.wandb_callback.WandbMultirunCallback

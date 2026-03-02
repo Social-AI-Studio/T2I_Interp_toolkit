@@ -1,20 +1,31 @@
+# @package _global_
 # ── SAE workflow config ────────────────────────────────────────────────────────
 # Run: python scripts/run_sae.py
 # Override: python scripts/run_sae.py prompt="a unicorn" n_top_features=6
 
 defaults:
   - _self_
+  - /wandb@wandb
 
 # Model
 model_key: CompVis/stable-diffusion-v1-4
 device: cuda:0
 dtype: float16
 
-# SAE
-sae_name: model_unet_down_blocks_2_attentions_1_out
+# SAE Configurations
+# Map of "model_hook_name" -> sae config
+saes:
+  model_unet_down_blocks_2_attentions_1_out:
+    path: "./sdxl-unbox/checkpoints/unet.down_blocks.2.attentions.1_k10_hidden5120_auxk256_bs4096_lr0.0001/final/state_dict.pth"
+    k: 10
+    hidden_dim: 5120
+
+# Settings for which SAE to inspect for the given prompt, and geometry size
+target_sae: model_unet_down_blocks_2_attentions_1_out
 n_top_features: 10
 spatial_h: 16
 spatial_w: 16
+max_samples: 1000
 
 # Activation modulation
 strengths: [-10, -5, 5, 10]
@@ -31,10 +42,25 @@ output_dir: ./output_images/sae
 save_grid: true
 
 # Hydra
+metrics:
+  clip:
+    _target_: t2i_interp.utils.metrics.clip_score.CLIPScorer
+  lpips:
+    _target_: t2i_interp.utils.metrics.lpips_score.LPIPSScorer
+  fid:
+    _target_: t2i_interp.utils.metrics.fid_score.FIDScorer
+
 hydra:
   output_subdir: null
   run:
     dir: .
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: .
   job_logging:
     root:
       level: WARNING
+
+  callbacks:
+    wandb_sweeper:
+      _target_: t2i_interp.reporting.wandb_callback.WandbMultirunCallback

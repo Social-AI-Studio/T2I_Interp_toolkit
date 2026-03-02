@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import json
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
@@ -16,10 +17,8 @@ import numpy as np
 import torch
 import zstandard as zstd
 from datasets import load_dataset
-from nnsight import LanguageModel
-from nnsight.modeling.diffusion import DiffusionModel
+
 from pydantic import BaseModel
-from torchvision import transforms
 
 # from t2i_interp.utils.text_image_buffer import TextImageActivationBuffer
 
@@ -190,7 +189,7 @@ def encode_prompt(prompt: str, model: DiffusionModel):
     return prompt_embeds
 
 
-def get_submodule(model: LanguageModel, layer: int):
+def get_submodule(model, layer: int):
     """Gets the residual stream submodule"""
     model_name = model._model_key
     name_l = model_name.lower()
@@ -320,14 +319,15 @@ def preprocess_image(image, target_size=512):
     --------
     torch.Tensor : Preprocessed image tensor [1, 3, H, W] in range [-1, 1]
     """
-    transform = transforms.Compose(
-        [
-            transforms.Resize((target_size, target_size)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),  # Scale to [-1, 1]
-        ]
-    )
-    return transform(image)  # .unsqueeze(0)
+    import numpy as np
+    import torch
+    from PIL import Image
+    
+    image = image.convert("RGB").resize((target_size, target_size), resample=Image.BILINEAR)
+    arr = np.array(image, dtype=np.float32) / 255.0
+    arr = np.transpose(arr, (2, 0, 1))
+    tensor = torch.from_numpy(arr)
+    return (tensor - 0.5) / 0.5
 
 
 # class ActivationMemmapWriter:
@@ -860,3 +860,13 @@ class ActivationConfig:
     data_loader_kwargs: dict[str, Any] = field(default_factory=dict)
     buffer_kwargs: dict[str, Any] = field(default_factory=dict)
     # pipe_kwargs: Dict[str, Any]   = field(default_factory=dict)
+
+def save_json(data: Any, filepath: str | Path) -> None:
+    """Save data to a JSON file gracefully."""
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4, default=str)
+
+def load_json(filepath: str | Path) -> Any:
+    """Load data from a JSON file."""
+    with open(filepath, 'r', encoding='utf-8') as f:
+        return json.load(f)

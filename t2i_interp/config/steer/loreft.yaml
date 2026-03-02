@@ -1,0 +1,73 @@
+# @package _global_
+# ── Steer workflow config ──────────────────────────────────────────────────────
+# Run: python scripts/run_steer.py --config-name=steer/loreft
+# Override example: python scripts/run_steer.py --config-name=steer/loreft model_key=CompVis/stable-diffusion-v1-4 device=cuda:1
+
+defaults:
+  - _self_
+  - /wandb@wandb
+
+# Model
+model_key: runwayml/stable-diffusion-v1-5
+device: cuda:0
+dtype: float16
+
+# Dataset
+# Note for LoReFT: Your dataset needs two prompt columns, one for base(student) and one for teacher
+dataset_name: nirmalendu01/spectacles-bias-prompts-headshot
+prompt_cols: ["base_prompt", "with_spectacles_prompt"] # e.g. ["student", "teacher"]
+max_samples: 100
+
+# Latent collection
+target_module: unet # or clip
+layer_names:  # LoReFT uses the first layer in this list
+  - unet.up_blocks.1.attentions.0.transformer_blocks.0.attn2
+save_dir: ./latents_cache/loreft_steering
+batch_size: 4 # Teacher pipeline often requires BS=1 if text lengths differ
+guidance_scale: 7.5
+conditional_only: true
+capture_step_index: "all"
+num_inference_steps: 30  # must match steer_steps so each step has a trained adapter
+delete_cache: true
+
+# LoReFT Params
+lora_rank: 32
+
+# Training
+shuffle: true
+train_steps: 100
+lr: 1.0e-3
+
+# Inference
+use_baseline: true
+steer_type: loreft
+alpha: 1.0  # edit scale: 1.0 = full trained edit, 0.0 = no edit, >1 amplifies
+steer_steps: 30
+output_dir: ./output_images/loreft_steer
+prompts:
+  - "A photo of Jack Sparrow"
+  - "A photo of Simba"
+  - "A photo of a cat"
+
+metrics:
+  clip:
+    _target_: t2i_interp.utils.metrics.clip_score.CLIPScorer
+  lpips:
+    _target_: t2i_interp.utils.metrics.lpips_score.LPIPSScorer
+  fid:
+    _target_: t2i_interp.utils.metrics.fid_score.FIDScorer
+
+# Hydra — run in-place, no log dirs
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+  sweep:
+    dir: ./multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: .
+  job_logging:
+    root:
+      level: WARNING
+  callbacks:
+    wandb_sweeper:
+      _target_: t2i_interp.reporting.wandb_callback.WandbMultirunCallback

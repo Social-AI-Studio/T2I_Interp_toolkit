@@ -9,7 +9,6 @@ import torch as th
 from dictionary_learning.utils import hf_dataset_to_generator
 from t2i_interp.accessors.accessor import ModuleAccessor
 from t2i_interp.t2i import T2IModel
-from t2i_interp.utils.metrics import MetricBase
 from t2i_interp.utils.output import Output
 from t2i_interp.utils.runningstats import TrainUpdate, Update
 from t2i_interp.utils.utils import (
@@ -569,16 +568,62 @@ class CAA(Steer):
         if alphas is None:
             alphas = [1.0] * len(steering_vecs)
         # zip and apply steering vecs, alphas
-        acts += sum([alpha * vec for vec, alpha in zip(steering_vecs, alphas)]) 
+        acts += sum([alpha * vec.to(acts.device, acts.dtype) for vec, alpha in zip(steering_vecs, alphas)]) 
         return acts
     
-    def steer(self, prompts, layer_name, steering_vecs, alphas, **kwargs):
-        hook = UNetAlterHook(
-            policy=partial(self.apply_steering, steering_vecs=steering_vecs, alphas=alphas)
-        )
-        module = self.model.resolve_accessor(layer_name).module
-        with TraceDict([module], hook):
-            imgs = self.model.pipeline(prompts, num_inference_steps=kwargs.get("num_inference_steps", 50)).images
+    def steer(
+        self,
+        prompts,
+        layer_names,
+        steering_vecs=None,
+        alphas=None,
+        **kwargs,
+    ):
+        """Steer at one or multiple layers.
+
+        Args:
+            prompts: Text prompts for generation.
+            layer_names: Layer name(s) to steer at. Single str or list of str.
+            steering_vecs: List of steering tensors, one per layer. If None, uses
+                self.steering_vecs values in attr order.
+            alphas: Scalar or list of strengths, one per layer.
+        """
+        names = [layer_names] if isinstance(layer_names, str) else list(layer_names)
+
+        if steering_vecs is None:
+            steering_vecs = list(self.steering_vecs.values())
+        steering_vecs = list(steering_vecs)
+
+        if alphas is None:
+            alphas = [1.0] * len(names)
+        elif isinstance(alphas, (int, float)):
+            alphas = [float(alphas)] * len(names)
+        else:
+            alphas = list(alphas)
+
+        if len(names) != len(steering_vecs) or len(names) != len(alphas):
+            raise ValueError(
+                f"layer_names ({len(names)}), steering_vecs ({len(steering_vecs)}), "
+                f"and alphas ({len(alphas)}) must have the same length"
+            )
+
+        modules = [self.model.resolve_accessor(n).module for n in names]
+
+        def make_policy(vec, alpha):
+            def policy(acts, **kw):
+                return acts + alpha * vec.to(acts.device, acts.dtype)
+
+            return policy
+
+        hooks = {
+            mod: UNetAlterHook(policy=make_policy(vec, alpha))
+            for mod, vec, alpha in zip(modules, steering_vecs, alphas)
+        }
+
+        with TraceDict(modules, hooks):
+            imgs = self.model.pipeline(
+                prompts, num_inference_steps=kwargs.get("num_inference_steps", 50)
+            ).images
         return imgs
     
     def eval(self, *args, **kwargs):
@@ -601,32 +646,32 @@ class LoREEFT(Steer):
 
     def train_loreft_on_clip(
         self,
-        loader,                    # DataLoader: batches = {"teacher": token_dict, "base": token_dict}
-        val_loader=None,           # Optional DataLoader with same format for validation
+        loader,
+        val_loader=None,
         layer_idx: int = 5,
         rank: int = 16,
         num_steps: int = 10_000,
         lr: float = 1e-3,
         device: str = "cuda:0",
         log_steps: int = 100,
+        **kwargs,
     ) -> Generator[Update, None, "LoReFTLayer"]:
-        """Train LoReFT on a CLIP text-encoder hidden layer.
+        """Train LoReFT on a pre-extracted CLIP text-encoder hidden layer.
 
-        The CLIP text encoder is extracted from ``self.model.pipeline`` and
-        frozen; only the LoReFT parameters are optimised.
+        Activations are read from pre-built ``loader`` / ``val_loader`` tars
+        (same format as the UNet path: PairedLoader batches of
+        ``(base_acts, teacher_acts)``).  ``d_model`` is inferred from the first
+        batch so no manual configuration is needed.
 
         Args:
-            loader: Pre-built DataLoader.  Each batch must have the shape
-                ``{"teacher": token_dict, "base": token_dict}`` where each
-                token dict contains at least ``input_ids`` and
-                ``attention_mask``.
-            layer_idx: Index into the encoder's ``hidden_states`` tuple
-                (0 = embedding layer, 1 = first transformer layer, …).
-            rank: Rank of the LoReFT decomposition.
-            num_steps: Total optimisation steps.
+            loader: Pre-built PairedLoader / ActivationsDataloader.
+            val_loader: Optional validation loader (same format).
+            layer_idx: Unused – kept for API compat with ``fit()``.
+            rank: LoReFT rank.
+            num_steps: Optimisation steps.
             lr: AdamW learning rate.
-            device: Compute device (e.g. ``"cuda:0"``).
-            log_steps: Yield a :class:`TrainUpdate` every this many steps.
+            device: Compute device.
+            log_steps: Log / validate every this many steps.
 
         Yields:
             :class:`Update` / :class:`TrainUpdate` progress events.
@@ -636,17 +681,25 @@ class LoREEFT(Steer):
         """
         from t2i_interp.loreft import LoReFTLayer
 
-        pipe         = self.model.pipeline
-        text_encoder = pipe.text_encoder.to(device)
-        text_encoder.eval()
-        for p in text_encoder.parameters():
-            p.requires_grad_(False)
+        it = loader.iterate()
+        first_batch = next(it)
+        shape = first_batch[0].shape
+        d_model = shape[-1]
 
-        d_model = text_encoder.config.hidden_size
+        # Pre-load val data once to avoid repeated cold disk reads on each val round
+        val_cache: list | None = None
+        if val_loader is not None:
+            if hasattr(val_loader, "reset"):
+                val_loader.reset()
+            val_cache = [
+                (vb[0].to(device, dtype=th.float32), vb[1].to(device, dtype=th.float32))
+                for vb in val_loader.iterate()
+            ]
+
         yield Update(
-            info=f"Starting LoREEFT-CLIP training: d_model={d_model}, "
-                 f"layer_idx={layer_idx}, rank={rank}, steps={num_steps}, "
-                 f"val={'yes' if val_loader is not None else 'no'}"
+            info=f"Starting LoReFT-CLIP training: d_model={d_model}, "
+                 f"rank={rank}, steps={num_steps}, "
+                 f"val={'yes' if val_cache is not None else 'no'}"
         )
 
         loreft         = LoReFTLayer(d_model=d_model, rank=rank).to(device)
@@ -654,62 +707,43 @@ class LoREEFT(Steer):
         best_val       = float("inf")
         best_loreft_sd = deepcopy(loreft.state_dict())
 
-        def _clip_loss(h_base_b, h_teacher_b, mask_b):
-            """MSE on active tokens, returning a scalar."""
-            diff = (loreft(h_base_b) - h_teacher_b) ** 2
-            return (diff * mask_b).sum() / mask_b.sum().clamp(min=1.0)
-
         def _run_val():
             loreft.eval()
             val_loss, n = 0.0, 0
             with th.no_grad():
-                for vbatch in val_loader:
-                    vt = {k: v.to(device) for k, v in vbatch["teacher"].items()}
-                    vb = {k: v.to(device) for k, v in vbatch["base"].items()}
-                    ot = text_encoder(**vt, output_hidden_states=True, return_dict=True)
-                    ob = text_encoder(**vb, output_hidden_states=True, return_dict=True)
-                    ht = ot.hidden_states[layer_idx].to(th.float32)
-                    hb = ob.hidden_states[layer_idx].to(th.float32)
-                    vm = vb["attention_mask"].to(th.float32).unsqueeze(-1)
-                    val_loss += float(_clip_loss(hb, ht, vm))
+                for hb, ht in val_cache:
+                    diff = (loreft(hb) - ht) ** 2
+                    val_loss += float(diff.sum() / diff.numel())
                     n += 1
             loreft.train()
             return val_loss / max(n, 1)
 
         step = 0
-        it   = iter(loader)
+        it   = loader.iterate()
         while step < num_steps:
             try:
                 batch = next(it)
             except StopIteration:
-                it    = iter(loader)
-                batch = next(it)
-
-            teacher_tokens = {k: v.to(device) for k, v in batch["teacher"].items()}
-            base_tokens    = {k: v.to(device) for k, v in batch["base"].items()}
+                it = loader.iterate()
+                try:
+                    batch = next(it)
+                except StopIteration:
+                    break  # dataset is empty; stop training early
 
             with th.no_grad():
-                out_teacher = text_encoder(
-                    **teacher_tokens, output_hidden_states=True, return_dict=True
-                )
-                out_base = text_encoder(
-                    **base_tokens, output_hidden_states=True, return_dict=True
-                )
-                h_teacher = out_teacher.hidden_states[layer_idx].to(th.float32)  # (B, T, D)
-                h_base    = out_base.hidden_states[layer_idx].to(th.float32)
-
-            attention_mask = base_tokens["attention_mask"].to(th.float32).unsqueeze(-1)  # (B, T, 1)
+                h_teacher = batch[1].to(device, dtype=th.float32)
+                h_base    = batch[0].to(device, dtype=th.float32)
 
             h_edit = loreft(h_base)
             diff   = (h_edit - h_teacher) ** 2
-            loss   = (diff * attention_mask).sum() / attention_mask.sum().clamp(min=1.0)
+            loss   = diff.sum() / diff.numel()
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             if log_steps and (step % log_steps == 0):
-                if val_loader is not None:
+                if val_cache is not None:
                     val_loss = _run_val()
                     if val_loss < best_val:
                         best_val       = val_loss
@@ -719,12 +753,11 @@ class LoREEFT(Steer):
                     yield TrainUpdate(step=step, parts={"loss": float(loss.item())})
             step += 1
 
-        # restore best checkpoint
-        if val_loader is not None:
+        if val_cache is not None:
             loreft.load_state_dict(best_loreft_sd)
-            yield Update(info=f"LoREEFT-CLIP training done. Best val_loss={best_val:.6f}")
+            yield Update(info=f"LoReFT-CLIP training done. Best val_loss={best_val:.6f}")
         else:
-            yield Update(info="LoREEFT-CLIP training done.")
+            yield Update(info="LoReFT-CLIP training done.")
         return loreft
 
     def train_loreft_on_unet(
@@ -771,39 +804,47 @@ class LoREEFT(Steer):
         Returns:
             Trained :class:`LoReFTLayer`.
         """
-        from t2i_interp.loreft import LoReFTLayer
+        from t2i_interp.loreft import LoReFTLayer, StepConditionalLoReFT
 
         pipe   = self.model.pipeline
         module = self.model.resolve_accessor(layer_name).module
+        # Infer true d_model and num_steps from the first batch, then reset so
+        # the full loader is available for training (PairedLoader.iterate() eagerly
+        # consumes all pairs via list(zip(...)) on first call, exhausting child loaders).
+        it = loader.iterate()
+        first_batch = next(it)
+        shape = first_batch[0].shape
+        true_d_model = shape[-1]
+        del it
+        if hasattr(loader, "reset"):
+            loader.reset()
+
         yield Update(
-            info=f"Starting LoREEFT-UNet training: layer={layer_name}, d_model={d_model}, "
+            info=f"Starting LoREEFT-UNet training: layer={layer_name}, d_model={true_d_model}, "
                  f"rank={rank}, steps={num_steps}, val={'yes' if val_loader is not None else 'no'}"
         )
 
-        loreft         = LoReFTLayer(d_model=d_model, rank=rank).to(device)
+        if len(shape) == 4:
+            num_steps_dim = shape[1]
+            loreft = StepConditionalLoReFT(d_model=true_d_model, rank=rank, num_steps=num_steps_dim).to(device)
+        else:
+            loreft = LoReFTLayer(d_model=true_d_model, rank=rank).to(device)
         optimizer      = th.optim.AdamW(loreft.parameters(), lr=lr)
         best_val       = float("inf")
         best_loreft_sd = deepcopy(loreft.state_dict())
 
-        def _capture(prompts):
-            """Run the pipeline and return the hooked activations."""
-            hook_obj = CaptureOutputHook(denoiser_steps=None, reduce_fn=None)
-            _, acts  = run_with_hook(
-                pipe=pipe,
-                batch={"prompt": prompts},
-                module=module,
-                hook_obj=hook_obj,
-                **gen_config,
-            )
-            return acts.to(th.float32)
-
         def _run_val():
             loreft.eval()
+            # Reset so the underlying WebDataset iterator restarts from the
+            # beginning — without this, iterate() is a no-op after the first
+            # validation pass (exhausted iterator → n=0 → val_loss=0.0).
+            if hasattr(val_loader, "reset"):
+                val_loader.reset()
             val_loss, n = 0.0, 0
             with th.no_grad():
-                for vbatch in val_loader:
-                    ht = _capture(vbatch["teacher"])
-                    hb = _capture(vbatch["base"])
+                for vbatch in val_loader.iterate():
+                    ht = vbatch[1].to(device, dtype=th.float32)
+                    hb = vbatch[0].to(device, dtype=th.float32)
                     diff = (loreft(hb) - ht) ** 2
                     val_loss += float(diff.sum() / diff.numel())
                     n += 1
@@ -811,17 +852,24 @@ class LoREEFT(Steer):
             return val_loss / max(n, 1)
 
         step = 0
-        it   = iter(loader)
+        it   = loader.iterate()
         while step < num_steps:
             try:
                 batch = next(it)
             except StopIteration:
-                it    = iter(loader)
-                batch = next(it)
+                # PairedLoader exhausts child-loader WebDataset iterators; must
+                # reset before calling iterate() again to restart from the start.
+                if hasattr(loader, "reset"):
+                    loader.reset()
+                it = loader.iterate()
+                try:
+                    batch = next(it)
+                except StopIteration:
+                    break  # dataset is truly empty; stop training early
 
             with th.no_grad():
-                h_teacher = _capture(batch["teacher"])
-                h_base    = _capture(batch["base"])
+                h_teacher = batch[1].to(device, dtype=th.float32)
+                h_base    = batch[0].to(device, dtype=th.float32)
 
             h_edit = loreft(h_base)
             diff   = (h_edit - h_teacher) ** 2
@@ -908,7 +956,7 @@ class LoREEFT(Steer):
             self.model = model
         assert self.model is not None, "Model must be provided at init or in fit()"
 
-        if "clip" in layer_name.lower():
+        if "clip" in layer_name.lower() or "text_encoder" in layer_name.lower():
             train_gen = self.train_loreft_on_clip(
                 loader=loader,
                 val_loader=val_loader,
@@ -935,6 +983,10 @@ class LoREEFT(Steer):
 
         loreft = yield from train_gen
 
+        if not hasattr(self, "lorefts"):
+            self.lorefts = {}
+        self.lorefts[layer_name] = loreft
+        
         self.loreft = loreft
         yield loreft
 
@@ -942,39 +994,51 @@ class LoREEFT(Steer):
         self,
         acts: th.Tensor,
         loreft: th.nn.Module | None = None,
-        **kwargs,
+        step: int = 0,
+        alpha: float = 1.0,
     ) -> th.Tensor:
-        """Apply the trained LoReFT transformation to hidden-state activations.
+        """Apply a trained LoReFT edit to a batch of activations.
 
         Args:
-            acts: Hidden-state tensor ``(B, T, D)`` intercepted by the hook.
-            loreft: Override the LoReFT module to apply; defaults to
-                ``self.loreft``.
+            acts: Input activations tensor from the UNet or CLIP.
+            loreft: The trained :class:`LoReFTLayer` or `StepConditionalLoReFT`. Defaults to ``self.loreft``.
+            step: Timestep for StepConditionalLoReFT.
+            alpha: Scale factor for the edit delta. 1.0 applies the full trained edit;
+                0.0 leaves activations unchanged; values >1 amplify the edit.
 
         Returns:
-            Edited activations ``(B, T, D)``.
+            Edited activations tensor of the same shape.
         """
         _loreft = loreft if loreft is not None else self.loreft
-        assert _loreft is not None, (
-            "No trained LoReFT module found. Call fit() first or pass loreft=."
-        )
+        if _loreft is None:
+            raise ValueError("No trained LoReFT module available.")
+        
+        from t2i_interp.loreft import StepConditionalLoReFT
         with th.no_grad():
-            return _loreft(acts.to(th.float32)).to(acts.dtype)
+            acts_f = acts.to(th.float32)
+            if isinstance(_loreft, StepConditionalLoReFT):
+                edited = _loreft(acts_f, step=step)
+            else:
+                edited = _loreft(acts_f)
+            # Blend: acts + alpha * delta  (alpha=1 → full edit, alpha=0 → no edit)
+            result = acts_f + alpha * (edited - acts_f)
+            return result.to(acts.dtype)
 
     def steer(
         self,
         prompts: list[str],
-        layer_name: str,
-        loreft: th.nn.Module | None = None,
+        layer_names: str | list[str],
+        lorefts: dict[str, th.nn.Module] | None = None,
         num_inference_steps: int = 50,
+        alpha: float = 1.0,
         **kwargs,
     ) -> list:
-        """Generate images with LoReFT applied at the specified layer.
+        """Generate images with LoReFT applied at the specified layer(s).
 
-        Dispatches on ``layer_name``:
+        Dispatches on ``layer_names``:
 
-        * **CLIP** (``'clip'`` anywhere in ``layer_name``, case-insensitive) –
-          hooks a transformer layer inside the text encoder.  ``layer_name``
+        * **CLIP** (``'clip'`` anywhere in ``layer_names``, case-insensitive) –
+          hooks a transformer layer inside the text encoder.  ``layer_names``
           should be parseable as an integer (the layer index) or a string
           like ``"clip.5"`` / ``"clip_layer_5"``; the last integer found in
           the string is used.
@@ -983,36 +1047,36 @@ class LoREEFT(Steer):
 
         Args:
             prompts: Text prompts to generate from.
-            layer_name: Layer identifier – ``"clip"`` / ``"clip.5"`` for CLIP
+            layer_names: Layer identifier(s) – ``"clip"`` / ``"clip.5"`` for CLIP
                 encoder layer 5, or a UNet accessor path.
-            loreft: Override for the LoReFT module; defaults to
-                ``self.loreft``.
+            lorefts: Override for the dict of LoReFT modules; defaults to
+                ``self.lorefts``.
             num_inference_steps: Diffusion steps.
             **kwargs: Forwarded to the pipeline.
 
         Returns:
             List of PIL images.
         """
-        _loreft = loreft if loreft is not None else self.loreft
-        assert _loreft is not None, (
-            "No trained LoReFT module found. Call fit() first or pass loreft=."
-        )
+        names = [layer_names] if isinstance(layer_names, str) else list(layer_names)
+        _lorefts = lorefts if lorefts is not None else getattr(self, "lorefts", {names[0]: getattr(self, "loreft", None)})
 
-        policy = partial(self.apply_steering, loreft=_loreft)
+        assert _lorefts is not None and len(_lorefts) > 0, "No trained LoReFT module found. Call fit() first."
 
-        if "clip" in layer_name.lower():
-            # Resolve the layer index from the name, e.g. "clip.5" -> 5
+        if "clip" in str(names[0]).lower():
+            # Multi-layer CLIP not fully scaled, falls back to single layer parser
             import re as _re
-            nums = _re.findall(r"\d+", layer_name)
+            nums = _re.findall(r"\d+", names[0])
             layer_idx = int(nums[-1]) if nums else 5
 
             pipe         = self.model.pipeline
             text_encoder = pipe.text_encoder
-            # CLIP text encoder layers: text_encoder.text_model.encoder.layers
             encoder_layers = text_encoder.text_model.encoder.layers
             target_module  = encoder_layers[layer_idx]
 
+            _loreft = _lorefts.get(names[0], getattr(self, "loreft", None))
+            policy = partial(self.apply_steering, loreft=_loreft, alpha=alpha)
             hook = TextEncoderAlterHook(policy=policy)
+            
             with TraceDict([target_module], hook):
                 imgs = pipe(
                     prompts,
@@ -1020,9 +1084,29 @@ class LoREEFT(Steer):
                     **kwargs,
                 ).images
         else:
-            module = self.model.resolve_accessor(layer_name).module
-            hook   = UNetAlterHook(policy=policy)
-            with TraceDict([module], hook):
+            modules = []
+            hooks = {}
+            for name in names:
+                module = self.model.resolve_accessor(name).module
+                modules.append(module)
+                _loreft = _lorefts.get(name, getattr(self, "loreft", None))
+                assert _loreft is not None, f"No trained LoReFT module found for layer: {name}"
+
+                # AlterHook._apply always passes value=None (no cache set), so we
+                # can't rely on `value` for the step index. Use a per-layer closure
+                # counter that increments on each hook call (one call per denoising
+                # step) to give StepConditionalLoReFT the correct step index.
+                def make_policy(l_module, _alpha=alpha):
+                    step_counter = [0]
+                    def policy(x, value=None):
+                        step = step_counter[0]
+                        step_counter[0] += 1
+                        return self.apply_steering(x, loreft=l_module, step=step, alpha=_alpha)
+                    return policy
+
+                hooks[module] = UNetAlterHook(policy=make_policy(_loreft))
+                
+            with TraceDict(modules, hooks):
                 imgs = self.model.pipeline(
                     prompts,
                     num_inference_steps=num_inference_steps,
