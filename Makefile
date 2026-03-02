@@ -1,4 +1,4 @@
-.PHONY: help install install-dev clean test test-unit test-integration test-cov lint format check train infer init pre-commit
+.PHONY: help install install-prod sync clean test test-unit test-integration test-cov lint format check train infer steer stitch sae localise init pre-commit
 
 # Default target
 help:
@@ -23,8 +23,12 @@ help:
 	@echo "  make test-cov        Run tests with coverage report"
 	@echo ""
 	@echo "Experiments:"
-	@echo "  make train           Run training pipeline"
-	@echo "  make infer           Run inference pipeline"
+	@echo "  make train           Run training pipeline (pass TRAIN_ARGS=...)"
+	@echo "  make infer           Run inference pipeline (pass INFER_ARGS=...)"
+	@echo "  make steer           Run steering workflow"
+	@echo "  make stitch          Run stitching workflow"
+	@echo "  make sae             Run SAE workflow"
+	@echo "  make localise        Run localisation workflow"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean           Remove cache and build artifacts"
@@ -76,32 +80,26 @@ DATASET ?= nirmalendu01/fairface-trainval-race-balanced-200
 ACCESSOR ?= model.unet_2.down_attn_blocks[0].self_attn_out
 RUN_NAME ?= test_run
 STEPS ?= 1000
+TRAIN_ARGS ?=
+INFER_ARGS ?=
 
 train:
-	python -m scripts.train_pipeline \
-		--training_fn KSteer.fit \
-		--run_name $(RUN_NAME) \
-		--dataset $(DATASET) \
-		--accessor_path '$(ACCESSOR)' \
-		--input_dim $$((4096*320)) \
-		--hidden_dim 4096 \
-		--output_dim 7 \
-		--steps $(STEPS) \
-		--lr 1e-5 \
-		--refresh_batch_size 64 \
-		--out_batch_size 16 \
-		--training_device cuda:0 \
-		--data_device cpu \
-		--autocast_dtype bfloat16 \
-		--preprocess_fn scripts.train_pipeline:preprocess_fn \
-		--gt_processing_fn scripts.train_pipeline:race_processing_fn \
-		--wandb_config t2i_interp/reporting/config.yaml
-
-train-script:
-	bash scripts/train_pipeline.sh
+	python -m t2i_interp.scripts.train_pipeline $(TRAIN_ARGS)
 
 infer:
-	bash scripts/infer_pipeline.sh
+	python -m t2i_interp.scripts.infer_pipeline $(INFER_ARGS)
+
+steer:
+	t2i-steer
+
+stitch:
+	t2i-stitch
+
+sae:
+	t2i-sae
+
+localise:
+	t2i-localise
 
 # Cleanup
 clean:

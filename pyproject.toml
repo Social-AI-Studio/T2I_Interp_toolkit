@@ -65,9 +65,9 @@ t2i-sae       = "t2i_interp.scripts.run_sae:main"
 t2i-localise  = "t2i_interp.scripts.run_localisation:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/T2I_Interp_toolkit"
-Repository = "https://github.com/yourusername/T2I_Interp_toolkit"
-Issues = "https://github.com/yourusername/T2I_Interp_toolkit/issues"
+Homepage = "https://github.com/Social-AI-Studio/T2I_Interp_toolkit"
+Repository = "https://github.com/Social-AI-Studio/T2I_Interp_toolkit"
+Issues = "https://github.com/Social-AI-Studio/T2I_Interp_toolkit/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["t2i_interp", "dictionary_learning"]
