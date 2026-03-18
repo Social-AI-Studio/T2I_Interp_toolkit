@@ -2,6 +2,26 @@
 
 A text-to-image interpretability toolkit for steering, SAE analysis, stitching, and cross-attention localisation in diffusion models.
 
+## Citation
+
+If you use this toolkit in your research, please cite our paper:
+
+> **DreamReader: An Interpretability Toolkit for Text-to-Image Models**  
+> Nirmalendu Prakash, Narmeen Oozeer, Michael Lan, Luka Samkharadze, Phillip Howard, Roy Ka-Wei Lee, Dhruv Nathawani, Shivam Raval, Amirali Abdullah (2026).  
+> [arXiv:2603.13299](https://arxiv.org/abs/2603.13299)
+
+```bibtex
+@misc{prakash2026dreamreaderinterpretabilitytoolkittexttoimage,
+      title={DreamReader: An Interpretability Toolkit for Text-to-Image Models}, 
+      author={Nirmalendu Prakash and Narmeen Oozeer and Michael Lan and Luka Samkharadze and Phillip Howard and Roy Ka-Wei Lee and Dhruv Nathawani and Shivam Raval and Amirali Abdullah},
+      year={2026},
+      eprint={2603.13299},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2603.13299}
+}
+```
+
 ## Features
 
 - Activation steering over UNet modules
