@@ -1,11 +1,13 @@
-from typing import Callable, Optional, Union, Tuple, List, Any, Dict, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Callable, Optional, Any, Dict
+from typing import Optional
+
 import torch as t
-from t2i_interp.utils.generic import _extract_tensor_and_rebuild, StopForward, _extract_tensor
+
+from t2i_interp.utils.generic import StopForward, _extract_tensor, _extract_tensor_and_rebuild
 
 Tensor = t.Tensor
-StepIndex = Optional[Union[int, str, Iterable[int], slice]]
+StepIndex = Optional[int | str | Iterable[int] | slice]
 # Policy = Union[
 #     Callable[..., Tensor],
 #     Mapping[Union[int, str], Callable[..., Tensor]],
@@ -15,8 +17,8 @@ StepIndex = Optional[Union[int, str, Iterable[int], slice]]
 @dataclass(kw_only=True)
 class BaseHook:
     enabled: bool = True
-    call_counter: Optional[int] = None
-    step_index: StepIndex = None   # None/int/"all"/iterable/slice
+    call_counter: int | None = None
+    step_index: StepIndex = None  # None/int/"all"/iterable/slice
     stop: bool = False
 
     # --- internal: normalize gating once ---
@@ -97,9 +99,9 @@ class BaseHook:
 class AlterHook(BaseHook):
     policy: Callable
     # missing: str = "identity"  # "identity" | "error" | "default"
-    cache: Optional[Dict[int, Tensor]] = None
+    cache: dict[int, Tensor] | None = None
 
-    def _resolve_cache(self) -> Optional[Callable[..., Tensor]]:
+    def _resolve_cache(self) -> Callable[..., Tensor] | None:
         """
         Returns the policy callable to use for the *current* call_counter.
         - If self.policy is callable -> returns it.
@@ -131,15 +133,17 @@ class AlterHook(BaseHook):
 
     def _apply(self, x: Tensor, module: t.nn.Module, **ctx) -> Tensor:
         value = self._resolve_cache()
-        out = self.policy(x, **{"value":value})
+        out = self.policy(x, **{"value": value})
         return out.to(x.device)
+
 
 @dataclass
 class TextEncoderAlterHook(AlterHook):
     """
     Adds token-index context. Useful for policies that need "last non-pad token" etc.
     """
-    last_token_indices: Optional[Tensor] = None  # [B]
+
+    last_token_indices: Tensor | None = None  # [B]
 
     def set_token_indices(self, idx: Tensor):
         # idx: [B] on any device; we move to output's device at use-time
@@ -152,12 +156,14 @@ class TextEncoderAlterHook(AlterHook):
 
         new_x = self._apply(x, module, token_indices=self.last_token_indices)
         return rebuild(new_x)
-    
+
+
 @dataclass
 class UNetAlterHook(AlterHook):
     """
     Applies policy either to full batch or only CFG conditional half (second half).
     """
+
     cfg_cond_only: bool = False
 
     def on_forward(self, module: t.nn.Module, inputs, output):
@@ -185,6 +191,7 @@ class UNetAlterHook(AlterHook):
         new_x = self._apply(x, module)
         return rebuild(new_x)
 
+
 @dataclass
 class CaptureHook(BaseHook):
     """
@@ -196,9 +203,9 @@ class CaptureHook(BaseHook):
 
     capture: str = "output"  # "input" | "output"
     tensor_index: int = 0
-    reduce_fn: Optional[Callable[[Tensor], Tensor]] = None
-    last: Optional[Tensor] = None
-    cache: Optional[Dict[int, Tensor]] = None
+    reduce_fn: Callable[[Tensor], Tensor] | None = None
+    last: Tensor | None = None
+    cache: dict[int, Tensor] | None = None
 
     def _post(self, x: Tensor) -> None:
         if self.reduce_fn is not None:
@@ -220,9 +227,3 @@ class CaptureHook(BaseHook):
         if tensor is not None:
             self._post(tensor)
         return None
-
-
-
-
-
-

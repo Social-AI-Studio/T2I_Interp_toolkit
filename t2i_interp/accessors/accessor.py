@@ -1,13 +1,16 @@
-from enum import Enum
-import torch as th
 import re
+from enum import Enum
+
+import torch as th
 import yaml
-from loguru import logger
+
 
 class IOType(Enum):
     """Enum to specify input or output access"""
+
     INPUT = "input"
     OUTPUT = "output"
+
 
 class ModuleAccessor:
     """
@@ -35,7 +38,7 @@ class ModuleAccessor:
         Useful for attention-based interventions.
         """
         return getattr(self.module, "heads", None)
-    
+
     def __repr__(self):
         return f"<ModuleAccessor {self.attr_name} ({self.io_type.value})>"
 
@@ -43,7 +46,7 @@ class ModuleAccessor:
 class ModelWrapper:
     """
     Generic container for model accessors, dynamically created based on a configuration file.
-    
+
     Iterates through the model's named modules and creates input/output accessors
     for any module whose name matches the patterns specified in the config.
     """
@@ -51,12 +54,12 @@ class ModelWrapper:
     def __init__(self, module: th.nn.Module, config_path: str):
         self.module = module
         self.accessors = {}
-        
+
         # Load patterns from config
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path) as f:
                 config = yaml.safe_load(f)
-                patterns = config.get('patterns', [])
+                patterns = config.get("patterns", [])
         except FileNotFoundError:
             # Fallback or empty if config not found
             patterns = []
@@ -75,22 +78,24 @@ class ModelWrapper:
                     # Create a sanitized attribute name from the module path
                     # e.g., "down_blocks.0.resnets.0" -> "down_blocks_0_resnets_0"
                     sanitized_name = name.replace(".", "_")
-                    
+
                     # Create Input Accessor
                     input_accessor_name = f"{sanitized_name}_in"
                     if not hasattr(self, input_accessor_name):
                         input_accessor = ModuleAccessor(module, input_accessor_name, IOType.INPUT)
                         setattr(self, input_accessor_name, input_accessor)
                         self.accessors[input_accessor_name] = input_accessor
-                    
+
                     # Create Output Accessor
                     output_accessor_name = f"{sanitized_name}_out"
                     if not hasattr(self, output_accessor_name):
-                        output_accessor = ModuleAccessor(module, output_accessor_name, IOType.OUTPUT)
+                        output_accessor = ModuleAccessor(
+                            module, output_accessor_name, IOType.OUTPUT
+                        )
                         setattr(self, output_accessor_name, output_accessor)
                         self.accessors[output_accessor_name] = output_accessor
-                    
-                    # Break after first match to avoid duplicate accessors for the same module 
+
+                    # Break after first match to avoid duplicate accessors for the same module
                     # if it matches multiple patterns (optional behavior)
                     break
 

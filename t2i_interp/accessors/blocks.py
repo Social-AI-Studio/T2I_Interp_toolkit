@@ -1,8 +1,5 @@
-from dataclasses import dataclass
 
 from t2i_interp.accessors.accessor import ModuleAccessor
-
-
 
 
 class SAEBlock:

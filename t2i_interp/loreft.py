@@ -1,6 +1,8 @@
+import math
+
 import torch
 import torch.nn as nn
-import math
+
 
 class LoReFTLayer(nn.Module):
     """
@@ -12,6 +14,7 @@ class LoReFTLayer(nn.Module):
     - W: (r, D)
     - b: (r,)
     """
+
     def __init__(self, d_model: int, rank: int):
         super().__init__()
         self.d_model = d_model
@@ -30,7 +33,7 @@ class LoReFTLayer(nn.Module):
         """
         h_shape = h.shape
         D = h_shape[-1]
-        
+
         # Flatten everything before the last dimension to handle both (B, D) and (B, T, D)
         h_flat = h.reshape(-1, D)
 
@@ -49,12 +52,14 @@ class LoReFTLayer(nn.Module):
         # Restore original shape
         return h_edit.view(*h_shape)
 
+
 class StepConditionalLoReFT(nn.Module):
     """
     A container that holds a separate LoReFTLayer for each diffusion step.
     During training, it processes a stacked tensor [B, num_steps, ...].
     During inference, it processes a single step tensor given `step=...`.
     """
+
     def __init__(self, d_model: int, rank: int, num_steps: int):
         super().__init__()
         self.num_steps = num_steps
@@ -72,7 +77,9 @@ class StepConditionalLoReFT(nn.Module):
         else:
             # Training applies all active steps simultaneously
             # h is expected to be [B, num_steps, sequence_length, d_model]
-            assert h.dim() >= 3 and h.shape[1] == self.num_steps, "For StepConditional training, h must be [B, num_steps, ...]"
+            assert h.dim() >= 3 and h.shape[1] == self.num_steps, (
+                "For StepConditional training, h must be [B, num_steps, ...]"
+            )
             out = []
             for t in range(self.num_steps):
                 out.append(self.layers[t](h[:, t]))

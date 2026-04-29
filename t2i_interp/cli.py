@@ -1,5 +1,6 @@
 import sys
 
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: t2i <command> [args...]")
@@ -9,12 +10,12 @@ def main():
         print("  sae        Run SAE tools")
         print("  stitch     Run patching/stitching tools")
         sys.exit(1)
-        
+
     command = sys.argv[1]
-    
+
     # Pop the command from argv so hydra doesnt accidentally consume it as an unparsed override
     sys.argv.pop(1)
-    
+
     if command == "steer":
         from t2i_interp.scripts.run_steer import main as cmd_main
     elif command == "localise":
@@ -27,9 +28,10 @@ def main():
         print(f"Unknown command: '{command}'")
         print("Available commands: steer, localise, sae, stitch")
         sys.exit(1)
-        
+
     # Launch sub-script
     cmd_main()
+
 
 if __name__ == "__main__":
     main()

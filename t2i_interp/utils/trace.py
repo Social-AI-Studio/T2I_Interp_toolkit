@@ -1,22 +1,22 @@
-"""  
+"""
 Script to implement the hooking function for nethook
 """
 
-# Libraries 
-from typing import Optional, Union, Tuple, List, Callable, Dict, Any, Iterable
-import torch as t
+# Libraries
 # from diffusers import StableDiffusionPipeline
 # import torch.nn.functional as nnf
-import numpy as np
-import abc
-import argparse 
-import tqdm 
-# from PIL import Image  
+# from PIL import Image
 import contextlib
-import copy
+
 # import inspect
 from collections import OrderedDict
+from collections.abc import Iterable
+from typing import Any
+
+import torch as t
+
 from t2i_interp.utils.generic import StopForward
+
 
 # Trace Class -- which performs the operation over only one layer
 class Trace(contextlib.AbstractContextManager):
@@ -31,7 +31,7 @@ class Trace(contextlib.AbstractContextManager):
     def __init__(self, module: t.nn.Module, hook_obj: Any, stop: bool = False):
         if not isinstance(module, t.nn.Module):
             raise TypeError(f"module must be nn.Module, got {type(module)}")
-        if not hasattr(hook_obj, "hook") or not callable(getattr(hook_obj, "hook")):
+        if not hasattr(hook_obj, "hook") or not callable(hook_obj.hook):
             raise TypeError("hook_obj must have a callable .hook(module, inputs, output)")
 
         self.module = module
@@ -48,13 +48,13 @@ class Trace(contextlib.AbstractContextManager):
                 raise TypeError(
                     "stop=True requires hook_obj.stop to exist, and hook_obj.hook must raise StopForward when stop is enabled."
                 )
-            setattr(self.hook_obj, "stop", True)
+            self.hook_obj.stop = True
 
         # IMPORTANT: no wrapper; direct registration
         if hasattr(self.hook_obj, "capture") and self.hook_obj.capture == "input":
-             self._handle = self.module.register_forward_pre_hook(self.hook_obj.hook)
+            self._handle = self.module.register_forward_pre_hook(self.hook_obj.hook)
         else:
-             self._handle = self.module.register_forward_hook(self.hook_obj.hook)
+            self._handle = self.module.register_forward_hook(self.hook_obj.hook)
 
     def __enter__(self):
         return self
@@ -70,7 +70,7 @@ class Trace(contextlib.AbstractContextManager):
             self._handle.remove()
             self._handle = None
         if self.stop and self._has_stop_attr:
-            setattr(self.hook_obj, "stop", self._prev_stop)
+            self.hook_obj.stop = self._prev_stop
 
 
 class TraceDict(OrderedDict, contextlib.AbstractContextManager):
@@ -87,7 +87,7 @@ class TraceDict(OrderedDict, contextlib.AbstractContextManager):
     def __init__(
         self,
         layers: Iterable[t.nn.Module],
-        hook_objs: Union[Any, Dict[t.nn.Module, Any]],
+        hook_objs: Any | dict[t.nn.Module, Any],
         stop: bool = False,
     ):
         super().__init__()
@@ -128,6 +128,3 @@ class TraceDict(OrderedDict, contextlib.AbstractContextManager):
     def close(self):
         for _, tr in reversed(list(self.items())):
             tr.close()
-
-
-

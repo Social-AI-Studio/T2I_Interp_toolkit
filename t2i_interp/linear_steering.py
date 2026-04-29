@@ -1,24 +1,23 @@
+import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator
 from copy import deepcopy
+from functools import partial
 from typing import Any
-import os
+
 import numpy as np
 import torch as th
 
-from dictionary_learning.utils import hf_dataset_to_generator
 from t2i_interp.accessors.accessor import ModuleAccessor
 from t2i_interp.t2i import T2IModel
 from t2i_interp.utils.output import Output
 from t2i_interp.utils.runningstats import TrainUpdate, Update
+from t2i_interp.utils.T2I.hook import TextEncoderAlterHook, UNetAlterHook
+from t2i_interp.utils.trace import TraceDict
 from t2i_interp.utils.utils import (
     ActivationConfig,
-    BatchIterator,
     normalize_batch,
 )
-from t2i_interp.utils.T2I.hook import UNetAlterHook, TextEncoderAlterHook
-from t2i_interp.utils.trace import TraceDict
-from functools import partial
 
 
 class Steer(ABC):
@@ -91,14 +90,13 @@ class KSteer(Steer):
         else:
             self.out = Output()
 
-
-        
         # Load config
         import yaml
+
         config_path = os.path.join(os.path.dirname(__file__), "config/mapper_training_config.yaml")
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             default_cfg = yaml.safe_load(f)
-        
+
         cfg_dict = default_cfg.copy()
         for k, v in kwargs.items():
             if k in cfg_dict:
@@ -107,7 +105,7 @@ class KSteer(Steer):
                 else:
                     cfg_dict[k] = v
             else:
-                 cfg_dict[k] = v
+                cfg_dict[k] = v
 
         cfg = ActivationConfig(
             steps=cfg_dict.get("train_steps"),
@@ -121,12 +119,17 @@ class KSteer(Steer):
 
         columns = cfg_dict.get("columns", ["label"])
         if "target_column" in kwargs:
-             columns = [kwargs["target_column"]]
-        
+            columns = [kwargs["target_column"]]
+
         # optim
         if optimizers is None:
             optimizers = [th.optim.Adam(mapper.parameters(), lr=cfg.lr)]
-        mapper = mapper.to(device=cfg.training_device, dtype=getattr(th, cfg.autocast_dtype) if isinstance(cfg.autocast_dtype, str) else cfg.autocast_dtype)
+        mapper = mapper.to(
+            device=cfg.training_device,
+            dtype=getattr(th, cfg.autocast_dtype)
+            if isinstance(cfg.autocast_dtype, str)
+            else cfg.autocast_dtype,
+        )
 
         # freeze model
         self.model.eval()
@@ -134,9 +137,7 @@ class KSteer(Steer):
             p.requires_grad_(False)
 
         # logging
-        yield Update(
-            info=f"Starting KSteer training"
-        )
+        yield Update(info="Starting KSteer training")
         yield Update(
             info=f"""Train steps={cfg.steps}, device={cfg.training_device},
                      dtype={cfg.autocast_dtype},memmap={cfg.data_loader_kwargs.get("use_memmap", False)},
@@ -152,7 +153,7 @@ class KSteer(Steer):
         while step < cfg.steps:
             # ActivationsDataloader is infinite loop by default (repeat=True)
             train_iter = train_loader.iterate()
-            
+
             for batch_data in train_iter:
                 if isinstance(batch_data, (tuple, list)):
                     # (act, extra1, extra2...)
@@ -161,18 +162,28 @@ class KSteer(Steer):
                     # columns=["label"] -> extra_keys=["label.pth"] -> batch_data[1] is label
                     if len(batch_data) > 1:
                         if len(batch_data) == 2:
-                             gt = batch_data[1]
+                            gt = batch_data[1]
                         else:
-                             gt = list(batch_data[1:])
+                            gt = list(batch_data[1:])
                     else:
                         gt = None
                 else:
                     act = batch_data
                     gt = None
 
-                act = act.to(cfg.training_device, dtype=getattr(th, cfg.autocast_dtype) if isinstance(cfg.autocast_dtype, str) else cfg.autocast_dtype)
-                act = act.to(cfg.training_device, dtype=getattr(th, cfg.autocast_dtype) if isinstance(cfg.autocast_dtype, str) else cfg.autocast_dtype)
-                
+                act = act.to(
+                    cfg.training_device,
+                    dtype=getattr(th, cfg.autocast_dtype)
+                    if isinstance(cfg.autocast_dtype, str)
+                    else cfg.autocast_dtype,
+                )
+                act = act.to(
+                    cfg.training_device,
+                    dtype=getattr(th, cfg.autocast_dtype)
+                    if isinstance(cfg.autocast_dtype, str)
+                    else cfg.autocast_dtype,
+                )
+
                 # Normalize targets
                 gt = normalize_batch(gt, cfg.training_device) if gt is not None else None
 
@@ -203,7 +214,7 @@ class KSteer(Steer):
                         mapper.eval()
                         with th.no_grad():
                             val_loss, n = 0.0, 0
-                            
+
                             val_loader.repeat = False
                             if hasattr(val_loader, "reset"):
                                 val_loader.reset()
@@ -212,16 +223,30 @@ class KSteer(Steer):
                                     val_act = batch_data[0]
                                     if len(batch_data) > 1:
                                         if len(batch_data) == 2:
-                                             gt_val = batch_data[1]
+                                            gt_val = batch_data[1]
                                         else:
-                                             gt_val = list(batch_data[1:])
+                                            gt_val = list(batch_data[1:])
                                     else:
                                         gt_val = None
 
-                                val_act = val_act.to(cfg.training_device, dtype=getattr(th, cfg.autocast_dtype) if isinstance(cfg.autocast_dtype, str) else cfg.autocast_dtype)
-                                val_act = val_act.to(cfg.training_device, dtype=getattr(th, cfg.autocast_dtype) if isinstance(cfg.autocast_dtype, str) else cfg.autocast_dtype)
-                                
-                                gt_val = normalize_batch(gt_val, cfg.training_device) if gt_val is not None else None
+                                val_act = val_act.to(
+                                    cfg.training_device,
+                                    dtype=getattr(th, cfg.autocast_dtype)
+                                    if isinstance(cfg.autocast_dtype, str)
+                                    else cfg.autocast_dtype,
+                                )
+                                val_act = val_act.to(
+                                    cfg.training_device,
+                                    dtype=getattr(th, cfg.autocast_dtype)
+                                    if isinstance(cfg.autocast_dtype, str)
+                                    else cfg.autocast_dtype,
+                                )
+
+                                gt_val = (
+                                    normalize_batch(gt_val, cfg.training_device)
+                                    if gt_val is not None
+                                    else None
+                                )
                                 mapped_val = normalize_batch(mapper(val_act), cfg.training_device)
 
                                 if gt_val is not None:
@@ -285,10 +310,11 @@ class KSteer(Steer):
 
         # Load config
         import yaml
+
         config_path = os.path.join(os.path.dirname(__file__), "config/mapper_training_config.yaml")
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             default_cfg = yaml.safe_load(f)
-        
+
         cfg_dict = default_cfg.copy()
         for k, v in kwargs.items():
             if k in cfg_dict:
@@ -297,14 +323,14 @@ class KSteer(Steer):
                 else:
                     cfg_dict[k] = v
             else:
-                 cfg_dict[k] = v
+                cfg_dict[k] = v
 
         cfg = ActivationConfig(
             data_loader_kwargs=cfg_dict.get("data_loader_kwargs", {}),
-             training_device=cfg_dict.get("training_device", "cpu"),
-             autocast_dtype=cfg_dict.get("autocast_dtype", th.float32),
+            training_device=cfg_dict.get("training_device", "cpu"),
+            autocast_dtype=cfg_dict.get("autocast_dtype", th.float32),
         )
-        
+
         val_loader.repeat = False
         if hasattr(val_loader, "reset"):
             val_loader.reset()
@@ -320,23 +346,28 @@ class KSteer(Steer):
 
         val_correct = 0
         val_total = 0
-        
+
         for batch_data in val_loader.iterate():
             if isinstance(batch_data, (tuple, list)):
                 val_act = batch_data[0]
                 if len(batch_data) > 1:
                     if len(batch_data) == 2:
-                         gt_val = batch_data[1]
+                        gt_val = batch_data[1]
                     else:
-                         gt_val = list(batch_data[1:])
+                        gt_val = list(batch_data[1:])
                 else:
                     gt_val = None
             else:
-                 val_act = batch_data
-                 gt_val = None
+                val_act = batch_data
+                gt_val = None
 
-            val_act = val_act.to(cfg.training_device, dtype=getattr(th, cfg.autocast_dtype) if isinstance(cfg.autocast_dtype, str) else cfg.autocast_dtype)
-            
+            val_act = val_act.to(
+                cfg.training_device,
+                dtype=getattr(th, cfg.autocast_dtype)
+                if isinstance(cfg.autocast_dtype, str)
+                else cfg.autocast_dtype,
+            )
+
             gt_val = normalize_batch(gt_val, cfg.training_device) if gt_val is not None else None
             mapped_val = normalize_batch(mapper(val_act), cfg.training_device)
 
@@ -404,7 +435,7 @@ class KSteer(Steer):
 
         if logits.ndim > 2:
             logits = logits.reshape(-1, logits.shape[-1])
-            
+
         B, _ = logits.shape
         if avoid_idx.numel() > 0:
             avoid_term = logits[:, avoid_idx].mean(dim=1)
@@ -434,13 +465,13 @@ class KSteer(Steer):
         if not hasattr(self, "classifier") and mapper is not None:
             self.classifier = mapper
 
-        assert hasattr(
-            self, "classifier"
-        ), "Classifier not found. Please fit the model or provide a classifier_path."
+        assert hasattr(self, "classifier"), (
+            "Classifier not found. Please fit the model or provide a classifier_path."
+        )
 
         if avoid_idx is None:
             avoid_idx = []
-        
+
         # Get classifier dtype
         param = next(self.classifier.parameters())
         dtype = param.dtype
@@ -453,35 +484,43 @@ class KSteer(Steer):
 
         # Clone and require grad
         steered = acts_t.detach().clone()
-        
+
         for step in range(steer_steps):
             curr = steered.clone().requires_grad_(True)
             logits = self.classifier(curr)
-            
+
             if isinstance(logits, (tuple, list)):
                 loss = 0
                 for i, logit_head in enumerate(logits):
                     # Determine target/avoid for this head
                     tgt = None
                     if target_idx is not None:
-                         if isinstance(target_idx, list) and len(target_idx) > i and isinstance(target_idx[i], (list, int, th.Tensor)):
-                             tgt = target_idx[i]
-                         elif i == 0 and isinstance(target_idx, (int, th.Tensor)): 
-                             # fallback for single target passed to multihead
-                             pass
-                    
+                        if (
+                            isinstance(target_idx, list)
+                            and len(target_idx) > i
+                            and isinstance(target_idx[i], (list, int, th.Tensor))
+                        ):
+                            tgt = target_idx[i]
+                        elif i == 0 and isinstance(target_idx, (int, th.Tensor)):
+                            # fallback for single target passed to multihead
+                            pass
+
                     avd = None
                     if avoid_idx is not None:
-                         if isinstance(avoid_idx, list) and len(avoid_idx) > i:
-                             avd = avoid_idx[i]
+                        if isinstance(avoid_idx, list) and len(avoid_idx) > i:
+                            avd = avoid_idx[i]
 
                     if tgt is not None or avd is not None:
-                         if tgt is None: tgt = []
-                         if avd is None: avd = []
-                         l = self.compute_steering_loss(logit_head, target_idx=tgt, avoid_idx=avd)
-                         loss += l.mean()
+                        if tgt is None:
+                            tgt = []
+                        if avd is None:
+                            avd = []
+                        l = self.compute_steering_loss(logit_head, target_idx=tgt, avoid_idx=avd)
+                        loss += l.mean()
             else:
-                loss_vec = self.compute_steering_loss(logits, target_idx=target_idx, avoid_idx=avoid_idx)
+                loss_vec = self.compute_steering_loss(
+                    logits, target_idx=target_idx, avoid_idx=avoid_idx
+                )
                 loss = loss_vec.mean()
 
             grads = th.autograd.grad(loss, curr, retain_graph=False)[0]
@@ -489,22 +528,31 @@ class KSteer(Steer):
             steered = (curr - current_alpha * grads).detach()
 
         th.set_grad_enabled(False)
-        
+
         # Cast back to input dtype if it was a tensor
         if th.is_tensor(acts):
             steered = steered.to(dtype=acts.dtype)
-            
+
         return steered
 
-    def steer(self, prompts, layer_name, target_idx, avoid_idx, alpha, steer_steps, **kwargs) -> Any:
+    def steer(
+        self, prompts, layer_name, target_idx, avoid_idx, alpha, steer_steps, **kwargs
+    ) -> Any:
         hook = UNetAlterHook(
-            policy=partial(self.apply_steering, target_idx=target_idx, avoid_idx=avoid_idx, alpha=alpha, steer_steps=steer_steps)
+            policy=partial(
+                self.apply_steering,
+                target_idx=target_idx,
+                avoid_idx=avoid_idx,
+                alpha=alpha,
+                steer_steps=steer_steps,
+            )
         )
         module = self.model.resolve_accessor(layer_name).module
         with TraceDict([module], hook):
-            imgs = self.model.pipeline(prompts, num_inference_steps=kwargs.get("num_inference_steps", 50)).images
+            imgs = self.model.pipeline(
+                prompts, num_inference_steps=kwargs.get("num_inference_steps", 50)
+            ).images
         return imgs
-
 
 
 class CAA(Steer):
@@ -521,7 +569,7 @@ class CAA(Steer):
     ):
         """
         Compute steering vector = Mean(Pos) - Mean(Neg).
-        
+
         Args:
             pos_acts: Positive activations (tensor or list of tensors).
             neg_acts: Negative activations (tensor or list of tensors).
@@ -531,17 +579,17 @@ class CAA(Steer):
             pos_acts = th.stack(pos_acts) if len(pos_acts) > 0 else th.tensor([])
         if neg_acts is not None and isinstance(neg_acts, list):
             neg_acts = th.stack(neg_acts) if len(neg_acts) > 0 else th.tensor([])
-            
+
         if pos_acts.numel() == 0:
-             raise ValueError("No positive activations provided")
+            raise ValueError("No positive activations provided")
 
         mean_pos = pos_acts.mean(dim=0, keepdim=True)
-        
+
         if neg_acts is not None and neg_acts.numel() > 0:
             mean_neg = neg_acts.mean(dim=0, keepdim=True)
         else:
             mean_neg = th.zeros_like(mean_pos)
-        print(mean_pos.shape, mean_neg.shape)    
+        print(mean_pos.shape, mean_neg.shape)
         steering_vec = (mean_pos - mean_neg).detach()
         steering_vec = steering_vec / (steering_vec.norm(p=2) + 1e-12)
 
@@ -549,11 +597,11 @@ class CAA(Steer):
         return steering_vec
 
     def apply_steering(
-        self, 
-        acts: th.Tensor, 
-        steering_vecs: th.Tensor | None = None, 
-        alphas: list[float] | None = None, 
-        **kwargs
+        self,
+        acts: th.Tensor,
+        steering_vecs: th.Tensor | None = None,
+        alphas: list[float] | None = None,
+        **kwargs,
     ):
         """
         Add steering vector to activations.
@@ -562,15 +610,17 @@ class CAA(Steer):
 
         if steering_vecs is None:
             steering_vecs = self.steering_vecs
-        
+
         assert steering_vecs is not None
 
         if alphas is None:
             alphas = [1.0] * len(steering_vecs)
         # zip and apply steering vecs, alphas
-        acts += sum([alpha * vec.to(acts.device, acts.dtype) for vec, alpha in zip(steering_vecs, alphas)]) 
+        acts += sum(
+            [alpha * vec.to(acts.device, acts.dtype) for vec, alpha in zip(steering_vecs, alphas)]
+        )
         return acts
-    
+
     def steer(
         self,
         prompts,
@@ -625,9 +675,10 @@ class CAA(Steer):
                 prompts, num_inference_steps=kwargs.get("num_inference_steps", 50)
             ).images
         return imgs
-    
+
     def eval(self, *args, **kwargs):
         pass
+
 
 class LoREEFT(Steer):
     def __init__(self, model: T2IModel = None):
@@ -698,13 +749,13 @@ class LoREEFT(Steer):
 
         yield Update(
             info=f"Starting LoReFT-CLIP training: d_model={d_model}, "
-                 f"rank={rank}, steps={num_steps}, "
-                 f"val={'yes' if val_cache is not None else 'no'}"
+            f"rank={rank}, steps={num_steps}, "
+            f"val={'yes' if val_cache is not None else 'no'}"
         )
 
-        loreft         = LoReFTLayer(d_model=d_model, rank=rank).to(device)
-        optimizer      = th.optim.AdamW(loreft.parameters(), lr=lr)
-        best_val       = float("inf")
+        loreft = LoReFTLayer(d_model=d_model, rank=rank).to(device)
+        optimizer = th.optim.AdamW(loreft.parameters(), lr=lr)
+        best_val = float("inf")
         best_loreft_sd = deepcopy(loreft.state_dict())
 
         def _run_val():
@@ -719,7 +770,7 @@ class LoREEFT(Steer):
             return val_loss / max(n, 1)
 
         step = 0
-        it   = loader.iterate()
+        it = loader.iterate()
         while step < num_steps:
             try:
                 batch = next(it)
@@ -732,11 +783,11 @@ class LoREEFT(Steer):
 
             with th.no_grad():
                 h_teacher = batch[1].to(device, dtype=th.float32)
-                h_base    = batch[0].to(device, dtype=th.float32)
+                h_base = batch[0].to(device, dtype=th.float32)
 
             h_edit = loreft(h_base)
-            diff   = (h_edit - h_teacher) ** 2
-            loss   = diff.sum() / diff.numel()
+            diff = (h_edit - h_teacher) ** 2
+            loss = diff.sum() / diff.numel()
 
             optimizer.zero_grad()
             loss.backward()
@@ -746,9 +797,11 @@ class LoREEFT(Steer):
                 if val_cache is not None:
                     val_loss = _run_val()
                     if val_loss < best_val:
-                        best_val       = val_loss
+                        best_val = val_loss
                         best_loreft_sd = deepcopy(loreft.state_dict())
-                    yield TrainUpdate(step=step, parts={"loss": float(loss.item()), "val_loss": val_loss})
+                    yield TrainUpdate(
+                        step=step, parts={"loss": float(loss.item()), "val_loss": val_loss}
+                    )
                 else:
                     yield TrainUpdate(step=step, parts={"loss": float(loss.item())})
             step += 1
@@ -762,9 +815,9 @@ class LoREEFT(Steer):
 
     def train_loreft_on_unet(
         self,
-        loader,                    # DataLoader: batches = {"teacher": prompts, "base": prompts}
-        val_loader=None,           # Optional DataLoader with same format for validation
-        layer_name: str = "",     # dot-path to the target UNet module
+        loader,  # DataLoader: batches = {"teacher": prompts, "base": prompts}
+        val_loader=None,  # Optional DataLoader with same format for validation
+        layer_name: str = "",  # dot-path to the target UNet module
         rank: int = 16,
         d_model: int = 1_024,
         num_steps: int = 5_000,
@@ -806,7 +859,7 @@ class LoREEFT(Steer):
         """
         from t2i_interp.loreft import LoReFTLayer, StepConditionalLoReFT
 
-        pipe   = self.model.pipeline
+        pipe = self.model.pipeline
         module = self.model.resolve_accessor(layer_name).module
         # Infer true d_model and num_steps from the first batch, then reset so
         # the full loader is available for training (PairedLoader.iterate() eagerly
@@ -821,16 +874,18 @@ class LoREEFT(Steer):
 
         yield Update(
             info=f"Starting LoREEFT-UNet training: layer={layer_name}, d_model={true_d_model}, "
-                 f"rank={rank}, steps={num_steps}, val={'yes' if val_loader is not None else 'no'}"
+            f"rank={rank}, steps={num_steps}, val={'yes' if val_loader is not None else 'no'}"
         )
 
         if len(shape) == 4:
             num_steps_dim = shape[1]
-            loreft = StepConditionalLoReFT(d_model=true_d_model, rank=rank, num_steps=num_steps_dim).to(device)
+            loreft = StepConditionalLoReFT(
+                d_model=true_d_model, rank=rank, num_steps=num_steps_dim
+            ).to(device)
         else:
             loreft = LoReFTLayer(d_model=true_d_model, rank=rank).to(device)
-        optimizer      = th.optim.AdamW(loreft.parameters(), lr=lr)
-        best_val       = float("inf")
+        optimizer = th.optim.AdamW(loreft.parameters(), lr=lr)
+        best_val = float("inf")
         best_loreft_sd = deepcopy(loreft.state_dict())
 
         def _run_val():
@@ -852,7 +907,7 @@ class LoREEFT(Steer):
             return val_loss / max(n, 1)
 
         step = 0
-        it   = loader.iterate()
+        it = loader.iterate()
         while step < num_steps:
             try:
                 batch = next(it)
@@ -869,11 +924,11 @@ class LoREEFT(Steer):
 
             with th.no_grad():
                 h_teacher = batch[1].to(device, dtype=th.float32)
-                h_base    = batch[0].to(device, dtype=th.float32)
+                h_base = batch[0].to(device, dtype=th.float32)
 
             h_edit = loreft(h_base)
-            diff   = (h_edit - h_teacher) ** 2
-            loss   = diff.sum() / diff.numel()
+            diff = (h_edit - h_teacher) ** 2
+            loss = diff.sum() / diff.numel()
 
             optimizer.zero_grad()
             loss.backward()
@@ -883,9 +938,11 @@ class LoREEFT(Steer):
                 if val_loader is not None:
                     val_loss = _run_val()
                     if val_loss < best_val:
-                        best_val       = val_loss
+                        best_val = val_loss
                         best_loreft_sd = deepcopy(loreft.state_dict())
-                    yield TrainUpdate(step=step, parts={"loss": float(loss.item()), "val_loss": val_loss})
+                    yield TrainUpdate(
+                        step=step, parts={"loss": float(loss.item()), "val_loss": val_loss}
+                    )
                 else:
                     yield TrainUpdate(step=step, parts={"loss": float(loss.item())})
             step += 1
@@ -904,9 +961,9 @@ class LoREEFT(Steer):
 
     def fit(
         self,
-        loader,                          # pre-built train DataLoader
-        layer_name: str,                 # "clip" (or contains "clip") → CLIP branch; else UNet
-        val_loader=None,                 # optional validation DataLoader
+        loader,  # pre-built train DataLoader
+        layer_name: str,  # "clip" (or contains "clip") → CLIP branch; else UNet
+        val_loader=None,  # optional validation DataLoader
         rank: int = 16,
         num_steps: int = 5_000,
         lr: float = 1e-3,
@@ -986,7 +1043,7 @@ class LoREEFT(Steer):
         if not hasattr(self, "lorefts"):
             self.lorefts = {}
         self.lorefts[layer_name] = loreft
-        
+
         self.loreft = loreft
         yield loreft
 
@@ -1012,8 +1069,9 @@ class LoREEFT(Steer):
         _loreft = loreft if loreft is not None else self.loreft
         if _loreft is None:
             raise ValueError("No trained LoReFT module available.")
-        
+
         from t2i_interp.loreft import StepConditionalLoReFT
+
         with th.no_grad():
             acts_f = acts.to(th.float32)
             if isinstance(_loreft, StepConditionalLoReFT):
@@ -1058,25 +1116,32 @@ class LoREEFT(Steer):
             List of PIL images.
         """
         names = [layer_names] if isinstance(layer_names, str) else list(layer_names)
-        _lorefts = lorefts if lorefts is not None else getattr(self, "lorefts", {names[0]: getattr(self, "loreft", None)})
+        _lorefts = (
+            lorefts
+            if lorefts is not None
+            else getattr(self, "lorefts", {names[0]: getattr(self, "loreft", None)})
+        )
 
-        assert _lorefts is not None and len(_lorefts) > 0, "No trained LoReFT module found. Call fit() first."
+        assert _lorefts is not None and len(_lorefts) > 0, (
+            "No trained LoReFT module found. Call fit() first."
+        )
 
         if "clip" in str(names[0]).lower():
             # Multi-layer CLIP not fully scaled, falls back to single layer parser
             import re as _re
+
             nums = _re.findall(r"\d+", names[0])
             layer_idx = int(nums[-1]) if nums else 5
 
-            pipe         = self.model.pipeline
+            pipe = self.model.pipeline
             text_encoder = pipe.text_encoder
             encoder_layers = text_encoder.text_model.encoder.layers
-            target_module  = encoder_layers[layer_idx]
+            target_module = encoder_layers[layer_idx]
 
             _loreft = _lorefts.get(names[0], getattr(self, "loreft", None))
             policy = partial(self.apply_steering, loreft=_loreft, alpha=alpha)
             hook = TextEncoderAlterHook(policy=policy)
-            
+
             with TraceDict([target_module], hook):
                 imgs = pipe(
                     prompts,
@@ -1098,14 +1163,16 @@ class LoREEFT(Steer):
                 # step) to give StepConditionalLoReFT the correct step index.
                 def make_policy(l_module, _alpha=alpha):
                     step_counter = [0]
+
                     def policy(x, value=None):
                         step = step_counter[0]
                         step_counter[0] += 1
                         return self.apply_steering(x, loreft=l_module, step=step, alpha=_alpha)
+
                     return policy
 
                 hooks[module] = UNetAlterHook(policy=make_policy(_loreft))
-                
+
             with TraceDict(modules, hooks):
                 imgs = self.model.pipeline(
                     prompts,

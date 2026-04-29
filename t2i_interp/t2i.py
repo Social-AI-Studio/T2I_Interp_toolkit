@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import contextlib
+from pathlib import Path
+
 import torch
 import torch.nn as nn
 from diffusers import DiffusionPipeline, StableDiffusionImg2ImgPipeline
 from loguru import logger
 
-from t2i_interp.accessors.accessor import IOType, ModuleAccessor, ModelWrapper
+from t2i_interp.accessors.accessor import IOType, ModelWrapper, ModuleAccessor
 from t2i_interp.utils.T2I.hook import CaptureHook
 from t2i_interp.utils.trace import TraceDict
-from pathlib import Path
-import os
 
 CONFIG_PATH = Path(__file__).parent / "config" / "modules_to_pick.yaml"
 
@@ -77,6 +77,7 @@ class T2IModel:
     """
     A wrapper around Diffusers pipelines to support interpretation hooks.
     """
+
     def __init__(
         self,
         model: str,
@@ -99,34 +100,31 @@ class T2IModel:
                     "For full compatibility, consider using eager."
                 )
         else:
-             impl = "eager"
+            impl = "eager"
 
         tokenizer_kwargs = kwargs.pop("tokenizer_kwargs", {})
-        
+
         self.device = _parse_device(device) or torch.device("cpu")
         self.dtype = _parse_dtype(dtype) or torch.float16
 
         pipeline_kwargs = {
-             "use_safetensors": True,
-             "trust_remote_code": trust_remote_code,
-             "safety_checker": safety_checker,
+            "use_safetensors": True,
+            "trust_remote_code": trust_remote_code,
+            "safety_checker": safety_checker,
         }
         if "token" in kwargs:
-             pipeline_kwargs["token"] = kwargs.pop("token")
+            pipeline_kwargs["token"] = kwargs.pop("token")
 
         logger.info(f"Loading model {model}...")
         try:
             # Try loading with the provided class
             if isinstance(automodal, type) or (hasattr(automodal, "from_pretrained")):
-                 self.pipeline = automodal.from_pretrained(
-                    model,
-                    torch_dtype=self.dtype,
-                    **pipeline_kwargs,
-                    **kwargs
-                 )
+                self.pipeline = automodal.from_pretrained(
+                    model, torch_dtype=self.dtype, **pipeline_kwargs, **kwargs
+                )
             else:
-                 # If automodal is already an instance? (Rare but possible)
-                 self.pipeline = automodal
+                # If automodal is already an instance? (Rare but possible)
+                self.pipeline = automodal
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             raise e
@@ -175,13 +173,17 @@ class T2IModel:
         Inspects the underlying pipeline components and maps them to `ModelWrapper`.
         """
         self._wrappers = {}
-        
+
         # Identify components
         if hasattr(self.pipeline, "components"):
             comps = self.pipeline.components
         elif hasattr(self.pipeline, "config"):
-             # Fallback: try to guess from config keys that map to attributes
-             comps = {k: getattr(self.pipeline, k) for k in self.pipeline.config.keys() if hasattr(self.pipeline, k)}
+            # Fallback: try to guess from config keys that map to attributes
+            comps = {
+                k: getattr(self.pipeline, k)
+                for k in self.pipeline.config.keys()
+                if hasattr(self.pipeline, k)
+            }
         else:
             comps = {}
 
@@ -196,16 +198,16 @@ class T2IModel:
     def edit(self, hooks: dict[nn.Module, Any] | None = None):
         """
         Context manager for applying temporary hooks (e.g. for SAEs or interventions).
-        
+
         Args:
             hooks: Optional initial dictionary of hooks.
         """
         if hooks is None:
             hooks = {}
-            
+
         with TraceDict(list(hooks.keys()), hooks):
             yield self
-    
+
     def run_with_hooks(
         self,
         prompt: str | list[str],
@@ -267,7 +269,7 @@ class T2IModel:
         all_steps: bool = True,
         return_output: bool = False,
         reduce_fn: Callable[[torch.Tensor], torch.Tensor] | None = None,
-        **kwargs
+        **kwargs,
     ) -> dict[str, torch.Tensor] | tuple[dict[str, torch.Tensor], Any]:
         """
         Runs the model generation with the given prompt and caches the activations of specified accessors.
@@ -282,13 +284,13 @@ class T2IModel:
             **kwargs: Additional arguments for generation.
 
         Returns:
-            dict or tuple: 
+            dict or tuple:
                 - If return_output is False: A dictionary mapping accessor attribute names to their cached values.
                 - If return_output is True: (saved_values, pipeline_output)
         """
         saved_values = {}
         hooks = {}
-        
+
         # We also need to keep track of which hook corresponds to which accessor to retrieve values later
         accessor_hook_map = {}
 
@@ -298,7 +300,7 @@ class T2IModel:
                     hooks[acc.module] = CaptureHook(capture="input", reduce_fn=reduce_fn)
                 else:
                     hooks[acc.module] = CaptureHook(capture="output", reduce_fn=reduce_fn)
-                
+
                 accessor_hook_map[acc.attr_name] = hooks[acc.module]
 
         with torch.no_grad():
@@ -306,10 +308,10 @@ class T2IModel:
                 output = self.pipeline(prompt, **kwargs)
 
         for name, hook in accessor_hook_map.items():
-            # Retrieve value. 
+            # Retrieve value.
             # If all_steps is True, we try to get 'cache' (dict of step -> tensor).
             # If False, we get 'last'.
-            
+
             val = None
             if all_steps:
                 if hasattr(hook, "cache"):
@@ -317,25 +319,25 @@ class T2IModel:
             else:
                 if hasattr(hook, "last"):
                     val = hook.last
-            
+
             # Detach/cpu if needed
             # If val is a dict (cache), we iterate
             if val is not None:
                 if isinstance(val, dict):
-                     # it's a step cache
-                     safe_val = {}
-                     for step, v in val.items():
-                         if hasattr(v, "detach"):
-                             safe_val[step] = v.detach().cpu()
-                         else:
-                             safe_val[step] = v
-                     saved_values[name] = safe_val
+                    # it's a step cache
+                    safe_val = {}
+                    for step, v in val.items():
+                        if hasattr(v, "detach"):
+                            safe_val[step] = v.detach().cpu()
+                        else:
+                            safe_val[step] = v
+                    saved_values[name] = safe_val
                 else:
                     if hasattr(val, "detach"):
                         saved_values[name] = val.detach().cpu()
                     else:
                         saved_values[name] = val
-        
+
         if return_output:
             return saved_values, output
         return saved_values
@@ -348,32 +350,32 @@ class T2IModel:
             comp_name, subpath = path.split(".", 1)
         else:
             comp_name, subpath = path, ""
-            
+
         component = getattr(self.pipeline, comp_name, None)
         if component is None:
             raise ValueError(f"Component '{comp_name}' not found in pipeline.")
-            
+
         if not isinstance(component, nn.Module):
-             # If it's not a module (e.g. scheduler?), we can't really hook it standardly
-             # But let's try to proceed if it has modules?
-             pass
+            # If it's not a module (e.g. scheduler?), we can't really hook it standardly
+            # But let's try to proceed if it has modules?
+            pass
 
         if subpath:
             # simple attribute lookup for the rest, utilizing torch's get_submodule if available
-            # or manual traversal for things that might not be pure modules? 
+            # or manual traversal for things that might not be pure modules?
             # Actually get_submodule is robust for nn.Module hierarchies.
             try:
                 module = component.get_submodule(subpath)
             except AttributeError:
-                 # Fallback for non-module components or manual traversal if needed
-                 curr = component
-                 for p in subpath.split("."):
-                     if p.isdigit():
-                         curr = curr[int(p)]
-                     else:
-                         curr = getattr(curr, p)
-                 module = curr
+                # Fallback for non-module components or manual traversal if needed
+                curr = component
+                for p in subpath.split("."):
+                    if p.isdigit():
+                        curr = curr[int(p)]
+                    else:
+                        curr = getattr(curr, p)
+                module = curr
         else:
             module = component
-            
+
         return ModuleAccessor(module=module, attr_name=path, io_type=io_type)

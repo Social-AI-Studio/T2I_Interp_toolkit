@@ -1,13 +1,14 @@
 import os
+
 import torch
 import webdataset as wds
-import numpy as np
-from tqdm import tqdm
-from datasets import load_dataset, Dataset, IterableDataset
+from datasets import Dataset, IterableDataset, load_dataset
 from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+from t2i_interp.accessors.accessor import IOType
 from t2i_interp.t2i import T2IModel
-from t2i_interp.accessors.accessor import ModuleAccessor, IOType
-from functools import reduce
+
 
 def collect_latents(
     accessors: list[str],
@@ -60,14 +61,16 @@ def collect_latents(
             filename = f"{acc}_{col}.tar"
             writers[(acc, col)] = wds.TarWriter(os.path.join(save_path, filename))
 
-    print(f"[collect_latents] Writing tars under: {save_path} (Format: {{accessor}}_{{column}}.tar)")
-    
+    print(
+        f"[collect_latents] Writing tars under: {save_path} (Format: {{accessor}}_{{column}}.tar)"
+    )
+
     # Disable diffusion progress bar
     model.pipeline.set_progress_bar_config(disable=True)
 
     # ---- init dataset ----
     if isinstance(dataset, (Dataset, IterableDataset)):
-        print(f"Using provided dataset object.")
+        print("Using provided dataset object.")
         ds = dataset
     else:
         print(f"Loading dataset {dataset} (split={split}, streaming={streaming})")
@@ -94,7 +97,6 @@ def collect_latents(
             real_accessors.append(acc)
         except Exception as e:
             raise ValueError(f"Could not resolve accessor {accessor_name} in model: {e}")
-
 
     # ---- iterate dataset ----
     for num_document, batch in tqdm(enumerate(dataloader)):
@@ -131,6 +133,7 @@ def collect_latents(
                 )
             except Exception as e:
                 import traceback
+
                 traceback.print_exc()
                 print(f"Error running model on column {input_col}: {e}")
                 continue
@@ -142,7 +145,8 @@ def collect_latents(
                 # Save all batch data as extras
                 sample_extras = {}
                 for k, val in batch.items():
-                    if f"{k}.pth" in sample_extras: continue
+                    if f"{k}.pth" in sample_extras:
+                        continue
                     if hasattr(val, "__getitem__") and not isinstance(val, (str, bytes)):
                         v = val[i]
                         if torch.is_tensor(v):
@@ -186,11 +190,7 @@ def collect_latents(
 
                     act = batch_tensor[i].detach().cpu()
 
-                    block_sample = {
-                        "__key__": key,
-                        "output.pth": act,
-                        **sample_extras
-                    }
+                    block_sample = {"__key__": key, "output.pth": act, **sample_extras}
                     writers[(accessor_name, input_col)].write(block_sample)
 
     for w in writers.values():
@@ -262,6 +262,7 @@ def collect_latents_inmemory(
                 )
             except Exception as e:
                 import traceback
+
                 traceback.print_exc()
                 print(f"[collect_inmemory] Error on batch {num_document}: {e}")
                 continue

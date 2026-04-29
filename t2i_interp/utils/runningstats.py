@@ -102,10 +102,10 @@ class SimpleUpdater(Updater):
             if getattr(u, "extras", None):
                 data.update(u.extras)
             self.pbar.set_postfix(data, refresh=True)
-            
+
             if u.info:
-                 tqdm.write(f"ℹ️ {u.info}")
-            
+                tqdm.write(f"ℹ️ {u.info}")
+
             self.pbar.update(1)
             return
 

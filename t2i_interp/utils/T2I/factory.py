@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Literal, Dict, Any
+from typing import Any, Literal
+
 import torch
 from diffusers import (
-    StableDiffusionPipeline,
-    DiffusionPipeline,
     AutoPipelineForText2Image,
+    DiffusionPipeline,
+    StableDiffusionPipeline,
 )
 
 ModelName = Literal["sd14", "sd21", "sd21-turbo", "sdxl", "sdxl-turbo"]
@@ -16,12 +17,12 @@ ModelName = Literal["sd14", "sd21", "sd21-turbo", "sdxl", "sdxl-turbo"]
 class PipeFactory:
     cache_dir: str = "./cache"
     dtype: torch.dtype = torch.float16
-    device: Optional[str] = "cuda"  # set None to not move
-    use_safetensors: bool = True    # relevant for SDXL
-    variant_fp16: Optional[str] = "fp16"  # relevant for turbo/sdxl fp16 repos
+    device: str | None = "cuda"  # set None to not move
+    use_safetensors: bool = True  # relevant for SDXL
+    variant_fp16: str | None = "fp16"  # relevant for turbo/sdxl fp16 repos
 
     # Map keys -> HF repo ids
-    repo_id: Dict[str, str] = None
+    repo_id: dict[str, str] = None
 
     def __post_init__(self):
         if self.repo_id is None:
@@ -74,6 +75,7 @@ class PipeFactory:
 
         return pipe
 
+
 # usage example:
 # factory = PipeFactory(cache_dir="./cache", device="cuda", dtype=torch.float16)
 
@@ -82,4 +84,3 @@ class PipeFactory:
 
 # # Override any from_pretrained kwargs
 # pipeTurbo = factory.create("sd21-turbo", local_files_only=True)
-

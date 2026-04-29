@@ -4,8 +4,6 @@ from __future__ import annotations
 from collections.abc import Callable, Generator
 from contextlib import nullcontext
 from copy import deepcopy
-from dataclasses import dataclass
-from typing import Any
 
 import torch as th
 import torch.nn as nn
@@ -15,7 +13,7 @@ from t2i_interp.utils.output import Output
 from t2i_interp.utils.runningstats import TrainUpdate, Update
 from t2i_interp.utils.T2I.hook import CaptureHook, UNetAlterHook
 from t2i_interp.utils.trace import TraceDict
-from functools import partial
+
 
 class Stitcher:
     """
@@ -33,7 +31,7 @@ class Stitcher:
         model: T2IModel,
         module_to_skip: nn.Module,
         replacement: nn.Module,
-    ) -> "StitchResult":
+    ) -> StitchResult:
         """
         Replace a submodule with:
           - 'identity' -> returns input
@@ -77,7 +75,7 @@ class Stitcher:
         model_b: T2IModel,
         module_a: str,
         module_b: str,
-    ) -> "StitchResult":
+    ) -> StitchResult:
         """
         Join two models at specified modules.
         - model_a: first model (gets module_b inserted)
@@ -87,12 +85,13 @@ class Stitcher:
 
     def map(
         self,
-        module_a: str,                  # accessor path for the source module (e.g. "text_encoder.text_model.final_layer_norm")
-        module_b: str,                  # accessor path for the target module (e.g. "unet.conv_out")
+        module_a: str,  # accessor path for the source module (e.g. "text_encoder.text_model.final_layer_norm")
+        module_b: str,  # accessor path for the target module (e.g. "unet.conv_out")
         mapper: nn.Module,
         prompts: list[str],
-        model_a: T2IModel,              # model that owns module_a (source)
-        model_b: T2IModel | None = None,  # model that owns module_b (target); None → same as model_a
+        model_a: T2IModel,  # model that owns module_a (source)
+        model_b: T2IModel
+        | None = None,  # model that owns module_b (target); None → same as model_a
         device: str = "cuda",
         num_inference_steps: int = 30,
         inject_steps: list[int] | None = None,  # which UNet steps to inject; None=all
@@ -141,7 +140,9 @@ class Stitcher:
 
         mapper = mapper.eval().to(device)
 
-        _inject_steps = inject_steps if inject_steps is not None else list(range(num_inference_steps))
+        _inject_steps = (
+            inject_steps if inject_steps is not None else list(range(num_inference_steps))
+        )
         act_a_cache: list[th.Tensor] = []
 
         # ------------------------------------------------------------------
@@ -179,8 +180,11 @@ class Stitcher:
             flat = act_a.reshape(act_a.shape[0], -1)
             with th.no_grad():
                 mapped_flat = mapper(flat)
-            return mapped_flat.reshape(act_b.shape) if mapped_flat.numel() == act_b.numel() \
-                   else mapped_flat.reshape(B, *act_b.shape[1:])
+            return (
+                mapped_flat.reshape(act_b.shape)
+                if mapped_flat.numel() == act_b.numel()
+                else mapped_flat.reshape(B, *act_b.shape[1:])
+            )
 
         alter = UNetAlterHook(policy=_inject_policy)
 
@@ -191,14 +195,16 @@ class Stitcher:
         pipe_b.set_progress_bar_config(disable=True)
 
         trace_modules = [mod_b] if cross_model else [mod_a, mod_b]
-        trace_hooks   = {mod_b: alter} if cross_model else {mod_a: capture, mod_b: alter}
+        trace_hooks = {mod_b: alter} if cross_model else {mod_a: capture, mod_b: alter}
 
         with th.no_grad():
             with TraceDict(trace_modules, trace_hooks):
                 if not cross_model:
+
                     def _on_capture(module, inputs, output):
                         if capture.last is not None and not act_a_cache:
                             act_a_cache.append(capture.last.detach().cpu())
+
                     mod_a.register_forward_hook(_on_capture)
                 imgs = pipe_b(
                     prompts,
@@ -264,12 +270,15 @@ class Stitcher:
 
         # Transfer direction: mapper(ref + alpha*v) - mapper(ref)
         with th.no_grad():
-            delta_b = mapper(ref_a.unsqueeze(0) + alpha * v.unsqueeze(0)) \
-                    - mapper(ref_a.unsqueeze(0))
+            delta_b = mapper(ref_a.unsqueeze(0) + alpha * v.unsqueeze(0)) - mapper(
+                ref_a.unsqueeze(0)
+            )
             delta_b = delta_b.squeeze(0)  # (flat_dim_b,)
 
         mod_b = model_b.resolve_accessor(module_b).module
-        _inject_steps = inject_steps if inject_steps is not None else list(range(num_inference_steps))
+        _inject_steps = (
+            inject_steps if inject_steps is not None else list(range(num_inference_steps))
+        )
         pipe_b = model_b.pipeline
         pipe_b.set_progress_bar_config(disable=True)
 
@@ -380,9 +389,7 @@ class Stitcher:
             model_a.pipeline.set_progress_bar_config(disable=True)
             with th.no_grad():
                 with TraceDict([mod_a], {mod_a: capture_hook}):
-                    model_a.pipeline(
-                        prompts_list, num_inference_steps=1, **pipeline_kwargs
-                    )
+                    model_a.pipeline(prompts_list, num_inference_steps=1, **pipeline_kwargs)
             if capture_hook.last is not None:
                 captured.append(capture_hook.last.detach().cpu())
             if not captured:
@@ -411,7 +418,9 @@ class Stitcher:
 
         # ── Step 5: inject delta_b into model_b during generation ─────────────
         mod_b = model_b.resolve_accessor(module_b).module
-        _inject_steps = inject_steps if inject_steps is not None else list(range(num_inference_steps))
+        _inject_steps = (
+            inject_steps if inject_steps is not None else list(range(num_inference_steps))
+        )
         pipe_b = model_b.pipeline
         pipe_b.set_progress_bar_config(disable=True)
 
@@ -456,16 +465,16 @@ class Stitcher:
 
     def train_mapper(
         self,
-        train_loader,                              # pre-built DataLoader: yields (act_a, act_b) or {"a": ..., "b": ...}
+        train_loader,  # pre-built DataLoader: yields (act_a, act_b) or {"a": ..., "b": ...}
         mapper: nn.Module,
         optimizers: list[th.optim.Optimizer],
-        val_loader=None,                           # optional DataLoader – same format as train_loader
+        val_loader=None,  # optional DataLoader – same format as train_loader
         num_steps: int = 1_000,
         loss_fn: Callable | None = None,
         training_device: str = "cuda",
         autocast_dtype: th.dtype = th.float32,
         log_steps: int = 100,
-        model: T2IModel | None = None,             # kept for API compatibility; not used internally
+        model: T2IModel | None = None,  # kept for API compatibility; not used internally
         **kwargs,
     ) -> Generator[Update, None, nn.Module]:
         """Train a mapper network between two activation spaces.
@@ -510,10 +519,10 @@ class Stitcher:
 
         yield Update(
             info=f"Starting Stitcher mapper training: steps={num_steps}, "
-                 f"device={training_device}, val={'yes' if val_loader is not None else 'no'}"
+            f"device={training_device}, val={'yes' if val_loader is not None else 'no'}"
         )
 
-        best_val       = float("inf")
+        best_val = float("inf")
         best_mapper_sd = deepcopy(mapper.state_dict())
 
         def _unpack(batch):
@@ -528,7 +537,9 @@ class Stitcher:
             with th.no_grad():
                 if hasattr(val_loader, "reset"):
                     val_loader.reset()
-                val_it = val_loader.iterate() if hasattr(val_loader, "iterate") else iter(val_loader)
+                val_it = (
+                    val_loader.iterate() if hasattr(val_loader, "iterate") else iter(val_loader)
+                )
                 for vbatch in val_it:
                     va, vb = _unpack(vbatch)
                     va = va.to(training_device, dtype=autocast_dtype).reshape(va.shape[0], -1)
@@ -539,20 +550,21 @@ class Stitcher:
             return val_loss / max(n, 1)
 
         step = 0
+
         # Support both standard DataLoader (iter) and custom loaders with .iterate()
         def _make_iter(loader):
             if hasattr(loader, "reset"):
                 loader.reset()
             return loader.iterate() if hasattr(loader, "iterate") else iter(loader)
 
-        it   = _make_iter(train_loader)
+        it = _make_iter(train_loader)
         mapper.train()
 
         while step < num_steps:
             try:
                 batch = next(it)
             except StopIteration:
-                it    = _make_iter(train_loader)
+                it = _make_iter(train_loader)
                 batch = next(it)
 
             act_a, act_b = _unpack(batch)
@@ -561,7 +573,7 @@ class Stitcher:
 
             with autocast_ctx:
                 mapped = mapper(act_a)
-                loss   = loss_fn(mapped, act_b)
+                loss = loss_fn(mapped, act_b)
 
             loss.backward()
             for opt in optimizers:
@@ -572,9 +584,11 @@ class Stitcher:
                 if val_loader is not None:
                     val_loss = _run_val()
                     if val_loss < best_val:
-                        best_val       = val_loss
+                        best_val = val_loss
                         best_mapper_sd = deepcopy(mapper.state_dict())
-                    yield TrainUpdate(step=step, parts={"loss": float(loss.item()), "val_loss": val_loss})
+                    yield TrainUpdate(
+                        step=step, parts={"loss": float(loss.item()), "val_loss": val_loss}
+                    )
                 else:
                     yield TrainUpdate(step=step, parts={"loss": float(loss.item())})
 

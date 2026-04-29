@@ -9,9 +9,6 @@ from itertools import islice
 import torch as t
 import zstandard as zstd
 from datasets import load_dataset
-from PIL import Image as PILImage
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
 from dictionary_learning.dictionary import (
     AutoEncoder,
     AutoEncoderNew,
@@ -21,6 +18,8 @@ from dictionary_learning.dictionary import (
 from dictionary_learning.trainers.batch_top_k import BatchTopKSAE
 from dictionary_learning.trainers.matryoshka_batch_top_k import MatryoshkaBatchTopKSAE
 from dictionary_learning.trainers.top_k import AutoEncoderTopK
+from PIL import Image as PILImage
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # def hf_dataset_to_generator(dataset, split="train", streaming=True, **kwargs):
 #     if isinstance(dataset, str):
