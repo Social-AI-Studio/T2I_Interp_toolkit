@@ -20,12 +20,16 @@ def main(cfg: DictConfig) -> None:
     import wandb
     from diffusers import AutoPipelineForText2Image
 
+    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.policy import scale_indx_policy
 
     print("=== t2i-sae config ===")
     print(OmegaConf.to_yaml(cfg))
+
+    # Reproducibility: seed all RNGs before model load / data ops.
+    seed_everything(getattr(cfg, "seed", None))
 
     # Optional wandb initialization
     run = None
@@ -37,6 +41,24 @@ def main(cfg: DictConfig) -> None:
             tags=cfg.wandb.get("tags", []),
             config=OmegaConf.to_container(cfg, resolve=True),
         )
+
+    # Run fingerprint: canonical record of every reproducibility-relevant input.
+    fingerprint = RunFingerprint.from_cfg(
+        cfg,
+        workflow="sae",
+        intervention={
+            "target_sae": getattr(cfg, "target_sae", None),
+            "saes": OmegaConf.to_container(getattr(cfg, "saes", {}), resolve=True),
+            "strengths": list(getattr(cfg, "strengths", []) or []),
+            "n_top_features": getattr(cfg, "n_top_features", None),
+            "num_inference_steps": getattr(cfg, "num_inference_steps", None),
+        },
+    )
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    fingerprint.write(os.path.join(cfg.output_dir, "fingerprint.json"))
+    print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
+    if run is not None:
+        fingerprint.log_to_wandb(run)
 
     # 1. Model
     model = T2IModel(

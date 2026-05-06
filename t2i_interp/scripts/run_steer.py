@@ -49,6 +49,7 @@ def main(cfg: DictConfig) -> None:
 
     from t2i_interp.linear_steering import KSteer
     from t2i_interp.mapper import MLPMapper
+    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.buffer import ActivationsDataloader, PairedLoader
@@ -57,6 +58,9 @@ def main(cfg: DictConfig) -> None:
 
     print("=== t2i-steer config ===")
     print(OmegaConf.to_yaml(cfg))
+
+    # Reproducibility: seed all RNGs before model load / data ops.
+    seed_everything(getattr(cfg, "seed", None))
 
     # Optional wandb initialization
     run = None
@@ -137,6 +141,26 @@ def main(cfg: DictConfig) -> None:
     alpha_suffix = float(getattr(cfg, "alpha", 0))
     cfg.output_dir = f"{cfg.output_dir}_alpha={alpha_suffix:g}"
     OmegaConf.set_struct(cfg, True)
+
+    # Run fingerprint: canonical record of every reproducibility-relevant input.
+    # Written next to output images and (if a W&B run is active) attached as an artifact.
+    fingerprint = RunFingerprint.from_cfg(
+        cfg,
+        workflow="steer",
+        intervention={
+            "steer_type": getattr(cfg, "steer_type", None),
+            "layer_names": list(layer_names),
+            "alpha": getattr(cfg, "alpha", None),
+            "steer_steps": getattr(cfg, "steer_steps", None),
+            "guidance_scale": getattr(cfg, "guidance_scale", None),
+            "num_inference_steps": getattr(cfg, "num_inference_steps", None),
+        },
+    )
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    fingerprint.write(os.path.join(cfg.output_dir, "fingerprint.json"))
+    print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
+    if run is not None:
+        fingerprint.log_to_wandb(run)
 
     # 4. Resolve steer-type specific variables before collecting latents
     steer_type = getattr(cfg, "steer_type", "ksteer")

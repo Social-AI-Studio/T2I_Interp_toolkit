@@ -6,6 +6,7 @@
 defaults:
   - /wandb@wandb
   - _self_
+  - optional /model: null   # override: t2i-localise model=sdxl_turbo
 
 # Model
 model_key: CompVis/stable-diffusion-v1-4

@@ -25,12 +25,18 @@ def main(cfg: DictConfig) -> None:
     from diffusers import StableDiffusionPipeline
     from tqdm import tqdm
 
+    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.hook import UNetAlterHook
 
     print("=== t2i-localise config ===")
     print(OmegaConf.to_yaml(cfg))
+
+    # Reproducibility: seed all RNGs before model load / data ops.
+    # (run_localisation also creates a per-tensor torch.Generator below for
+    # the baseline image — that uses cfg.seed too, kept for backwards compat.)
+    seed_everything(getattr(cfg, "seed", None))
 
     # Optional wandb initialization
     run = None
@@ -42,6 +48,25 @@ def main(cfg: DictConfig) -> None:
             tags=cfg.wandb.get("tags", []),
             config=OmegaConf.to_container(cfg, resolve=True),
         )
+
+    # Run fingerprint: canonical record of every reproducibility-relevant input.
+    fingerprint = RunFingerprint.from_cfg(
+        cfg,
+        workflow="localisation",
+        intervention={
+            "target_layer": getattr(cfg, "target_layer", None),
+            "target_heads": list(getattr(cfg, "target_heads", []) or []),
+            "factor": getattr(cfg, "factor", None),
+            "start_step": getattr(cfg, "start_step", None),
+            "end_step": getattr(cfg, "end_step", None),
+            "num_inference_steps": getattr(cfg, "num_inference_steps", None),
+        },
+    )
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    fingerprint.write(os.path.join(cfg.output_dir, "fingerprint.json"))
+    print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
+    if run is not None:
+        fingerprint.log_to_wandb(run)
 
     # 1. Model
     model = T2IModel(

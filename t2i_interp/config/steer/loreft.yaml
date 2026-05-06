@@ -6,11 +6,15 @@
 defaults:
   - _self_
   - /wandb@wandb
+  - optional /model: null   # override: t2i-steer --config-name=steer/loreft model=sdxl_turbo
 
 # Model
 model_key: runwayml/stable-diffusion-v1-5
 device: cuda:0
 dtype: float16
+
+# Reproducibility
+seed: null   # int → torch.manual_seed; null → unseeded
 
 # Dataset
 # Note for LoReFT: Your dataset needs two prompt columns, one for base(student) and one for teacher

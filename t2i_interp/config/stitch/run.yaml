@@ -6,9 +6,13 @@
 defaults:
   - _self_
   - /wandb@wandb
+  - optional /model: null   # override model_a: t2i-stitch model=sdxl_turbo
 
 wandb:
   sweep_report_type: stitch_steer
+
+# Reproducibility
+seed: null   # int → torch.manual_seed; null → unseeded
 
 # Model
 model_key: runwayml/stable-diffusion-v1-5

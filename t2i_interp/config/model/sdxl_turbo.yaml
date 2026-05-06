@@ -1,0 +1,21 @@
+# @package _global_
+# SDXL-Turbo — 4-step distilled, CFG-free.
+# Architecture is identical to SDXL base, so layer paths are the same.
+#
+# Key differences vs. CFG-guided pipelines:
+#   - guidance_scale: 0.0     turbo is CFG-free
+#   - conditional_only: false no unconditional half without CFG
+#   - num_inference_steps: 4  4-step distilled
+#   - steer_steps: 4          must match num_inference_steps for steering
+#   - capture_step_index: all 4 steps is small enough for full-step tars
+#
+# Compose into any workflow:
+#   t2i-steer --config-name=steer/loreft model=sdxl_turbo
+#   t2i-steer --config-name=steer/caa model=sdxl_turbo
+model_key: stabilityai/sdxl-turbo
+dtype: float16
+guidance_scale: 0.0
+conditional_only: false
+num_inference_steps: 4
+steer_steps: 4
+capture_step_index: all
