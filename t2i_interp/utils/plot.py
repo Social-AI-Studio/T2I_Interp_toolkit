@@ -1,16 +1,12 @@
-import numpy as np
-import abc
-import tqdm 
-from PIL import Image, ImageDraw, ImageFont
-#import open_clip
-import pickle 
-import os
 
-from typing import Any, Mapping, Optional, Sequence, Tuple, Union
+# import open_clip
+from collections.abc import Mapping, Sequence
+from typing import Any, Union
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-
+from PIL import Image, ImageDraw, ImageFont
 
 DataLike = Union[pd.DataFrame, Mapping[str, Any]]
 
@@ -18,20 +14,20 @@ DataLike = Union[pd.DataFrame, Mapping[str, Any]]
 def plot_key_wise(
     data: DataLike,
     *,
-    key_col: Optional[str] = None,
-    value_cols: Optional[Sequence[str]] = None,
+    key_col: str | None = None,
+    value_cols: Sequence[str] | None = None,
     preserve_order: bool = True,
     sort_keys: bool = False,
     scale: str = "global",  # "global" or "per_row"
     cmap: str = "Greens",
-    figsize: Optional[Tuple[float, float]] = None,
+    figsize: tuple[float, float] | None = None,
     max_xticks: int = 12,
     show_xticks: bool = True,
     rotate_xticks: int = 90,
     colorbar: bool = True,
-    colorbar_label: Optional[str] = None,
-    suptitle: Optional[str] = None,
-) -> Tuple[plt.Figure, Sequence[plt.Axes]]:
+    colorbar_label: str | None = None,
+    suptitle: str | None = None,
+) -> tuple[plt.Figure, Sequence[plt.Axes]]:
     """
     Draws stripe-like heatmap rows (one row per numeric column) across keys.
 
@@ -50,7 +46,9 @@ def plot_key_wise(
 
     # Determine value columns (numeric)
     if value_cols is None:
-        numeric_cols = df.drop(columns=[key_col]).select_dtypes(include=[np.number]).columns.tolist()
+        numeric_cols = (
+            df.drop(columns=[key_col]).select_dtypes(include=[np.number]).columns.tolist()
+        )
         if not numeric_cols:
             raise ValueError("No numeric columns found to plot.")
         value_cols = numeric_cols
@@ -71,8 +69,7 @@ def plot_key_wise(
         figsize = (12, max(2.0, 0.55 * R + 1.0))
 
     fig, axes = plt.subplots(
-        nrows=R, ncols=1, sharex=True, figsize=figsize,
-        gridspec_kw={"hspace": 0.25}
+        nrows=R, ncols=1, sharex=True, figsize=figsize, gridspec_kw={"hspace": 0.25}
     )
     if R == 1:
         axes = [axes]
@@ -99,7 +96,7 @@ def plot_key_wise(
 
     im_last = None
     for i, (ax, col) in enumerate(zip(axes, value_cols)):
-        row = values[i:i+1, :]  # (1, N)
+        row = values[i : i + 1, :]  # (1, N)
         im = ax.imshow(
             row,
             aspect="auto",
@@ -123,7 +120,9 @@ def plot_key_wise(
         step = max(1, N // max_xticks)
         tick_positions = list(range(0, N, step))
         axes[-1].set_xticks(tick_positions)
-        axes[-1].set_xticklabels([keys[j] for j in tick_positions], rotation=rotate_xticks, ha="right")
+        axes[-1].set_xticklabels(
+            [keys[j] for j in tick_positions], rotation=rotate_xticks, ha="right"
+        )
     else:
         axes[-1].set_xticks([])
 
@@ -141,7 +140,7 @@ def plot_key_wise(
 def _to_dataframe(
     data: DataLike,
     *,
-    key_col: Optional[str],
+    key_col: str | None,
     preserve_order: bool,
 ) -> pd.DataFrame:
     if isinstance(data, pd.DataFrame):
@@ -164,6 +163,7 @@ def _to_dataframe(
 
     return df
 
+
 # usage (DataFrame (first col is layer string, rest numeric))
 # fig, axes = plot_layer_stripes(df, colorbar_label="Higher CLIP-Score →", suptitle="UNet")
 # plt.show()
@@ -181,18 +181,19 @@ def _to_dataframe(
 # fig, axes = plot_layer_stripes(d, scale="global")
 # plt.show()
 
+
 def view_images(
     images,
     num_rows=1,
     offset_ratio=0.02,
     bg=255,
     resize_to_first=False,
-    labels=None,                 # list[str] same length as #images (before padding)
+    labels=None,  # list[str] same length as #images (before padding)
     label_color=(0, 0, 0),
     label_bg=(255, 255, 255),
-    label_bg_alpha=180,          # 0..255
+    label_bg_alpha=180,  # 0..255
     label_pad=6,
-    label_pos="top-left",        # "top-left", "top-right", "bottom-left", "bottom-right"
+    label_pos="top-left",  # "top-left", "top-right", "bottom-left", "bottom-right"
     font_size=16,
 ):
     """
@@ -213,7 +214,9 @@ def view_images(
         x = np.asarray(x)
 
         if x.ndim == 4:
-            raise ValueError("Got a 4D tensor/array inside list; pass the batch directly, not nested.")
+            raise ValueError(
+                "Got a 4D tensor/array inside list; pass the batch directly, not nested."
+            )
 
         if x.ndim == 2:
             x = np.stack([x, x, x], axis=-1)
@@ -276,15 +279,17 @@ def view_images(
     else:
         for im in imgs:
             if im.shape[:2] != (h0, w0):
-                raise ValueError(f"All images must have same size. First is {(h0,w0)}, got {im.shape[:2]}. "
-                                 f"Set resize_to_first=True to auto-resize.")
+                raise ValueError(
+                    f"All images must have same size. First is {(h0, w0)}, got {im.shape[:2]}. "
+                    f"Set resize_to_first=True to auto-resize."
+                )
 
     # pad empties to fill grid
     rem = n_orig % num_rows
     num_empty = (num_rows - rem) % num_rows
     empty = np.ones((h0, w0, 3), dtype=np.uint8) * bg
     imgs = imgs + [empty] * num_empty
-    labels_padded = (list(labels) if labels is not None else None)
+    labels_padded = list(labels) if labels is not None else None
     if labels_padded is not None:
         labels_padded += [""] * num_empty
 
@@ -302,7 +307,7 @@ def view_images(
         j = idx % num_cols
         y0 = i * (h0 + offset)
         x0 = j * (w0 + offset)
-        canvas[y0:y0 + h0, x0:x0 + w0] = imgs[idx]
+        canvas[y0 : y0 + h0, x0 : x0 + w0] = imgs[idx]
 
     out = Image.fromarray(canvas).convert("RGBA")
 
@@ -352,50 +357,51 @@ def view_images(
 
     return out.convert("RGB")
 
+
 def plot_image_heatmap(output, sparse_maps, feature):
     """
     Visualizes a feature activation map overlaid on the generated image.
-    
+
     Args:
         output: Pipeline output object containing .images[0]
         sparse_maps: Feature activations tensor (H, W, D) or similar (on CPU/RAM)
         feature: Index of the feature to visualize
     """
-    import numpy as np
     import matplotlib.pyplot as plt
+    import numpy as np
     from matplotlib.colors import ListedColormap
     from PIL import Image
-    
+
     # sparse_maps should be (H, W, D)
     heatmap = sparse_maps[:, :, feature]
-    if hasattr(heatmap, 'cpu'):
+    if hasattr(heatmap, "cpu"):
         heatmap = heatmap.cpu().numpy()
-    elif hasattr(heatmap, 'numpy'):
+    elif hasattr(heatmap, "numpy"):
         heatmap = heatmap.numpy()
-        
+
     image = output.images[0]
-    if image.mode != 'RGBA':
+    if image.mode != "RGBA":
         image = image.convert("RGBA")
-    
+
     jet = plt.cm.jet
     cmap = jet(np.arange(jet.N))
     cmap[:1, -1] = 0
     cmap[1:, -1] = 0.6
     cmap = ListedColormap(cmap)
-    
+
     # Normalize heatmap
     h_min, h_max = np.min(heatmap), np.max(heatmap)
     if h_max - h_min > 1e-6:
         heatmap = (heatmap - h_min) / (h_max - h_min)
     else:
         heatmap = np.zeros_like(heatmap)
-    
+
     heatmap_rgba = cmap(heatmap)
     heatmap_image = Image.fromarray((heatmap_rgba * 255).astype(np.uint8))
-    
+
     # Resize heatmap to match image size (Nearest Neighbor to preserve grid structure)
     heatmap_image = heatmap_image.resize(image.size, resample=Image.NEAREST)
-    
+
     heatmap_with_transparency = Image.alpha_composite(image, heatmap_image)
 
     return heatmap_with_transparency
@@ -440,8 +446,9 @@ def make_steer_grid(
         A PIL Image of the rendered grid.
     """
     import io
-    import numpy as np
+
     import matplotlib.pyplot as plt
+    import numpy as np
     from PIL import Image
 
     def _clean_ax(ax):
@@ -454,33 +461,36 @@ def make_steer_grid(
     # Flatten to one row per (pair × apply-prompt)
     rows: list[dict] = []
     for pair in pairs_results:
-        pos      = pair.get("pos", "")
-        neg      = pair.get("neg", "")
-        apply    = pair.get("apply", [""]) or [""]
-        steered  = pair.get("steered",  []) or []
+        pos = pair.get("pos", "")
+        neg = pair.get("neg", "")
+        apply = pair.get("apply", [""]) or [""]
+        steered = pair.get("steered", []) or []
         baseline = pair.get("baseline", []) or []
         for ai, ap in enumerate(apply):
-            rows.append({
-                "pos":      pos,
-                "neg":      neg,
-                "apply":    ap,
-                "steered":  steered[ai]  if ai < len(steered)  else None,
-                "baseline": baseline[ai] if ai < len(baseline) else None,
-            })
+            rows.append(
+                {
+                    "pos": pos,
+                    "neg": neg,
+                    "apply": ap,
+                    "steered": steered[ai] if ai < len(steered) else None,
+                    "baseline": baseline[ai] if ai < len(baseline) else None,
+                }
+            )
 
     has_baseline = any(r["baseline"] is not None for r in rows)
     n_cols = 2 if has_baseline else 1
     n_rows = len(rows)
 
     fig, axes = plt.subplots(
-        n_rows, n_cols,
+        n_rows,
+        n_cols,
         figsize=(n_cols * cell_size, n_rows * cell_size),
         squeeze=False,
         gridspec_kw={"hspace": 0.35, "wspace": 0.05},
     )
 
     for ri, row in enumerate(rows):
-        ax_base  = axes[ri][0]
+        ax_base = axes[ri][0]
         ax_steer = axes[ri][1] if has_baseline else axes[ri][0]
 
         # ── column headers on the first row ─────────────────────────────────
@@ -503,7 +513,7 @@ def make_steer_grid(
             ax_steer.imshow(np.asarray(row["steered"]))
         else:
             ax_steer.set_facecolor("#eeeeee")
-        ax_steer.set_xlabel(f'{row["pos"]} → {row["neg"]}', fontsize=8, labelpad=6)
+        ax_steer.set_xlabel(f"{row['pos']} → {row['neg']}", fontsize=8, labelpad=6)
         _clean_ax(ax_steer)
 
     plt.tight_layout()
@@ -518,32 +528,33 @@ def make_steer_grid(
 def show_grid(images, labels, cols=3):
     """
     Plots a list of images in a grid with corresponding labels.
-    
+
     Args:
         images: List of PIL Images or numpy arrays.
         labels: List of label strings.
         cols: Number of columns in the grid.
     """
     import math
+
     import matplotlib.pyplot as plt
     import numpy as np
-    
+
     rows = math.ceil(len(images) / cols)
     fig, axes = plt.subplots(rows, cols, figsize=(cols * 5, rows * 5))
-    
+
     # Handle single subplot case
     if rows == 1 and cols == 1:
         axes = np.array([axes])
     axes = axes.flatten()
-    
+
     for i, (img, label) in enumerate(zip(images, labels)):
         axes[i].imshow(img)
         axes[i].set_title(label, fontsize=10)
-        axes[i].axis('off')
-        
+        axes[i].axis("off")
+
     # Hide empty subplots
     for i in range(len(images), len(axes)):
-        axes[i].axis('off')
-        
+        axes[i].axis("off")
+
     plt.tight_layout()
     plt.show()

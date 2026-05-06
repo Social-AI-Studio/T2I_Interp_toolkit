@@ -1,14 +1,15 @@
+import datetime
 import os
+
 import torch
 import webdataset as wds
-import numpy as np
-from tqdm import tqdm
-import datetime
-from datasets import load_dataset, Dataset, IterableDataset
+from datasets import Dataset, IterableDataset, load_dataset
 from torch.utils.data import DataLoader
+from tqdm import tqdm
+
+from t2i_interp.accessors.accessor import IOType
 from t2i_interp.t2i import T2IModel
-from t2i_interp.accessors.accessor import ModuleAccessor, IOType
-from functools import reduce
+
 
 def collect_latents(
     accessors: list[str],
@@ -64,14 +65,16 @@ def collect_latents(
             filename = f"{acc}_{col}.tar"
             writers[(acc, col)] = wds.TarWriter(os.path.join(save_path, filename))
 
-    print(f"[collect_latents] Writing tars under: {save_path} (Format: {{accessor}}_{{column}}.tar)")
-    
+    print(
+        f"[collect_latents] Writing tars under: {save_path} (Format: {{accessor}}_{{column}}.tar)"
+    )
+
     # Disable diffusion progress bar
     model.pipeline.set_progress_bar_config(disable=True)
 
     # ---- init dataset ----
     if isinstance(dataset, (Dataset, IterableDataset)):
-        print(f"Using provided dataset object.")
+        print("Using provided dataset object.")
         ds = dataset
     else:
         print(f"Loading dataset {dataset} (split={split}, streaming={streaming})")
@@ -102,6 +105,7 @@ def collect_latents(
     # Define reduce_fn if conditional_only
     reduce_fn = None
     if conditional_only:
+
         def slice_cond(x):
             # Assume CFG: [uncond, cond]. Take second half.
             # B_total = 2 * B_prompts
@@ -110,9 +114,10 @@ def collect_latents(
                 return x
             half = x.shape[0] // 2
             return x[half:]
+
         reduce_fn = slice_cond
 
-    
+
 # ---- optional per-sample filtering ----
 def _to_py_scalar(v):
     if torch.is_tensor(v):
@@ -120,6 +125,7 @@ def _to_py_scalar(v):
             return v.item()
         return v.detach().cpu().tolist()
     return v
+
 
 def _select_batch(batch_dict, idxs):
     out = {}
@@ -138,6 +144,7 @@ def _select_batch(batch_dict, idxs):
                 out[k] = v
     return out
 
+
 def _compute_filter_idxs(batch_dict, filters_spec):
     if not filters_spec:
         return None
@@ -146,9 +153,11 @@ def _compute_filter_idxs(batch_dict, filters_spec):
     B = None
     for v in batch_dict.values():
         if torch.is_tensor(v) and v.ndim >= 1:
-            B = v.shape[0]; break
+            B = v.shape[0]
+            break
         if isinstance(v, (list, tuple)):
-            B = len(v); break
+            B = len(v)
+            break
     if B is None:
         return None
     keep = [True] * B
@@ -178,7 +187,7 @@ def _compute_filter_idxs(batch_dict, filters_spec):
     idxs = [i for i, k in enumerate(keep) if k]
     return idxs
 
-# ---- iterate dataset ----
+    # ---- iterate dataset ----
     for num_document, batch in tqdm(enumerate(dataloader)):
         if num_document < start_at:
             continue
@@ -216,7 +225,7 @@ def _compute_filter_idxs(batch_dict, filters_spec):
                     num_inference_steps=num_inference_steps,
                     guidance_scale=guidance_scale,
                     return_output=False,
-                    reduce_fn=reduce_fn
+                    reduce_fn=reduce_fn,
                 )
             except Exception as e:
                 print(f"Error running model on column {input_col}: {e}")
@@ -247,14 +256,14 @@ def _compute_filter_idxs(batch_dict, filters_spec):
                             batch_tensor = act_data[steps[-1]]
                     else:
                         batch_tensor = act_data
-                    
+
                     act = batch_tensor[i].detach().cpu()
 
                     block_sample = {
                         "__key__": key,
                         "output.pth": act,
                         "__orig_index__.pth": torch.tensor(batch_start + orig_idxs[i]),
-                        **sample_extras
+                        **sample_extras,
                     }
                     writers[(accessor_name, input_col)].write(block_sample)
 

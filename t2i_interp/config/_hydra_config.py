@@ -6,6 +6,7 @@ Usage inside a script::
     @hydra.main(config_path=config_dir("steer"), config_name="run", version_base=None)
     def main(cfg): ...
 """
+
 import importlib.resources as _ir
 import pathlib
 

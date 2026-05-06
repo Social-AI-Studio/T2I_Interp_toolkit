@@ -3,18 +3,24 @@
 
 import argparse
 import os
-from typing import List, Tuple
 
-import torch
 import lpips
-from PIL import Image
+import torch
 import torchvision.transforms as T
-def list_pairs(ref_dir: str, pred_dir: str) -> List[Tuple[str, str]]:
+from PIL import Image
+
+
+def list_pairs(ref_dir: str, pred_dir: str) -> list[tuple[str, str]]:
     # Pair by filename intersection
-    ref_files = {f for f in os.listdir(ref_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))}
-    pred_files = {f for f in os.listdir(pred_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))}
+    ref_files = {
+        f for f in os.listdir(ref_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+    }
+    pred_files = {
+        f for f in os.listdir(pred_dir) if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+    }
     common = sorted(ref_files & pred_files)
     return [(os.path.join(ref_dir, f), os.path.join(pred_dir, f)) for f in common]
+
 
 def load_img_pil(img: Image.Image, device: str) -> torch.Tensor:
     img = img.convert("RGB")
@@ -22,8 +28,10 @@ def load_img_pil(img: Image.Image, device: str) -> torch.Tensor:
     x = x * 2.0 - 1.0
     return x
 
+
 def load_img(path: str, device: str) -> torch.Tensor:
     return load_img_pil(Image.open(path), device)
+
 
 class LPIPSScorer:
     def __init__(self, net: str = "alex", device: str = None):
@@ -32,13 +40,14 @@ class LPIPSScorer:
         self.loss_fn = lpips.LPIPS(net=self.net).to(self.device).eval()
 
     @torch.no_grad()
-    def compute(self, out: 'Output', ref_images=None) -> 'Output':
+    def compute(self, out: "Output", ref_images=None) -> "Output":
         from t2i_interp.utils.output import Output
+
         if not isinstance(out, Output):
             raise TypeError("out must be of type Output")
 
         preds = out.preds
-        
+
         if ref_images is None:
             if hasattr(out, "baselines") and out.baselines is not None:
                 ref_images = out.baselines
@@ -47,7 +56,7 @@ class LPIPSScorer:
 
         if not isinstance(ref_images, list) and not isinstance(ref_images, tuple):
             ref_images = [ref_images] * len(preds)
-        
+
         if len(ref_images) != len(preds):
             if len(ref_images) == 1:
                 ref_images = ref_images * len(preds)
@@ -60,7 +69,7 @@ class LPIPSScorer:
                 ref_t = load_img(ref, self.device)
             else:
                 ref_t = load_img_pil(ref, self.device)
-                
+
             if isinstance(pred, str):
                 pred_t = load_img(pred, self.device)
             else:
@@ -71,7 +80,7 @@ class LPIPSScorer:
 
         if out.metrics is None:
             out.metrics = []
-            
+
         metric_dict = {"lpips_score": sum(scores) / len(scores)}
         if not out.metrics:
             out.metrics = [metric_dict] * len(preds)
@@ -86,19 +95,19 @@ class LPIPSScorer:
         """Standardized interface for run_steer.py"""
         if references is None:
             # LPIPS requires a reference image. If not provided, it fails gracefully.
-            return {"lpips_score": float('nan')}
-            
+            return {"lpips_score": float("nan")}
+
         preds = images
         ref_images = references
 
         if not isinstance(ref_images, list) and not isinstance(ref_images, tuple):
             ref_images = [ref_images] * len(preds)
-        
+
         if len(ref_images) != len(preds):
             if len(ref_images) == 1:
                 ref_images = ref_images * len(preds)
             else:
-                return {"lpips_score": float('nan')}
+                return {"lpips_score": float("nan")}
 
         scores = []
         for ref, pred in zip(ref_images, preds):
@@ -108,7 +117,7 @@ class LPIPSScorer:
                 ref_t = load_img_pil(ref, self.device)
             else:
                 ref_t = ref.to(self.device).float()
-                
+
             if isinstance(pred, str):
                 pred_t = load_img(pred, self.device)
             elif isinstance(pred, Image.Image):
@@ -118,15 +127,20 @@ class LPIPSScorer:
 
             s = self.loss_fn(ref_t, pred_t).item()
             scores.append(s)
-            
+
         return {"lpips_score": sum(scores) / len(scores)}
+
 
 @torch.no_grad()
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ref_dir", type=str, required=True, help="Folder of reference images")
-    ap.add_argument("--pred_dir", type=str, required=True, help="Folder of predicted images (same filenames)")
-    ap.add_argument("--net", type=str, default="alex", choices=["alex", "vgg", "squeeze"], help="LPIPS backbone")
+    ap.add_argument(
+        "--pred_dir", type=str, required=True, help="Folder of predicted images (same filenames)"
+    )
+    ap.add_argument(
+        "--net", type=str, default="alex", choices=["alex", "vgg", "squeeze"], help="LPIPS backbone"
+    )
     ap.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
 
@@ -136,7 +150,7 @@ def main():
 
     scorer = LPIPSScorer(net=args.net, device=args.device)
     vals = []
-    
+
     for ref_path, pred_path in pairs:
         ref = load_img(ref_path, args.device)
         pred = load_img(pred_path, args.device)
@@ -145,6 +159,7 @@ def main():
 
     mean_lpips = sum(vals) / len(vals)
     print(f"LPIPS ({args.net}) over {len(vals)} pairs = {mean_lpips:.6f}")
+
 
 if __name__ == "__main__":
     main()

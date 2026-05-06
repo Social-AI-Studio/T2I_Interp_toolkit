@@ -1,11 +1,13 @@
-import os
 import json
+import os
 from glob import glob
+from typing import Any
+
 import wandb
-from typing import List, Dict, Any
 from omegaconf import DictConfig
 
-def flatten_dict(d, parent_key='', sep='.'):
+
+def flatten_dict(d, parent_key="", sep="."):
     items = []
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -15,13 +17,14 @@ def flatten_dict(d, parent_key='', sep='.'):
             items.append((new_key, v))
     return dict(items)
 
-def get_constant_and_flat_cfgs(job_results: List[Dict[str, Any]]):
+
+def get_constant_and_flat_cfgs(job_results: list[dict[str, Any]]):
     all_cfgs = [res.get("cfg", {}) for res in job_results]
     flat_cfgs = [flatten_dict(c) for c in all_cfgs]
     all_keys = set()
     for fc in flat_cfgs:
         all_keys.update(fc.keys())
-        
+
     constant_keys = set()
     for k in all_keys:
         first_val = None
@@ -36,26 +39,27 @@ def get_constant_and_flat_cfgs(job_results: List[Dict[str, Any]]):
                 break
         if is_constant:
             constant_keys.add(k)
-            
+
     return flat_cfgs, constant_keys
 
-def generate_default_table(config: DictConfig, job_results: List[Dict[str, Any]]) -> wandb.Table:
+
+def generate_default_table(config: DictConfig, job_results: list[dict[str, Any]]) -> wandb.Table:
     """Standard table with one row per job."""
     columns = ["Job ID", "Configuration", "Metrics", "Generated Artifacts"]
     table = wandb.Table(columns=columns)
-    
+
     flat_cfgs, constant_keys = get_constant_and_flat_cfgs(job_results)
 
     for i, result in enumerate(job_results):
         job_id = result.get("job_number", "Unknown")
         metrics = result.get("metrics", {})
         out_dir = result.get("output_dir")
-        
+
         images = []
         if out_dir and os.path.isdir(out_dir):
             for img_path in sorted(glob(os.path.join(out_dir, "*.png"))):
                 images.append(wandb.Image(img_path))
-        
+
         filtered_cfg = {k: v for k, v in flat_cfgs[i].items() if k not in constant_keys}
         cfg_str = json.dumps(filtered_cfg, indent=2, default=str)
         metrics_str = json.dumps(metrics, indent=2, default=str)
@@ -64,10 +68,10 @@ def generate_default_table(config: DictConfig, job_results: List[Dict[str, Any]]
     return table
 
 
-def generate_steer_table(config: DictConfig, job_results: List[Dict[str, Any]]) -> wandb.Table:
+def generate_steer_table(config: DictConfig, job_results: list[dict[str, Any]]) -> wandb.Table:
     """Pivoted table specific to steering runs: prompts as rows, individual metric columns."""
     flat_cfgs, constant_keys = get_constant_and_flat_cfgs(job_results)
-    
+
     # 1. Discover all metric names
     base_metric_names = set()
     for res in job_results:
@@ -83,9 +87,9 @@ def generate_steer_table(config: DictConfig, job_results: List[Dict[str, Any]]) 
     # 2. Build Columns
     # To avoid WandB UI crashes from mixed types or too many columns, we make each Run a separate Row.
     # Columns will be strictly typed: Prompt (str), Run (str), Image (wandb.Image), Metric1 (float), Metric2 (float)...
-    metric_cols = [m.split('/')[-1] for m in ordered_metrics]
+    metric_cols = [m.split("/")[-1] for m in ordered_metrics]
     columns = ["Prompt", "Run", "Image"] + metric_cols
-            
+
     table = wandb.Table(columns=columns)
 
     prompts = config.get("prompts", [])
@@ -95,16 +99,17 @@ def generate_steer_table(config: DictConfig, job_results: List[Dict[str, Any]]) 
     # Helper to extract and format scalar or list value strictly to native python to prevent tensor crashes
     def get_metric_val(metric_dict, key, idx):
         import math
+
         val = metric_dict.get(key)
         if isinstance(val, list):
             val = val[idx] if idx < len(val) else val[-1]
-            
+
         if val is None:
             return None
-            
+
         try:
             if hasattr(val, "item"):
-                val = val.item() # convert numpy/torch to native
+                val = val.item()  # convert numpy/torch to native
             if (isinstance(val, float) and math.isnan(val)) or str(val).lower().strip() == "nan":
                 return None
             if isinstance(val, (int, float)):
@@ -115,7 +120,6 @@ def generate_steer_table(config: DictConfig, job_results: List[Dict[str, Any]]) 
 
     # 3. Populate Rows
     for i, prompt in enumerate(prompts):
-        
         # --- Baseline Row ---
         baseline_img = None
         baseline_metrics = {}
@@ -125,22 +129,22 @@ def generate_steer_table(config: DictConfig, job_results: List[Dict[str, Any]]) 
                 bpath = os.path.join(out_dir, f"baseline_{i}.png")
                 if os.path.exists(bpath):
                     baseline_img = wandb.Image(bpath)
-            
+
             b_mdict = res.get("metrics", {})
             for m in ordered_metrics:
                 if f"baseline/{m}" in b_mdict and m not in baseline_metrics:
                     baseline_metrics[m] = get_metric_val(b_mdict, f"baseline/{m}", i)
-                    
+
         b_row = [str(prompt), "Baseline", baseline_img]
         for m in ordered_metrics:
             b_row.append(baseline_metrics.get(m, None))
         table.add_data(*b_row)
-        
+
         # --- Steered Run Rows ---
         for j, res in enumerate(job_results):
             job_id = res.get("job_number", f"Job {j}")
             cfg = flat_cfgs[j]
-            
+
             if "layer_names" in cfg and cfg["layer_names"]:
                 ln = cfg["layer_names"]
                 first = ln[0] if isinstance(ln, list) else ln
@@ -159,37 +163,39 @@ def generate_steer_table(config: DictConfig, job_results: List[Dict[str, Any]]) 
                 filtered_cfg = {k: v for k, v in cfg.items() if k not in constant_keys}
                 cfg_str = ", ".join(f"{k}={v}" for k, v in filtered_cfg.items())
                 label = f"Run {job_id}"
-                if cfg_str: label += f" [{cfg_str}]"
-            
+                if cfg_str:
+                    label += f" [{cfg_str}]"
+
             out_dir = res.get("output_dir")
             steered_img = None
             if out_dir:
                 spath = os.path.join(out_dir, f"steered_{i}.png")
                 if os.path.exists(spath):
                     steered_img = wandb.Image(spath)
-                    
+
             s_row = [str(prompt), label, steered_img]
-            
+
             s_mdict = res.get("metrics", {})
             for m in ordered_metrics:
                 v = get_metric_val(s_mdict, f"steered/{m}", i)
-                if v is None: # fallback
+                if v is None:  # fallback
                     v = get_metric_val(s_mdict, m, i)
                 s_row.append(v)
-                
+
             table.add_data(*s_row)
-            
+
     return table
 
-def generate_localise_table(config: DictConfig, job_results: List[Dict[str, Any]]) -> wandb.Table:
+
+def generate_localise_table(config: DictConfig, job_results: list[dict[str, Any]]) -> wandb.Table:
     """Pivoted table specific to localisation sweeps: prompts as rows, layer/heads as columns, individual metric columns."""
     flat_cfgs, constant_keys = get_constant_and_flat_cfgs(job_results)
-    
+
     # 1. Discover all metric names strictly omitting baseline and dynamic run layer names
     base_metric_names = set()
     for res in job_results:
         for k in res.get("metrics", {}).keys():
-            m_split = k.split('/')
+            m_split = k.split("/")
             if len(m_split) > 1:
                 base_metric_names.add(m_split[-1])
             else:
@@ -206,9 +212,10 @@ def generate_localise_table(config: DictConfig, job_results: List[Dict[str, Any]
     prompt = config.get("prompt", None)
     if not prompt and len(job_results) > 0:
         prompt = job_results[0].get("cfg", {}).get("prompt", "Unknown Prompt")
-        
+
     def get_metric_val(metric_dict, key):
         import math
+
         val = metric_dict.get(key)
         if isinstance(val, list):
             val = val[-1]
@@ -228,7 +235,7 @@ def generate_localise_table(config: DictConfig, job_results: List[Dict[str, Any]
     # --- Baseline Row ---
     baseline_img = None
     baseline_metrics = {}
-    
+
     # Find the output_dir from the first valid job result to grab the baseline
     for res in job_results:
         out_dir = res.get("output_dir")
@@ -236,7 +243,7 @@ def generate_localise_table(config: DictConfig, job_results: List[Dict[str, Any]
             bpath = os.path.join(out_dir, "baseline.png")
             if os.path.exists(bpath):
                 baseline_img = wandb.Image(bpath)
-        
+
         b_mdict = res.get("metrics", {})
         for m in ordered_metrics:
             if f"baseline/{m}" in b_mdict and m not in baseline_metrics:
@@ -246,45 +253,48 @@ def generate_localise_table(config: DictConfig, job_results: List[Dict[str, Any]
     for m in ordered_metrics:
         b_row.append(baseline_metrics.get(m, None))
     table.add_data(*b_row)
-    
+
     # --- Localisation Run Rows ---
     for j, res in enumerate(job_results):
         out_dir = res.get("output_dir")
-        if not out_dir: continue
-        
+        if not out_dir:
+            continue
+
         metrics = res.get("metrics", {})
-        
+
         # In run_localisation.py, metrics are saved as `<layer>__h<head>/<metric>`
         # We need to find all unique layer__h prefixes saved in this job's metrics
         run_prefixes = set()
         for k in metrics.keys():
-            if k.startswith("baseline/"): continue
-            prefix = k.split('/')[0]
+            if k.startswith("baseline/"):
+                continue
+            prefix = k.split("/")[0]
             if "__h" in prefix:
                 run_prefixes.add(prefix)
-                
+
         for prefix in run_prefixes:
             # prefix format: layer_name__h0
             layer_name, head_str = prefix.split("__h")
             head_idx = int(head_str)
-            
+
             # Find the corresponding image
             img_path = os.path.join(out_dir, f"{prefix}.png")
             loc_img = wandb.Image(img_path) if os.path.exists(img_path) else None
-            
+
             # Extract metrics for this specific head
             r_row = [str(prompt), layer_name, head_idx, loc_img]
             for m in ordered_metrics:
                 v = get_metric_val(metrics, f"{prefix}/{m}")
-                if v is None: v = get_metric_val(metrics, m) # fallback
+                if v is None:
+                    v = get_metric_val(metrics, m)  # fallback
                 r_row.append(v)
-                
+
             table.add_data(*r_row)
 
     return table
 
 
-def generate_caa_alpha_table(config: DictConfig, job_results: List[Dict[str, Any]]) -> wandb.Table:
+def generate_caa_alpha_table(config: DictConfig, job_results: list[dict[str, Any]]) -> wandb.Table:
     """CAA-specific table with alpha as an explicit column.
 
     Rows:    one per (prompt, layer_block, alpha); baseline rows use alpha=0.
@@ -326,6 +336,7 @@ def generate_caa_alpha_table(config: DictConfig, job_results: List[Dict[str, Any
 
     def get_metric_val(metric_dict, key, idx):
         import math
+
         val = metric_dict.get(key)
         if isinstance(val, list):
             val = val[idx] if idx < len(val) else val[-1]
@@ -353,7 +364,6 @@ def generate_caa_alpha_table(config: DictConfig, job_results: List[Dict[str, Any
 
     for i, prompt in enumerate(prompts):
         for lbl, alpha_map in layer_alpha.items():
-
             # --- Baseline row (alpha = 0) ---
             baseline_img = None
             baseline_metrics: dict = {}
@@ -395,7 +405,9 @@ def generate_caa_alpha_table(config: DictConfig, job_results: List[Dict[str, Any
     return table
 
 
-def generate_stitch_steer_table(config: DictConfig, job_results: List[Dict[str, Any]]) -> wandb.Table:
+def generate_stitch_steer_table(
+    config: DictConfig, job_results: list[dict[str, Any]]
+) -> wandb.Table:
     """Table for stitch steer_contrast -m multirun sweeps.
 
     Each Hydra job runs steer_contrast for one (pos, neg, apply) triplet and
@@ -409,7 +421,7 @@ def generate_stitch_steer_table(config: DictConfig, job_results: List[Dict[str, 
     table = wandb.Table(columns=columns)
 
     for j, res in enumerate(job_results):
-        job_id  = res.get("job_number", j)
+        job_id = res.get("job_number", j)
         out_dir = res.get("output_dir")
 
         # Read per-job metadata written by run_stitch.py
@@ -423,25 +435,53 @@ def generate_stitch_steer_table(config: DictConfig, job_results: List[Dict[str, 
                 except Exception as e:
                     print(f"[generate_stitch_steer_table] Failed to read {meta_path}: {e}")
 
-        pos   = meta.get("pos",   res.get("cfg", {}).get("steer_pos_prompts", ["?"])[0] if isinstance(res.get("cfg", {}).get("steer_pos_prompts"), list) else "?")
-        neg   = meta.get("neg",   res.get("cfg", {}).get("steer_neg_prompts", ["?"])[0] if isinstance(res.get("cfg", {}).get("steer_neg_prompts"), list) else "?")
+        pos = meta.get(
+            "pos",
+            res.get("cfg", {}).get("steer_pos_prompts", ["?"])[0]
+            if isinstance(res.get("cfg", {}).get("steer_pos_prompts"), list)
+            else "?",
+        )
+        neg = meta.get(
+            "neg",
+            res.get("cfg", {}).get("steer_neg_prompts", ["?"])[0]
+            if isinstance(res.get("cfg", {}).get("steer_neg_prompts"), list)
+            else "?",
+        )
         alpha = float(meta.get("alpha", res.get("cfg", {}).get("steer_alpha", 1.0)))
-        apply_prompts    = meta.get("apply", [])
-        steered_paths    = meta.get("steered_paths",  [os.path.join(out_dir, f"steered_{i}.png")  for i in range(len(apply_prompts))] if out_dir else [])
-        baseline_paths   = meta.get("baseline_paths", [os.path.join(out_dir, f"baseline_{i}.png") for i in range(len(apply_prompts))] if out_dir else [])
+        apply_prompts = meta.get("apply", [])
+        steered_paths = meta.get(
+            "steered_paths",
+            [os.path.join(out_dir, f"steered_{i}.png") for i in range(len(apply_prompts))]
+            if out_dir
+            else [],
+        )
+        baseline_paths = meta.get(
+            "baseline_paths",
+            [os.path.join(out_dir, f"baseline_{i}.png") for i in range(len(apply_prompts))]
+            if out_dir
+            else [],
+        )
 
         # One row per apply prompt (or one row if no apply prompts)
         n_rows = max(len(apply_prompts), 1)
         for ai in range(n_rows):
-            ap           = apply_prompts[ai] if ai < len(apply_prompts) else ""
-            steered_img  = wandb.Image(steered_paths[ai])  if ai < len(steered_paths)  and os.path.exists(steered_paths[ai])  else None
-            baseline_img = wandb.Image(baseline_paths[ai]) if ai < len(baseline_paths) and os.path.exists(baseline_paths[ai]) else None
+            ap = apply_prompts[ai] if ai < len(apply_prompts) else ""
+            steered_img = (
+                wandb.Image(steered_paths[ai])
+                if ai < len(steered_paths) and os.path.exists(steered_paths[ai])
+                else None
+            )
+            baseline_img = (
+                wandb.Image(baseline_paths[ai])
+                if ai < len(baseline_paths) and os.path.exists(baseline_paths[ai])
+                else None
+            )
             table.add_data(str(job_id), f"{pos} → {neg}", alpha, ap, steered_img, baseline_img)
 
     return table
 
 
-def build_steer_grid_from_jobs(job_results: List[Dict[str, Any]], output_path: str) -> str | None:
+def build_steer_grid_from_jobs(job_results: list[dict[str, Any]], output_path: str) -> str | None:
     """Read each job's ``steer_meta.json``, assemble a combined grid image, and
     save it to ``output_path``.  Returns the saved path, or None if no metadata
     was found (e.g. all jobs failed or used the multi-pair path).
@@ -455,6 +495,7 @@ def build_steer_grid_from_jobs(job_results: List[Dict[str, Any]], output_path: s
         rows:     steered image then baseline image, one column per apply-prompt
     """
     from PIL import Image as _Image
+
     from t2i_interp.utils.plot import make_steer_grid
 
     pairs_results = []
@@ -472,19 +513,23 @@ def build_steer_grid_from_jobs(job_results: List[Dict[str, Any]], output_path: s
             print(f"[build_steer_grid] Failed to read {meta_path}: {e}")
             continue
 
-        steered_imgs  = [_Image.open(p) for p in meta.get("steered_paths",  []) if os.path.exists(p)]
-        baseline_imgs = [_Image.open(p) for p in meta.get("baseline_paths", []) if os.path.exists(p)]
+        steered_imgs = [_Image.open(p) for p in meta.get("steered_paths", []) if os.path.exists(p)]
+        baseline_imgs = [
+            _Image.open(p) for p in meta.get("baseline_paths", []) if os.path.exists(p)
+        ]
 
         if not steered_imgs:
             continue
 
-        pairs_results.append({
-            "pos":      meta.get("pos",   "pos"),
-            "neg":      meta.get("neg",   "neg"),
-            "apply":    meta.get("apply", [""]),
-            "steered":  steered_imgs,
-            "baseline": baseline_imgs,
-        })
+        pairs_results.append(
+            {
+                "pos": meta.get("pos", "pos"),
+                "neg": meta.get("neg", "neg"),
+                "apply": meta.get("apply", [""]),
+                "steered": steered_imgs,
+                "baseline": baseline_imgs,
+            }
+        )
 
     if not pairs_results:
         print("[build_steer_grid] No steer_meta.json files found — skipping grid.")
@@ -497,7 +542,9 @@ def build_steer_grid_from_jobs(job_results: List[Dict[str, Any]], output_path: s
     return output_path
 
 
-def generate_sweep_table(report_type: str, config: DictConfig, job_results: List[Dict[str, Any]]) -> wandb.Table:
+def generate_sweep_table(
+    report_type: str, config: DictConfig, job_results: list[dict[str, Any]]
+) -> wandb.Table:
     """Factory method to get the correct W&B table based on report_type."""
     if report_type == "steer":
         return generate_steer_table(config, job_results)

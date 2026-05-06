@@ -1,12 +1,13 @@
 import os
-import wandb
-import json
-from glob import glob
 from typing import Any
-from omegaconf import DictConfig, OmegaConf
-from hydra.experimental.callback import Callback
+
+import wandb
 from hydra.core.utils import JobReturn
+from hydra.experimental.callback import Callback
+from omegaconf import DictConfig, OmegaConf
+
 from t2i_interp.utils.utils import load_json
+
 
 class WandbMultirunCallback(Callback):
     """
@@ -14,6 +15,7 @@ class WandbMultirunCallback(Callback):
     - Activates only during `-m` (multirun) executions.
     - Runs once after all sweep iterations have finished.
     """
+
     def __init__(self):
         self.sweep_id = None
         self.job_results = []
@@ -57,30 +59,41 @@ class WandbMultirunCallback(Callback):
             else:
                 print(f"[WandbMultirunCallback] metrics.json not found at {metrics_path}")
 
-        print(f"[WandbMultirunCallback] job output_dir={output_dir}, metrics keys={list(metrics.keys())}")
-        self.job_results.append({
-            "job_number": getattr(job_return, "id", getattr(job_return, "job_name", len(self.job_results))),
-            "cfg": cfg_dict,
-            "output_dir": output_dir,
-            "metrics": metrics
-        })
+        print(
+            f"[WandbMultirunCallback] job output_dir={output_dir}, metrics keys={list(metrics.keys())}"
+        )
+        self.job_results.append(
+            {
+                "job_number": getattr(
+                    job_return, "id", getattr(job_return, "job_name", len(self.job_results))
+                ),
+                "cfg": cfg_dict,
+                "output_dir": output_dir,
+                "metrics": metrics,
+            }
+        )
 
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
         """Called at the end of the entire sweep to aggregate tables."""
         if not self.base_project or not self.job_results:
             return
 
-        print(f"[WandbMultirunCallback] Aggregating {len(self.job_results)} runs into master W&B table...")
+        print(
+            f"[WandbMultirunCallback] Aggregating {len(self.job_results)} runs into master W&B table..."
+        )
 
         # Initialize the master sweep run
         run = wandb.init(
             project=self.base_project,
             name=f"Sweep-Summary-{config.wandb.get('name', 'Table')}",
             tags=["sweep_summary"] + list(config.wandb.get("tags", [])),
-            config=OmegaConf.to_container(config, resolve=False)
+            config=OmegaConf.to_container(config, resolve=False),
         )
 
-        from t2i_interp.reporting.sweep_reports import generate_sweep_table, build_steer_grid_from_jobs
+        from t2i_interp.reporting.sweep_reports import (
+            build_steer_grid_from_jobs,
+            generate_sweep_table,
+        )
 
         report_type = config.wandb.get("sweep_report_type", "default")
         table = generate_sweep_table(report_type, config, self.job_results)
@@ -90,10 +103,10 @@ class WandbMultirunCallback(Callback):
         # For stitch_steer sweeps also build and log the combined grid image
         if report_type == "stitch_steer":
             import os
+
             # Save grid next to the first job's output dir, or fall back to cwd
             first_out = next(
-                (r.get("output_dir") for r in self.job_results if r.get("output_dir")),
-                "."
+                (r.get("output_dir") for r in self.job_results if r.get("output_dir")), "."
             )
             grid_path = os.path.join(os.path.dirname(first_out), "steer_sweep_grid.png")
             saved = build_steer_grid_from_jobs(self.job_results, grid_path)

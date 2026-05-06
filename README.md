@@ -32,12 +32,27 @@ If you use this toolkit in your research, please cite our paper:
 
 ## Installation
 
+The project is managed with [uv](https://docs.astral.sh/uv/). Install it first:
+
 ```bash
-# from repository root
-pip install -e .
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# or via Homebrew
+brew install uv
 ```
 
-Optional auth for datasets/experiment tracking:
+Then from the repository root:
+
+```bash
+make install        # dev environment (uv sync --extra dev)
+# or
+make install-prod   # runtime only
+make sync           # dev + ray + notebook extras
+```
+
+This creates a local `.venv/` with all dependencies pinned by `uv.lock`.
+
+Optional auth for datasets / experiment tracking:
 
 ```bash
 huggingface-cli login
@@ -46,7 +61,15 @@ wandb login
 
 ## CLI Quickstart
 
-Both command styles are supported:
+After `make install`, either activate the venv or prefix commands with `uv run`:
+
+```bash
+source .venv/bin/activate    # then t2i-steer, t2i-stitch, ...
+# or
+uv run t2i-steer             # no activation needed
+```
+
+Both invocation styles are supported:
 
 ```bash
 t2i steer
@@ -72,6 +95,15 @@ t2i-sae n_top_features=6 num_inference_steps=2
 # Localisation
 t2i-localise
 t2i-localise -m guidance_scale=0.0,2.0,5.0
+```
+
+Or via Makefile shortcuts (defaults from each workflow's `run.yaml`):
+
+```bash
+make steer
+make stitch
+make sae
+make localise
 ```
 
 W&B override example:
@@ -100,21 +132,25 @@ t2i-localise wandb.project="attention-ablation" wandb.name="baseline-sweep"
 ```text
 T2I_Interp_toolkit/
 ├── t2i_interp/
-│   ├── cli.py
-│   ├── config/
-│   │   ├── steer/
-│   │   ├── stitch/
-│   │   ├── sae/
-│   │   └── localisation/
-│   ├── scripts/
-│   │   ├── run_steer.py
-│   │   ├── run_stitch.py
-│   │   ├── run_sae.py
-│   │   └── run_localisation.py
-│   └── utils/
-├── bash/
-├── notebooks/
-└── pyproject.toml
+│   ├── cli.py                 # unified `t2i` entry point
+│   ├── accessors/             # ModuleAccessor / ModelWrapper
+│   ├── hooks/                 # capture / alter hooks
+│   ├── config/                # Hydra YAMLs (steer, stitch, sae, localisation)
+│   ├── scripts/               # run_steer / run_stitch / run_sae / run_localisation
+│   ├── reporting/             # W&B integration, sweep reports
+│   ├── utils/                 # T2I helpers, metrics, plotting, training
+│   ├── linear_steering.py     # CAA, KSteer, LoReFT
+│   ├── loreft.py              # LoReFTLayer
+│   ├── sae.py                 # SAEManager
+│   ├── stitch.py              # Stitcher (mapper, graft, diffusion lens)
+│   └── t2i.py                 # T2IModel pipeline wrapper
+├── dictionary_learning/       # vendored SAE training library
+├── bash/                      # convenience sweep launchers
+├── notebooks/                 # workflow walkthroughs
+├── tests/                     # unit + integration
+├── Makefile
+├── pyproject.toml
+└── uv.lock
 ```
 
 ## Development
@@ -122,15 +158,24 @@ T2I_Interp_toolkit/
 ```bash
 git clone https://github.com/Social-AI-Studio/T2I_Interp_toolkit.git
 cd T2I_Interp_toolkit
-pip install -e ".[dev]"
+make install
+make init           # install pre-commit hooks (one-time)
 ```
 
 Before opening a PR:
 
 ```bash
-ruff check .
-ruff format .
-pytest
+make format         # ruff format + ruff check --fix
+make lint           # ruff check (no fixes)
+make check          # lint + format-check (CI-equivalent)
+make test           # pytest tests/
+make test-cov       # with coverage report
+```
+
+All Makefile targets:
+
+```bash
+make help
 ```
 
 ## License

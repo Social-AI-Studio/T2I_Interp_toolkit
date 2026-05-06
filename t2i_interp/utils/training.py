@@ -6,13 +6,13 @@ from typing import Any
 
 import torch
 
+from t2i_interp.utils.generic import call_with_filtered_kwargs
 from t2i_interp.utils.output import Output
 from t2i_interp.utils.runningstats import (
     SimpleFileLogger,
     Update,
     Updater,
 )
-from t2i_interp.utils.generic import call_with_filtered_kwargs
 
 TrainingFn = Callable[[torch.nn.Module, dict[str, Any]], dict[str, Any]]
 
@@ -45,7 +45,11 @@ class Training:
     def run_trainer(self) -> Output:
         out = Output()
         try:
-            gen = call_with_filtered_kwargs(self.training_spec.training_function, *self.training_spec.args, **self.training_spec.kwargs)
+            gen = call_with_filtered_kwargs(
+                self.training_spec.training_function,
+                *self.training_spec.args,
+                **self.training_spec.kwargs,
+            )
             for item in gen:
                 for su in self.training_spec.stats_updaters:
                     if isinstance(item, Update):

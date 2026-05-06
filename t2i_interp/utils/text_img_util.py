@@ -241,7 +241,6 @@ def replace_policy(
     return _f
 
 
-from t2i_interp.utils.T2I.hook import CaptureHook
 
 
 def _prep_prompts_images(batch: list[Any] | dict[str, Any]) -> dict[str, Any]:

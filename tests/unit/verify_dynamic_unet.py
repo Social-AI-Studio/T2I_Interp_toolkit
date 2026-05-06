@@ -1,15 +1,15 @@
+import os
 
-import torch
 from diffusers import UNet2DConditionModel
-from transformers import CLIPTextModel, CLIPTextConfig, T5EncoderModel, T5Config
-from t2i_interp.accessors.unet import Unet
 from t2i_interp.accessors.clip_encoder import ClipEncoder
 from t2i_interp.accessors.t5_encoder import T5Encoder
-import os
+from t2i_interp.accessors.unet import Unet
+from transformers import CLIPTextConfig, CLIPTextModel, T5Config, T5EncoderModel
+
 
 def test_dynamic_accessors():
     print("Testing Dynamic Accessors (UNet, CLIP, T5)...")
-    
+
     # --- UNet Verification ---
     print("\n--- Testing UNet ---")
     unet = UNet2DConditionModel(
@@ -41,7 +41,7 @@ def test_dynamic_accessors():
         projection_dim=64,
         num_hidden_layers=2,
         num_attention_heads=4,
-        max_position_embeddings=77
+        max_position_embeddings=77,
     )
     clip_model = CLIPTextModel(clip_config)
     clip_yaml = "t2i_interp/config/CLIPEncoder.yaml"
@@ -54,7 +54,7 @@ def test_dynamic_accessors():
         print(f"CLIP Check: MLP={found_mlp}, SelfAttn={found_attn}")
         print("Sample keys:", list(clip_wrapper.accessors.keys())[:3])
     else:
-         print(f"ERROR: Config not found {clip_yaml}")
+        print(f"ERROR: Config not found {clip_yaml}")
 
     # --- T5 Verification ---
     print("\n--- Testing T5 ---")
@@ -66,7 +66,7 @@ def test_dynamic_accessors():
         num_layers=2,
         num_heads=4,
         decoder_start_token_id=0,
-        is_encoder_decoder=False # Encoder only
+        is_encoder_decoder=False,  # Encoder only
     )
     t5_model = T5EncoderModel(t5_config)
     t5_yaml = "t2i_interp/config/T5EncoderModel.yaml"
@@ -80,6 +80,7 @@ def test_dynamic_accessors():
         print("Sample keys:", list(t5_wrapper.accessors.keys())[:3])
     else:
         print(f"ERROR: Config not found {t5_yaml}")
+
 
 if __name__ == "__main__":
     test_dynamic_accessors()

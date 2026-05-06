@@ -63,6 +63,11 @@ dictionaries/
 *.tmp
 .cache/
 
+# Local planning / paper drafts (not for upstream)
+paper-dump.txt
+paper.pdf
+PLAN.md
+
 
 
 

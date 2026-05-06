@@ -1,10 +1,12 @@
-from typing import Callable, Optional, Union, Tuple, List, Any, Dict
 import inspect
+from collections.abc import Callable
+from typing import Any
+
 import torch as t
 import torch.nn as nn
-from torchvision import transforms
 
 Tensor = t.Tensor
+
 
 def call_with_filtered_kwargs(fn, *args, **kwargs):
     """
@@ -14,9 +16,10 @@ def call_with_filtered_kwargs(fn, *args, **kwargs):
     sig = inspect.signature(fn)
     if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
         return fn(*args, **kwargs)
-    
+
     allowed = {k: v for k, v in kwargs.items() if k in sig.parameters}
     return fn(*args, **allowed)
+
 
 # Forward
 class StopForward(Exception):
@@ -34,6 +37,7 @@ class StopForward(Exception):
 
     pass
 
+
 def _to_dtype_device(x: Tensor, ref: Tensor) -> Tensor:
     # keep gradients, but match dtype/device for numerical safety
     if x.dtype != ref.dtype:
@@ -41,6 +45,7 @@ def _to_dtype_device(x: Tensor, ref: Tensor) -> Tensor:
     if x.device != ref.device:
         x = x.to(ref.device)
     return x
+
 
 def reshape_like(vec, x):
     """
@@ -53,7 +58,8 @@ def reshape_like(vec, x):
     # .reshape handles non-contiguous; .view requires contiguity
     return v.reshape(x.shape)
 
-def flatten_batch(acts: Tensor, device: Optional[Union[str, t.device]] = None) -> Tensor:
+
+def flatten_batch(acts: Tensor, device: str | t.device | None = None) -> Tensor:
     """
     (B, ...) -> (B, -1)
     """
@@ -68,7 +74,10 @@ def flatten_batch(acts: Tensor, device: Optional[Union[str, t.device]] = None) -
         acts = acts.to(device)
     return acts.view(B, -1)
 
-def _extract_tensor_and_rebuild(output: Any, tensor_index: int = 0) -> Tuple[Optional[Tensor], Callable[[Tensor], Any]]:
+
+def _extract_tensor_and_rebuild(
+    output: Any, tensor_index: int = 0
+) -> tuple[Tensor | None, Callable[[Tensor], Any]]:
     """
     Returns (tensor, rebuild_fn) where rebuild_fn(new_tensor) reconstructs the output.
     Supports:
@@ -92,9 +101,10 @@ def _extract_tensor_and_rebuild(output: Any, tensor_index: int = 0) -> Tuple[Opt
         else:
             target_val = output[idx]
             write_idx = idx
-            
+
         if isinstance(target_val, t.Tensor):
-             def rebuild(new: Tensor):
+
+            def rebuild(new: Tensor):
                 if isinstance(output, tuple):
                     # Reconstruct tuple
                     lst = list(output)
@@ -104,11 +114,13 @@ def _extract_tensor_and_rebuild(output: Any, tensor_index: int = 0) -> Tuple[Opt
                 out = list(output)
                 out[write_idx] = new
                 return out
-             return target_val, rebuild
+
+            return target_val, rebuild
 
     return None, (lambda _: output)
 
-def _extract_tensor(data: Any, tensor_index: int = 0) -> Optional[Tensor]:
+
+def _extract_tensor(data: Any, tensor_index: int = 0) -> Tensor | None:
     """
     Simplified extraction that only returns the tensor, ignoring reconstruction.
     Useful for 'input' hooks or read-only 'output' hooks.
@@ -116,22 +128,23 @@ def _extract_tensor(data: Any, tensor_index: int = 0) -> Optional[Tensor]:
     tensor, _ = _extract_tensor_and_rebuild(data, tensor_index)
     return tensor
 
+
 def preprocess_image_for_vae(image, target_size=512):
     """
     Preprocess PIL image for VAE encoder.
-    
+
     Parameters:
     -----------
     image : PIL.Image
     target_size : int
-    
+
     Returns:
     --------
     torch.Tensor : Preprocessed image tensor [1, 3, H, W] in range [-1, 1]
     """
     import numpy as np
     from PIL import Image
-    
+
     image = image.convert("RGB").resize((target_size, target_size), resample=Image.BILINEAR)
     arr = np.array(image, dtype=np.float32) / 255.0
     arr = np.transpose(arr, (2, 0, 1))
@@ -139,7 +152,7 @@ def preprocess_image_for_vae(image, target_size=512):
     return ((tensor - 0.5) / 0.5).unsqueeze(0)
 
 
-def build_loss(loss: Union[str, Dict[str, Any], nn.Module] = "mse", **kwargs) -> nn.Module:
+def build_loss(loss: str | dict[str, Any] | nn.Module = "mse", **kwargs) -> nn.Module:
     """
     Small loss factory for training scripts.
 
@@ -153,7 +166,7 @@ def build_loss(loss: Union[str, Dict[str, Any], nn.Module] = "mse", **kwargs) ->
     if isinstance(loss, nn.Module):
         return loss
 
-    params: Dict[str, Any]
+    params: dict[str, Any]
     if isinstance(loss, dict):
         name = str(loss.get("name", loss.get("type", "mse"))).lower()
         params = {k: v for k, v in loss.items() if k not in ("name", "type")}
