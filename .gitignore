@@ -52,6 +52,13 @@ logs/
 nohup.out
 .wandb/
 
+# Workflow output dirs (defaults from t2i_interp/config/*/run.yaml)
+output_images/
+latents_cache/
+multirun/
+test_run/
+smoke_out/
+
 # Model weights and checkpoints
 *.pt
 *.pth
