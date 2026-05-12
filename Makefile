@@ -1,4 +1,4 @@
-.PHONY: help install install-prod sync clean test test-unit test-integration test-cov lint format check train infer steer stitch sae localise init pre-commit
+.PHONY: help install install-prod sync clean test test-unit test-integration test-cov lint format check train infer steer stitch sae localise init pre-commit notebook notebook-strip
 
 # Default target
 help:
@@ -29,6 +29,10 @@ help:
 	@echo "  make stitch          Run stitching workflow"
 	@echo "  make sae             Run SAE workflow"
 	@echo "  make localise        Run localisation workflow"
+	@echo ""
+	@echo "Notebooks:"
+	@echo "  make notebook        Launch Jupyter Lab in notebooks/"
+	@echo "  make notebook-strip  Strip output cells from notebooks/*.ipynb"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean           Remove cache and build artifacts"
@@ -100,6 +104,14 @@ sae:
 
 localise:
 	t2i-localise
+
+# Notebooks
+notebook:
+	uv run jupyter lab --notebook-dir=notebooks
+
+notebook-strip:
+	uv run nbstripout notebooks/*.ipynb
+	@echo "Stripped output cells from all notebooks."
 
 # Cleanup
 clean:
