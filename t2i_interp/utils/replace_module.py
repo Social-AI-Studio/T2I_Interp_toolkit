@@ -134,7 +134,7 @@ def replace_modules(
 # replaced = replace_modules(
 #     unet,
 #     module_to_replace="**attn2",      # all cross-attn modules in diffusers UNet
-#     new_module=HookedCrossAttention.wrap_factory,
+#     new_module=lambda old, name: MyHookedAttn(old, name),  # factory(old_module, name)
 #     copy_state=True                  # state copied by default
 # )
 # print("replaced:", replaced)

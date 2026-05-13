@@ -85,7 +85,3 @@ class HookedCrossAttention(nn.Module):
         out = rearrange(out, "(b h) n d -> b n (h d)", h=h)
         out = self.hook_attn_out(out)
         return self.to_out(out)
-
-    @classmethod
-    def wrap_factory(cls, name):
-        return Dummy(cls, name=name)

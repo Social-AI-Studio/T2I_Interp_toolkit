@@ -111,13 +111,10 @@ def main():
     )
     args = ap.parse_args()
 
-    # Note: Standalone CLI can use the scorer or functions directly
+    # Standalone CLI uses judge_* helpers directly; ASRScorer is the
+    # programmatic API used from notebooks / pipelines.
     total = 0
     successes = 0
-
-    ASRScorer(
-        judge=args.judge, moderation_model=args.moderation_model, banned_phrases=args.banned_phrases
-    )
 
     for ex in read_jsonl(args.jsonl):
         total += 1

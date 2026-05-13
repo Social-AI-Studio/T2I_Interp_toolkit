@@ -34,7 +34,6 @@ def _discover_and_add(mapping, names, base_key, root_glob, slots):
 
 def build_canonical_map_with_encoders(model: nn.Module, schema: dict[str, Any]) -> dict[str, str]:
     names = dict(model.named_modules())
-    infer_arch_by_name(model, schema.get("arch_map", {}))
     out: dict[str, str] = {}
 
     # ---- encoders: text ----

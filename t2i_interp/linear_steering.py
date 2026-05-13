@@ -122,10 +122,6 @@ class KSteer(Steer):
             data_loader_kwargs=cfg_dict.get("data_loader_kwargs", {}),
         )
 
-        cfg_dict.get("columns", ["label"])
-        if "target_column" in kwargs:
-            [kwargs["target_column"]]
-
         # optim
         if optimizers is None:
             optimizers = [th.optim.Adam(mapper.parameters(), lr=cfg.lr)]
