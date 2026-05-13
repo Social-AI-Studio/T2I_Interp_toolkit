@@ -5,18 +5,17 @@ t2i-localise factor=0.5 prompt="a dragon"
 t2i-localise sweep_all_layers=true target_heads=[0,1,2]
 """
 
+import os
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-import os
 from t2i_interp.config._hydra_config import config_dir
 from t2i_interp.utils.utils import save_json
 
 
 @hydra.main(config_path=config_dir(), config_name="localisation/run", version_base=None)
 def main(cfg: DictConfig) -> None:
-    import os
-
     import matplotlib
     import torch
     import wandb
@@ -158,18 +157,18 @@ def main(cfg: DictConfig) -> None:
         InferenceSpec(
             name=f"{name}__h{h}",
             inference_fn=run_head,
-            kwargs=dict(
-                model=model,
-                acc=acc,
-                head_idx=h,
-                factor=cfg.factor,
-                start_step=cfg.start_step,
-                end_step=cfg.end_step,
-                prompt=cfg.prompt,
-                n_steps=cfg.num_inference_steps,
-                seed=cfg.seed,
-                guidance_scale=cfg.guidance_scale,
-            ),
+            kwargs={
+                "model": model,
+                "acc": acc,
+                "head_idx": h,
+                "factor": cfg.factor,
+                "start_step": cfg.start_step,
+                "end_step": cfg.end_step,
+                "prompt": cfg.prompt,
+                "n_steps": cfg.num_inference_steps,
+                "seed": cfg.seed,
+                "guidance_scale": cfg.guidance_scale,
+            },
         )
         for name, acc in sweep.items()
         for h in (target_heads if target_heads is not None else range(acc.module.heads))
@@ -178,16 +177,16 @@ def main(cfg: DictConfig) -> None:
     results = [Inference(s).run_inference() for s in tqdm(specs)]
 
     # 6. Save per-layer grids to local & W&B
-    layer_names = sorted(set(s.name.split("__h")[0] for s in specs))
+    layer_names = sorted({s.name.split("__h")[0] for s in specs})
     wandb_grids = []
 
     for layer in layer_names:
-        ls = [(s, r) for s, r in zip(specs, results) if s.name.startswith(layer)]
+        ls = [(s, r) for s, r in zip(specs, results, strict=False) if s.name.startswith(layer)]
         fig, axes = plt.subplots(1, len(ls) + 1, figsize=(4 * (len(ls) + 1), 4))
         axes[0].imshow(baseline)
         axes[0].set_title("baseline")
         axes[0].axis("off")
-        for ax, (s, r) in zip(axes[1:], ls):
+        for ax, (s, r) in zip(axes[1:], ls, strict=False):
             ax.imshow(r.preds[0])
             ax.set_title(s.name.split("__")[1])
             ax.axis("off")

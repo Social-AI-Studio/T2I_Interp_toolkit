@@ -5,17 +5,16 @@ t2i-sae prompt="a red apple" n_top_features=6
 t2i-sae strengths="[-5,5]"
 """
 
+import os
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-import os
 from t2i_interp.config._hydra_config import config_dir
 
 
 @hydra.main(config_path=config_dir(), config_name="sae/run", version_base=None)
 def main(cfg: DictConfig) -> None:
-    import os
-
     import matplotlib.pyplot as plt
     import torch
     import wandb

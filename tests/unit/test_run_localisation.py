@@ -1,6 +1,6 @@
-import matplotlib.pyplot  # noqa: F401 — needed so @patch("matplotlib.pyplot") resolves
 from unittest.mock import MagicMock, patch
 
+import matplotlib.pyplot  # noqa: F401 — needed so @patch("matplotlib.pyplot") resolves
 import pytest
 from omegaconf import OmegaConf
 

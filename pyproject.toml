@@ -28,6 +28,7 @@ dependencies = [
     "torch>=2.0.0",
     "accelerate>=1.10.0",
     "pillow>=10.0.0",
+    "matplotlib>=3.7.0",
     "numpy>=1.24.0",
     "tqdm>=4.65.0",
     "loguru>=0.7.0",
@@ -104,8 +105,16 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401", "F403"]
+# N999 fires on every __init__.py because ruff resolves module names relative
+# to the repo root (`T2I_Interp_toolkit`) which has caps; the actual Python
+# package is the lowercase `t2i_interp`. Pre-existing — keep ignore broad.
+"__init__.py" = ["F401", "F403", "N999"]
 "tests/**/*.py" = ["B011", "N802"]
+# Math conventions: B = batch, N = batch dim, D = feature dim — standard PyTorch
+# usage across stitch / steer / sae paths.
+"t2i_interp/stitch.py" = ["N806"]
+"t2i_interp/sae.py" = ["N806"]
+"t2i_interp/scripts/run_steer.py" = ["N806"]
 
 [tool.ruff.format]
 quote-style = "double"

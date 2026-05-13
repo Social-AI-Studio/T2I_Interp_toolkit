@@ -31,7 +31,7 @@ class Stitcher:
         model: T2IModel,
         module_to_skip: nn.Module,
         replacement: nn.Module,
-    ) -> StitchResult:
+    ) -> None:
         """
         Replace a submodule with:
           - 'identity' -> returns input
@@ -75,7 +75,7 @@ class Stitcher:
         model_b: T2IModel,
         module_a: str,
         module_b: str,
-    ) -> StitchResult:
+    ) -> None:
         """
         Join two models at specified modules.
         - model_a: first model (gets module_b inserted)
@@ -329,7 +329,7 @@ class Stitcher:
 
         # Interleave: steered_0, baseline_0, steered_1, baseline_1, ...
         pairs = []
-        for s, b in zip(steered_imgs, baseline_imgs):
+        for s, b in zip(steered_imgs, baseline_imgs, strict=False):
             pairs.extend([s, b])
         return pairs
 
@@ -468,7 +468,7 @@ class Stitcher:
             ).images
 
         pairs = []
-        for s, b in zip(steered_imgs, baseline_imgs):
+        for s, b in zip(steered_imgs, baseline_imgs, strict=False):
             pairs.extend([s, b])
         return pairs
 

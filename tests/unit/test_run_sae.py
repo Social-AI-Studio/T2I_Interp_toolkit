@@ -1,8 +1,8 @@
 """End-to-end test of the t2i-sae entry point with all heavy dependencies mocked."""
 
-import matplotlib.pyplot  # noqa: F401 — needed so @patch("matplotlib.pyplot") resolves
 from unittest.mock import MagicMock, patch
 
+import matplotlib.pyplot  # noqa: F401 — needed so @patch("matplotlib.pyplot") resolves
 import pytest
 import torch
 from omegaconf import OmegaConf

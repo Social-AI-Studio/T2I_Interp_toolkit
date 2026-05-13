@@ -1,18 +1,14 @@
 from __future__ import annotations
 
 import contextlib
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 import torch as t
 import torch.nn as nn
-from dictionary_learning.training import trainSAE
-from dictionary_learning.utils import hf_dataset_to_generator
 
 from t2i_interp.accessors.accessor import IOType, ModuleAccessor
-from t2i_interp.config.train_config import sae_trainer_config
 
 # from t2i_interp.accessors.blocks import SAEBlock # removed if unused
 from t2i_interp.t2i import T2IModel

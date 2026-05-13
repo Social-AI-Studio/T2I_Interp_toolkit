@@ -5,10 +5,11 @@ t2i-steer model_key=CompVis/stable-diffusion-v1-4 device=cuda:1
 t2i-steer alpha=20 steer_steps=10
 """
 
+import os
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-import os
 from t2i_interp.config._hydra_config import config_dir
 from t2i_interp.utils.utils import save_json
 
@@ -37,8 +38,6 @@ def main(cfg: DictConfig) -> None:
         "xformers.flash_attn_3._C",
     ]:
         sys.modules.setdefault(_xf, types.ModuleType(_xf))
-
-    import os
 
     import transformers
     import wandb
@@ -102,7 +101,7 @@ def main(cfg: DictConfig) -> None:
     data_key = getattr(cfg, "label_col", None)
     if data_key and isinstance(ds_train[0][data_key], str):
         print(f"Converting string column '{data_key}' to integer indices.")
-        unique_labels = sorted(list(set(ds_train[data_key])))
+        unique_labels = sorted(set(ds_train[data_key]))
         label2idx = {lbl: i for i, lbl in enumerate(unique_labels)}
         ds_train = ds_train.map(
             lambda x: {f"{data_key}_idx": label2idx[x[data_key]]}, desc=f"Mapping {data_key}"
@@ -303,9 +302,7 @@ def main(cfg: DictConfig) -> None:
             and label.shape[1] > 1
         ):
             # Multi-dimensional label (like race+gender)
-            output_dims = (
-                [label.shape[1]] if len(label.shape) == 2 else [d for d in label.shape[1:]]
-            )
+            output_dims = [label.shape[1]] if len(label.shape) == 2 else list(label.shape[1:])
             # Since MLPMapperTwoHeads expects exactly 2 dims, if not 2, just use MLPMapper with flat output_dim
             if len(output_dims) == 2:
                 from t2i_interp.mapper import MLPMapperTwoHeads

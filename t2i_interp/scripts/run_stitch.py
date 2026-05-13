@@ -5,10 +5,11 @@ t2i-stitch dataset_name=my/ds num_steps=2000
 t2i-stitch inject_steps=[0,1,2]
 """
 
+import os
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-import os
 from t2i_interp.config._hydra_config import config_dir
 
 
@@ -31,8 +32,6 @@ def main(cfg: DictConfig) -> None:
         "xformers.flash_attn_3._C",
     ]:
         sys.modules.setdefault(_xf, types.ModuleType(_xf))
-
-    import os
 
     import torch as th
     import transformers

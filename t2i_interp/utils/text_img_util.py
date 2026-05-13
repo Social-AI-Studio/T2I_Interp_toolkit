@@ -241,8 +241,6 @@ def replace_policy(
     return _f
 
 
-
-
 def _prep_prompts_images(batch: list[Any] | dict[str, Any]) -> dict[str, Any]:
     """
     Accepts:
