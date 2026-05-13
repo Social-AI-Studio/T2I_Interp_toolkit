@@ -55,9 +55,22 @@ def migrate_one(ckpt_path: Path, hidden_dim: int, k: int) -> bool:
         return False
 
     sd = {k_.replace("pre_bias", "b_dec"): v for k_, v in sd.items() if k_ in LEGACY_KEYS}
+    # Derive bias length from the encoder weight (dict_size = weight.shape[0])
+    # rather than the --hidden-dim CLI arg. AutoEncoderTopK's load_state_dict
+    # checks bias shape against the weight, so a stale --hidden-dim would
+    # silently produce a checkpoint that fails to load.
+    enc_weight = sd.get("encoder.weight")
+    if enc_weight is None:
+        raise RuntimeError(f"{ckpt_path}: no 'encoder.weight' found in state dict")
+    dict_size = enc_weight.shape[0]
+    if dict_size != hidden_dim:
+        print(
+            f"  [info] {ckpt_path}: hidden_dim arg ({hidden_dim}) differs from "
+            f"encoder.weight.shape[0] ({dict_size}); using actual weight shape."
+        )
     sd.update(
         {
-            "encoder.bias": torch.zeros((hidden_dim,)),
+            "encoder.bias": torch.zeros((dict_size,)),
             "k": torch.tensor(k),
             "threshold": torch.tensor(-1.0),
         }

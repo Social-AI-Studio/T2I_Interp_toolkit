@@ -62,23 +62,10 @@ def main(cfg: DictConfig) -> None:
     # Reproducibility: seed all RNGs before model load / data ops.
     seed_everything(getattr(cfg, "seed", None))
 
-    # Optional wandb initialization
-    run = None
-    if getattr(cfg, "wandb", None) and cfg.wandb.get("project"):
-        base_name = cfg.wandb.get("name", None)
-        alpha_val = float(getattr(cfg, "alpha", 0))
-        run_name = f"{base_name}_alpha={alpha_val:g}" if base_name else f"alpha={alpha_val:g}"
-        run = wandb.init(
-            project=cfg.wandb.project,
-            entity=cfg.wandb.get("entity", None),
-            name=run_name,
-            tags=cfg.wandb.get("tags", []),
-            config=OmegaConf.to_container(cfg, resolve=True),
-        )
-
-    # Resolve layer_names + finalize output_dir BEFORE model/dataset load so
-    # the fingerprint can be written first. That way a crash during model load
-    # or dataset download still leaves a "what was attempted" record on disk.
+    # Resolve layer_names + finalize output_dir BEFORE wandb.init / fingerprint
+    # / model load so all three downstream snapshots see the SAME `cfg`
+    # (W&B's run.config, the fingerprint JSON, and the actual output path
+    # should all agree).
     _layer_names_cfg = OmegaConf.to_container(getattr(cfg, "layer_names", None), resolve=True)
     layer_names = list(_layer_names_cfg) if _layer_names_cfg is not None else [cfg.layer_name]
 
@@ -92,6 +79,21 @@ def main(cfg: DictConfig) -> None:
     alpha_suffix = float(getattr(cfg, "alpha", 0))
     cfg.output_dir = f"{cfg.output_dir}_alpha={alpha_suffix:g}"
     OmegaConf.set_struct(cfg, True)
+
+    # Optional wandb initialization — must come AFTER cfg.output_dir is
+    # finalized so the W&B run snapshot matches the fingerprint's snapshot.
+    run = None
+    if getattr(cfg, "wandb", None) and cfg.wandb.get("project"):
+        base_name = cfg.wandb.get("name", None)
+        alpha_val = float(getattr(cfg, "alpha", 0))
+        run_name = f"{base_name}_alpha={alpha_val:g}" if base_name else f"alpha={alpha_val:g}"
+        run = wandb.init(
+            project=cfg.wandb.project,
+            entity=cfg.wandb.get("entity", None),
+            name=run_name,
+            tags=cfg.wandb.get("tags", []),
+            config=OmegaConf.to_container(cfg, resolve=True),
+        )
 
     # Run fingerprint: written BEFORE model load (matches README §"Reproducibility").
     fingerprint = RunFingerprint.from_cfg(
