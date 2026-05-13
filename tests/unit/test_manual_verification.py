@@ -66,7 +66,7 @@ def test_interventions():
 
     print("Running run_intervention...")
     # We just check if it runs without crashing
-    out = run_intervention(model, ["A photo of a dog"], [intervention], num_inference_steps=5)
+    run_intervention(model, ["A photo of a dog"], [intervention], num_inference_steps=5)
     print("run_intervention finished.")
     print("Intervention test passed!")
 
@@ -88,8 +88,7 @@ def test_buffer():
 
     def data_gen():
         prompts = ["cat", "dog", "bird", "fish"]
-        for p in prompts:
-            yield p
+        yield from prompts
 
     # d_submodule should be inferred or provided.
     # For resnets[0], out channels is 1280.

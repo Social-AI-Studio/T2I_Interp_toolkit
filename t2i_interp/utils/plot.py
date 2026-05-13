@@ -1,13 +1,13 @@
 # import open_clip
 from collections.abc import Mapping, Sequence
-from typing import Any, Union
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
-DataLike = Union[pd.DataFrame, Mapping[str, Any]]
+DataLike = pd.DataFrame | Mapping[str, Any]
 
 
 def plot_key_wise(
@@ -94,7 +94,7 @@ def plot_key_wise(
         vmaxs = [np.nanmax(values[i]) for i in range(R)]
 
     im_last = None
-    for i, (ax, col) in enumerate(zip(axes, value_cols)):
+    for i, (ax, col) in enumerate(zip(axes, value_cols, strict=False)):
         row = values[i : i + 1, :]  # (1, N)
         im = ax.imshow(
             row,
@@ -150,7 +150,7 @@ def _to_dataframe(
         raise TypeError("data must be a pandas DataFrame or a dict-like Mapping[str, ...].")
 
     # dict[str, scalar]  OR  dict[str, dict[str, scalar]]
-    keys = list(data.keys()) if preserve_order else sorted(list(data.keys()))
+    keys = list(data.keys()) if preserve_order else sorted(data.keys())
     first_val = next(iter(data.values())) if data else None
 
     if data and isinstance(first_val, Mapping):
@@ -546,7 +546,7 @@ def show_grid(images, labels, cols=3):
         axes = np.array([axes])
     axes = axes.flatten()
 
-    for i, (img, label) in enumerate(zip(images, labels)):
+    for i, (img, label) in enumerate(zip(images, labels, strict=False)):
         axes[i].imshow(img)
         axes[i].set_title(label, fontsize=10)
         axes[i].axis("off")
