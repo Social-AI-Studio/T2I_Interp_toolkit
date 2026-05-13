@@ -9,7 +9,7 @@ defaults:
   - optional /model: null   # override: t2i-steer --config-name=steer/ksteer model=sdxl_turbo
 
 # Model
-model_key: runwayml/stable-diffusion-v1-5
+model_key: stable-diffusion-v1-5/stable-diffusion-v1-5
 device: cuda:0
 dtype: float16
 
