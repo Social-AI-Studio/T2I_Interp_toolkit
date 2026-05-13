@@ -65,6 +65,8 @@ smoke_out/
 *.ckpt
 *.safetensors
 dictionaries/
+# SAE checkpoints downloaded by `t2i-migrate-sae`
+sdxl-unbox/
 
 # Temporary files
 *.tmp
@@ -80,3 +82,4 @@ openreview.txt
 
 
 
+notebook_runs/

@@ -1,10 +1,14 @@
 # @package _global_
 # Stable Diffusion 1.5 — classic CFG-guided 30-step diffusion.
 #
+# Uses the community fork at stable-diffusion-v1-5/stable-diffusion-v1-5
+# (the original runwayml/stable-diffusion-v1-5 was removed from HF in 2024;
+# this fork was created by HuggingFace as a replacement).
+#
 # Compose into any workflow:
 #   t2i-steer model=sd15
 #   t2i-stitch model=sd15
-model_key: runwayml/stable-diffusion-v1-5
+model_key: stable-diffusion-v1-5/stable-diffusion-v1-5
 dtype: float16
 guidance_scale: 7.5
 conditional_only: true
