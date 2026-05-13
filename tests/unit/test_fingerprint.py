@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -141,27 +142,24 @@ def test_seed_everything_makes_torch_deterministic():
     assert torch.equal(a, b)
 
 
-def test_log_to_wandb_records_summary_fields():
+def test_log_to_wandb_records_summary_fields(monkeypatch):
     """log_to_wandb should call run.log_artifact and populate summary keys."""
-    import sys
     import types
     from unittest.mock import MagicMock
 
-    # Stub the `wandb` module so `Artifact(...)` returns a context-managing mock.
+    # Stub `wandb` via monkeypatch — auto-restored after the test, so a real
+    # `wandb` import elsewhere in the session is not affected.
     fake_wandb = types.ModuleType("wandb")
-    fake_wandb.Artifact = lambda name, type: MagicMock()  # noqa: A002 (kw matches wandb API)
-    sys.modules["wandb"] = fake_wandb
+    fake_wandb.Artifact = lambda name, type: MagicMock()  # noqa: A002 (matches wandb API)
+    monkeypatch.setitem(sys.modules, "wandb", fake_wandb)
 
-    try:
-        fp = RunFingerprint.from_cfg(_make_cfg(), workflow="steer", intervention=_intervention())
-        run = MagicMock()
-        run.summary = {}
-        fp.log_to_wandb(run)
+    fp = RunFingerprint.from_cfg(_make_cfg(), workflow="steer", intervention=_intervention())
+    run = MagicMock()
+    run.summary = {}
+    fp.log_to_wandb(run)
 
-        assert run.summary["fingerprint/hash"] == fp.hash()
-        assert run.summary["fingerprint/workflow"] == "steer"
-        assert run.summary["fingerprint/model_id"] == "stabilityai/sdxl-turbo"
-        assert run.summary["fingerprint/seed"] == 42
-        run.log_artifact.assert_called_once()
-    finally:
-        del sys.modules["wandb"]
+    assert run.summary["fingerprint/hash"] == fp.hash()
+    assert run.summary["fingerprint/workflow"] == "steer"
+    assert run.summary["fingerprint/model_id"] == "stabilityai/sdxl-turbo"
+    assert run.summary["fingerprint/seed"] == 42
+    run.log_artifact.assert_called_once()

@@ -33,9 +33,9 @@ import socket
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from omegaconf import DictConfig, OmegaConf
 
@@ -81,8 +81,9 @@ class RunFingerprint:
       - `python_version`, `platform`, `hostname`, `timestamp`
 
     The 16-char `hash()` is computed over the canonical content (excluding
-    timestamp / hostname / git_dirty) so re-running the same logical
-    experiment from different machines produces an identical hash.
+    `_VOLATILE_FIELDS` — timestamp, hostname, dirty-flag, python version,
+    platform) so re-running the same logical experiment from different
+    machines produces an identical hash.
     """
 
     workflow: str
@@ -101,10 +102,14 @@ class RunFingerprint:
     timestamp: str
 
     # Fields excluded from the stable hash (volatile / machine-local).
-    _VOLATILE_FIELDS: tuple[str, ...] = field(
-        default=("timestamp", "hostname", "git_dirty"),
-        repr=False,
-        compare=False,
+    # `ClassVar` so dataclass treats it as a class-level constant — it does
+    # not become an instance field and does not appear in `asdict()` output.
+    _VOLATILE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "timestamp",
+        "hostname",
+        "git_dirty",
+        "python_version",
+        "platform",
     )
 
     @classmethod

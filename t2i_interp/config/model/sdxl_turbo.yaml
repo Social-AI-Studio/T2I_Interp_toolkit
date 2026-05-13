@@ -7,7 +7,9 @@
 #   - conditional_only: false no unconditional half without CFG
 #   - num_inference_steps: 4  4-step distilled
 #   - steer_steps: 4          must match num_inference_steps for steering
-#   - capture_step_index: all 4 steps is small enough for full-step tars
+#   - capture_step_index: 0   first denoising step (int, not "all" — `all` is
+#                             only honored by collect_latents; the in-memory
+#                             collector used by stitch expects an int)
 #
 # Compose into any workflow:
 #   t2i-steer --config-name=steer/loreft model=sdxl_turbo
@@ -18,4 +20,4 @@ guidance_scale: 0.0
 conditional_only: false
 num_inference_steps: 4
 steer_steps: 4
-capture_step_index: all
+capture_step_index: 0
