@@ -8,6 +8,7 @@ t2i-localise sweep_all_layers=true target_heads=[0,1,2]
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+import os
 from t2i_interp.config._hydra_config import config_dir
 from t2i_interp.utils.utils import save_json
 

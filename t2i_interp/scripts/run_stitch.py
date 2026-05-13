@@ -8,6 +8,7 @@ t2i-stitch inject_steps=[0,1,2]
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+import os
 from t2i_interp.config._hydra_config import config_dir
 
 

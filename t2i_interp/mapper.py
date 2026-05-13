@@ -27,6 +27,11 @@ class AffineMapper(nn.Module):
 class MLPMapper(nn.Module):
     def __init__(self, input_dim: int, output_dim: int, hidden_dim: int = 512):
         super().__init__()
+        # Expose dims for introspection (tests + the stitching workflow check
+        # mapper shape against source/target activation dims).
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.output_dim = output_dim
         self.network = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),

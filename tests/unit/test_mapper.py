@@ -55,22 +55,20 @@ def test_mlp_mapper_two_heads_initialization():
     mapper = MLPMapperTwoHeads(
         input_dim=100,
         hidden_dim=50,
-        output_dim_1=7,
-        output_dim_2=3,
+        output_dims=[7, 3],
     )
-
-    assert mapper.output_dim_1 == 7
-    assert mapper.output_dim_2 == 3
+    # The class doesn't expose per-head dims as attributes; forward shape is
+    # the contract (see test_mlp_mapper_two_heads_forward).
+    assert isinstance(mapper, MLPMapperTwoHeads)
 
 
 def test_mlp_mapper_two_heads_forward():
-    """Test MLPMapperTwoHeads produces two outputs."""
+    """Test MLPMapperTwoHeads produces two outputs with the requested shapes."""
     batch_size = 4
     mapper = MLPMapperTwoHeads(
         input_dim=100,
         hidden_dim=50,
-        output_dim_1=7,
-        output_dim_2=3,
+        output_dims=[7, 3],
     )
 
     x = torch.randn(batch_size, 100)

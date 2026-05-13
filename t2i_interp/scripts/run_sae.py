@@ -8,6 +8,7 @@ t2i-sae strengths="[-5,5]"
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+import os
 from t2i_interp.config._hydra_config import config_dir
 
 
@@ -73,17 +74,20 @@ def main(cfg: DictConfig) -> None:
         model, saes_config=cfg.saes, device=cfg.device, dtype=getattr(torch, cfg.dtype)
     )
 
-    # 3. Capture activations
+    # 3. Capture activations.
+    # Use `capture_activations(return_images=False)` to get the {sae_name: z}
+    # dict in output.preds — `run_with_steering` returns images, which is the
+    # wrong shape for the downstream `output.preds[sae_key]` lookup.
     print("Capturing sparse activations...")
     output = Inference(
         InferenceSpec(
             name="sae_capture",
-            inference_fn=sae_manager.run_with_steering,
+            inference_fn=sae_manager.capture_activations,
             kwargs={
                 "sae_list": sae_list,
                 "prompt": cfg.prompt,
-                "z_alter_fns": {},
                 "use_delta": False,
+                "return_images": False,  # we only want the latent dict
                 "num_inference_steps": cfg.num_inference_steps,
                 "guidance_scale": cfg.guidance_scale,
                 "seed": cfg.seed,

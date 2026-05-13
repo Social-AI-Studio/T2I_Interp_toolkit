@@ -8,6 +8,7 @@ t2i-steer alpha=20 steer_steps=10
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
+import os
 from t2i_interp.config._hydra_config import config_dir
 from t2i_interp.utils.utils import save_json
 
