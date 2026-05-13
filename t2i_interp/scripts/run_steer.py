@@ -392,24 +392,10 @@ def main(cfg: DictConfig) -> None:
             if getattr(cfg, "delete_cache", False):
                 _delete_layer_cache(layer_name)
     elif mapper is not None:
-        train_loader = ActivationsDataloader(
-            train_latents_dir,
-            layer_names,
-            prompt_col=prompt_cols[0],
-            batch_size=getattr(cfg, "batch_size", 32),
-            flatten=True,
-            limit=cfg.max_samples,
-        )
-        val_loader = None
-        if hasattr(cfg, "val_prompt_col"):
-            val_loader = ActivationsDataloader(
-                val_latents_dir,
-                layer_names,
-                prompt_col=getattr(cfg, "val_prompt_col", None),
-                batch_size=getattr(cfg, "batch_size", 32),
-                flatten=True,
-                limit=cfg.max_samples,
-            )
+        # KSteer / mapper-based path. Reuses the train_loader / val_loader
+        # built upstream from the latent tar files — the old code re-created
+        # them here referencing undefined `train_latents_dir` / `val_latents_dir`
+        # vars (NameError on every ksteer run), see PLAN.md item B.7.
 
         def _get_target_labels(loader, attr_name="default"):
             """Extract pos_acts and neg_acts from dataloader to train linear stealers"""
