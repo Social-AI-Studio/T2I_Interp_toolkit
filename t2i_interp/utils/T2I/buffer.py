@@ -189,7 +189,7 @@ class PairedLoader:
         # Collect all pairs jointly before any shuffling so that
         # sample i from loader A is always paired with sample i from loader B.
         iterators = [l.iterate() for l in self.loaders]
-        pairs = list(zip(*iterators))
+        pairs = list(zip(*iterators, strict=False))
         if self.shuffle:
             rng = torch.Generator()
             if self.seed is not None:
@@ -238,7 +238,7 @@ class InMemoryPairedLoader:
         iterators = [l.iterate() for l in loaders]
         # Materialise all batches in lock-step to maintain pairing
         all_batches: list[list] = [[] for _ in loaders]
-        for batch_tuple in zip(*iterators):
+        for batch_tuple in zip(*iterators, strict=False):
             for i, b in enumerate(batch_tuple):
                 all_batches[i].append(b)
 

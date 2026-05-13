@@ -15,7 +15,7 @@ def collect_latents(
     dataset: str | Dataset | IterableDataset,
     model: T2IModel,
     save_path: str,
-    columns: list[str] = ["caption"],
+    columns: list[str] = None,
     split: str = "train",
     data_files: str | list | dict | None = None,
     streaming: bool = True,
@@ -52,6 +52,8 @@ def collect_latents(
         save_path: The directory where tars were written.
     """
     # ---- decide output directory ----
+    if columns is None:
+        columns = ["caption"]
     os.makedirs(save_path, exist_ok=True)
 
     # Writers: one per (accessor, prompt_column)
@@ -96,7 +98,7 @@ def collect_latents(
             acc = model.resolve_accessor(accessor_name, io_type=IOType.OUTPUT)
             real_accessors.append(acc)
         except Exception as e:
-            raise ValueError(f"Could not resolve accessor {accessor_name} in model: {e}")
+            raise ValueError(f"Could not resolve accessor {accessor_name} in model: {e}") from e
 
     # ---- iterate dataset ----
     for num_document, batch in tqdm(enumerate(dataloader)):
@@ -159,12 +161,12 @@ def collect_latents(
                     act_data = cache[accessor_name]
                     if isinstance(act_data, dict):
                         if capture_step_index == "all":
-                            steps = sorted(list(act_data.keys()))
+                            steps = sorted(act_data.keys())
                             batch_tensor = torch.stack([act_data[s] for s in steps], dim=1)
                         elif capture_step_index in act_data:
                             batch_tensor = act_data[capture_step_index]
                         else:
-                            steps = sorted(list(act_data.keys()))
+                            steps = sorted(act_data.keys())
                             batch_tensor = act_data[steps[-1]]
                     else:
                         batch_tensor = act_data
@@ -203,7 +205,7 @@ def collect_latents_inmemory(
     accessors: list[str],
     dataset,
     model: "T2IModel",
-    columns: list[str] = ["caption"],
+    columns: list[str] = None,
     batch_size: int = 1,
     max_samples: int = 5000,
     num_inference_steps: int = 1,
@@ -223,6 +225,8 @@ def collect_latents_inmemory(
     """
     from torch.utils.data import DataLoader
 
+    if columns is None:
+        columns = ["caption"]
     model.pipeline.set_progress_bar_config(disable=True)
 
     real_accessors = []

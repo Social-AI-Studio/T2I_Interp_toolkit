@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import open_clip
 import torch
 from PIL import Image
+
+if TYPE_CHECKING:
+    from t2i_interp.utils.output import Output
 
 
 @dataclass
@@ -30,7 +36,7 @@ class CLIPScorer:
         self._cos = torch.nn.CosineSimilarity(dim=-1)
 
     @torch.no_grad()
-    def compute(self, out: "Output", prompts: list[str] = None) -> "Output":
+    def compute(self, out: Output, prompts: list[str] = None) -> Output:
         """
         Computes CLIP score for each image in out.preds against the corresponding prompt.
         If prompts is not provided, it tries to get it from out.labels or out.run_metadata.
@@ -72,7 +78,7 @@ class CLIPScorer:
                 )
 
         scores = []
-        for img, prompt in zip(images, prompts):
+        for img, prompt in zip(images, prompts, strict=False):
             scores.append(self.score(img, prompt))
 
         if out.metrics is None:
@@ -106,7 +112,7 @@ class CLIPScorer:
             prompts = prompts * len(images)
 
         scores = []
-        for image, prompt in zip(images, prompts):
+        for image, prompt in zip(images, prompts, strict=False):
             if isinstance(image, str):
                 img = Image.open(image).convert("RGB")
             elif isinstance(image, Image.Image):

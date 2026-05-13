@@ -41,7 +41,7 @@ def test_tuple_detection():
         accessors = getattr(wrapper, "accessors", {})
         sorted_acc = sorted(accessors.items())
 
-        for acc_name, acc in sorted_acc:
+        for _acc_name, acc in sorted_acc:
             count_total += 1
             if acc.returns_tuple:
                 count_tuple += 1

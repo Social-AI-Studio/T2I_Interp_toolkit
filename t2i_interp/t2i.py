@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -102,7 +104,7 @@ class T2IModel:
         else:
             impl = "eager"
 
-        tokenizer_kwargs = kwargs.pop("tokenizer_kwargs", {})
+        kwargs.pop("tokenizer_kwargs", {})
 
         self.device = _parse_device(device) or torch.device("cpu")
         self.dtype = _parse_dtype(dtype) or torch.float16
@@ -304,7 +306,7 @@ class T2IModel:
                 accessor_hook_map[acc.attr_name] = hooks[acc.module]
 
         with torch.no_grad():
-            with TraceDict(list([acc.module for acc in accessors]), hooks):
+            with TraceDict([acc.module for acc in accessors], hooks):
                 output = self.pipeline(prompt, **kwargs)
 
         for name, hook in accessor_hook_map.items():

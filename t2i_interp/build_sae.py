@@ -50,7 +50,7 @@ def build_sae_manager(model, saes_config, device="cuda:0", dtype=torch.float16):
 
         # Safely traverse the model object to find the module slice
         module_ref = model
-        for part in attr_path.split("_"):
+        for _part in attr_path.split("_"):
             # A bit tricky since attributes might be `down_blocks_2_attentions_1_out` straight on `unet`
             # or nested. In `T2IModel`, the wrapped names are exactly the hook names minus "model_".
             pass

@@ -64,10 +64,9 @@ class OutputAlterHook:
     def _apply(self, x: Tensor, module: t.nn.Module) -> Tensor:
         """Apply policy either to entire batch or only to the CFG conditional half."""
         if self.guidance and x.dim() >= 1 and x.size(0) % 2 == 0 and x.size(0) > 1:
-            B2 = x.size(0)
-            B = B2 // 2
-            uncond = x[:B]
-            cond = x[B:]
+            batch_size = x.size(0) // 2
+            uncond = x[:batch_size]
+            cond = x[batch_size:]
             cond_new = self.policy(cond, module)
             out = t.cat([uncond, cond_new], dim=0)
         else:
@@ -298,10 +297,10 @@ def flatten_batch(acts: Tensor, device: str | t.device | None = None) -> Tensor:
         raise TypeError(f"Captured value is not a Tensor: {type(acts)}")
     if acts.dim() == 0:
         acts = acts.unsqueeze(0)
-    B = acts.shape[0] if acts.dim() >= 1 else 1
+    batch_size = acts.shape[0] if acts.dim() >= 1 else 1
     if device is not None:
         acts = acts.to(device)
-    return acts.view(B, -1)
+    return acts.view(batch_size, -1)
 
 
 def _register(module: t.nn.Module, io_type: IOType, fn: Callable):

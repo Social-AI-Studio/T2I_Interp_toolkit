@@ -1,13 +1,19 @@
 # lpips_score.py
 # pip install lpips torch torchvision pillow
 
+from __future__ import annotations
+
 import argparse
 import os
+from typing import TYPE_CHECKING
 
 import lpips
 import torch
 import torchvision.transforms as T
 from PIL import Image
+
+if TYPE_CHECKING:
+    from t2i_interp.utils.output import Output
 
 
 def list_pairs(ref_dir: str, pred_dir: str) -> list[tuple[str, str]]:
@@ -40,7 +46,7 @@ class LPIPSScorer:
         self.loss_fn = lpips.LPIPS(net=self.net).to(self.device).eval()
 
     @torch.no_grad()
-    def compute(self, out: "Output", ref_images=None) -> "Output":
+    def compute(self, out: Output, ref_images=None) -> Output:
         from t2i_interp.utils.output import Output
 
         if not isinstance(out, Output):
@@ -64,7 +70,7 @@ class LPIPSScorer:
                 raise ValueError("Mismatch in number of preds and ref_images")
 
         scores = []
-        for ref, pred in zip(ref_images, preds):
+        for ref, pred in zip(ref_images, preds, strict=False):
             if isinstance(ref, str):
                 ref_t = load_img(ref, self.device)
             else:
@@ -110,7 +116,7 @@ class LPIPSScorer:
                 return {"lpips_score": float("nan")}
 
         scores = []
-        for ref, pred in zip(ref_images, preds):
+        for ref, pred in zip(ref_images, preds, strict=False):
             if isinstance(ref, str):
                 ref_t = load_img(ref, self.device)
             elif isinstance(ref, Image.Image):

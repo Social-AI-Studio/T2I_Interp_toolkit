@@ -31,7 +31,7 @@ def as_url(data, source="zc", size=None):
     buffered = io.BytesIO()
     img.save(buffered, format="png")
     b64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    return "data:image/png;base64,%s" % (b64)
+    return f"data:image/png;base64,{b64}"
 
 
 def from_image(im, target="zc", size=None):
@@ -83,23 +83,23 @@ def renormalizer(source="zc", target="zc"):
 
 
 # Several commonly-seen image normalization schemes.
-OFFSET_SCALE = dict(
+OFFSET_SCALE = {
     # pytorch default [0, 1]
-    pt=([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
+    "pt": ([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
     # zero-centered [-1, 1]
-    zc=([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+    "zc": ([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
     # zero-mean, unit-variance over empirical ImageNet sample
-    imagenet=([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    "imagenet": ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     # clip normalization; see
     # https://github.com/openai/CLIP/blob/c5478aac7b9e007a2659d36b57ebe148849e542a/clip/clip.py#L85
-    clip=([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711]),
+    "clip": ([0.48145466, 0.4578275, 0.40821073], [0.26862954, 0.26130258, 0.27577711]),
     # zero-mean, 255 range over ImageNet sample
-    imagenet_meanonly=([0.485, 0.456, 0.406], [1.0 / 255, 1.0 / 255, 1.0 / 255]),
+    "imagenet_meanonly": ([0.485, 0.456, 0.406], [1.0 / 255, 1.0 / 255, 1.0 / 255]),
     # zero-mean, 255 range over Places sample
-    places_meanonly=([0.475, 0.441, 0.408], [1.0 / 255, 1.0 / 255, 1.0 / 255]),
+    "places_meanonly": ([0.475, 0.441, 0.408], [1.0 / 255, 1.0 / 255, 1.0 / 255]),
     # byte encoding [0, 255] as in common image file formats
-    byte=([0.0, 0.0, 0.0], [1.0 / 255, 1.0 / 255, 1.0 / 255]),
-)
+    "byte": ([0.0, 0.0, 0.0], [1.0 / 255, 1.0 / 255, 1.0 / 255]),
+}
 
 NORMALIZER = {k: transforms.Normalize(*OFFSET_SCALE[k]) for k in OFFSET_SCALE}
 

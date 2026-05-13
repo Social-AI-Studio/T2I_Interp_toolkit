@@ -90,6 +90,10 @@ packages = ["t2i_interp", "dictionary_learning"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# `dictionary_learning/` is a vendored third-party fork — upstream owns its
+# style. `notebooks/` use exploratory conventions (top-level capitalized
+# constants, unused fixtures) where strict linting fights the medium.
+extend-exclude = ["dictionary_learning", "notebooks"]
 
 [tool.ruff.lint]
 select = [
@@ -107,22 +111,34 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
     "E741",  # ambiguous variable name
+    # Universal PyTorch / torchvision aliases — `import torch.nn.functional as F`
+    # and `import torchvision.transforms as T` are the canonical idioms.
+    "N812",
+    # PyTorch hook control-flow signals (e.g. `StopForward`) are exceptions
+    # by mechanism, not errors by meaning — the `*Error` suffix is misleading.
+    "N818",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # N999 fires on every __init__.py because ruff resolves module names relative
 # to the repo root (`T2I_Interp_toolkit`) which has caps; the actual Python
-# package is the lowercase `t2i_interp`. Pre-existing — keep ignore broad.
-"__init__.py" = ["F401", "F403", "N999"]
-"tests/**/*.py" = ["B011", "N802"]
-# Math conventions: B = batch, N = batch dim, D = feature dim, R = rank —
-# standard PyTorch / ML usage. Renaming to lowercase makes tensor-shape code
-# harder to read for ML reviewers.
-"t2i_interp/stitch.py" = ["N806"]
-"t2i_interp/sae.py" = ["N806"]
-"t2i_interp/utils/plot.py" = ["N806"]
-"t2i_interp/utils/text_img_util.py" = ["N806"]
-"t2i_interp/scripts/run_steer.py" = ["N806"]
+# package is the lowercase `t2i_interp`. Unfixable without renaming the repo.
+"__init__.py" = ["N999"]
+# N806 (uppercase locals) is allowed in tensor-shape-heavy modules where
+# B/N/D/H/W/L/S/A/F/R/U/X are standard ML/PyTorch shape conventions
+# (B=batch, N=batch dim, D=feature dim, H=height, W=width, X=design matrix).
+# Lowercasing makes math-dense code harder to read for ML reviewers.
+"t2i_interp/intervention.py" = ["N806"]
+"t2i_interp/linear_steering.py" = ["N806", "N803"]
+"t2i_interp/loreft.py" = ["N806"]
+"t2i_interp/t2i.py" = ["N806"]
+"t2i_interp/utils/T2I/attn_policy.py" = ["N806"]
+"t2i_interp/utils/T2I/buffer.py" = ["N806"]
+"t2i_interp/utils/T2I/collect_latents.py" = ["N806"]
+"t2i_interp/utils/concept_detection.py" = ["N806"]
+"t2i_interp/utils/generic.py" = ["N806"]
+"t2i_interp/utils/nethook.py" = ["N806"]
+"t2i_interp/utils/utils.py" = ["N806", "N803"]
 
 [tool.ruff.format]
 quote-style = "double"

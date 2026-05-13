@@ -82,7 +82,7 @@ def generate_steer_table(config: DictConfig, job_results: list[dict[str, Any]]) 
                 base_metric_names.add(k.replace("baseline/", "", 1))
             else:
                 base_metric_names.add(k)
-    ordered_metrics = sorted(list(base_metric_names))
+    ordered_metrics = sorted(base_metric_names)
 
     # 2. Build Columns
     # To avoid WandB UI crashes from mixed types or too many columns, we make each Run a separate Row.
@@ -200,7 +200,7 @@ def generate_localise_table(config: DictConfig, job_results: list[dict[str, Any]
                 base_metric_names.add(m_split[-1])
             else:
                 base_metric_names.add(k)
-    ordered_metrics = sorted(list(base_metric_names))
+    ordered_metrics = sorted(base_metric_names)
 
     # 2. Build Columns
     # Columns: Prompt, Layer, Head, Image, Metric1, Metric2...
@@ -255,7 +255,7 @@ def generate_localise_table(config: DictConfig, job_results: list[dict[str, Any]
     table.add_data(*b_row)
 
     # --- Localisation Run Rows ---
-    for j, res in enumerate(job_results):
+    for _j, res in enumerate(job_results):
         out_dir = res.get("output_dir")
         if not out_dir:
             continue

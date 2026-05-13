@@ -464,21 +464,21 @@ class SAEManager:
                             target = (out_tensor - x_in) if _use_delta else out_tensor
 
                             x_flat, restore_fn = self._flatten_for_sae(target, _sae)
-                            N = x_flat.shape[0]
+                            n_items = x_flat.shape[0]
 
                             # Double batch for stable baseline error on second half
-                            x2 = t.cat([x_flat, x_flat], dim=0)  # [2N, D]
-                            z2 = _sae.encoder(x2)  # [2N, ...]
-                            z1 = z2[:N]
-                            z0 = z2[N:]
+                            x2 = t.cat([x_flat, x_flat], dim=0)  # [2*n_items, D]
+                            z2 = _sae.encoder(x2)
+                            z1 = z2[:n_items]
+                            z0 = z2[n_items:]
 
                             if _zfn is not None:
                                 z1 = _zfn(z1)
 
-                            r1 = _sae.decoder(z1)  # [N, D]
-                            r0 = _sae.decoder(z0)  # [N, D]
-                            e0 = x_flat - r0  # [N, D]
-                            edited_flat = r1 + e0  # [N, D]
+                            r1 = _sae.decoder(z1)
+                            r0 = _sae.decoder(z0)
+                            e0 = x_flat - r0
+                            edited_flat = r1 + e0
 
                             # capture
                             cache.setdefault(_name, []).append(
@@ -512,13 +512,13 @@ class SAEManager:
                             # For Input, target is x_in
                             target = x_in
                             x_flat, restore_fn = self._flatten_for_sae(target, _sae)
-                            N = x_flat.shape[0]
+                            n_items = x_flat.shape[0]
 
                             # Double batch strategy
                             x2 = t.cat([x_flat, x_flat], dim=0)
                             z2 = _sae.encoder(x2)
-                            z1 = z2[:N]
-                            z0 = z2[N:]
+                            z1 = z2[:n_items]
+                            z0 = z2[n_items:]
 
                             if _zfn is not None:
                                 z1 = _zfn(z1)

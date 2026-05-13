@@ -327,14 +327,14 @@ def main(cfg: DictConfig) -> None:
                 else:
                     act = batch_data
                     label = None
-                B = act.shape[0]
+                batch_size = act.shape[0]
                 if isinstance(label, list):
                     label = label[0]
                 if torch.is_tensor(label):
                     label = label.cpu().tolist()
                 if not isinstance(label, list) and label is not None:
-                    label = [label] * B
-                for i in range(B):
+                    label = [label] * batch_size
+                for i in range(batch_size):
                     l = label[i] if label else None
                     if torch.is_tensor(l):
                         l = l.item()
@@ -426,11 +426,11 @@ def main(cfg: DictConfig) -> None:
                 for batch in loader.iterate():
                     for accessor in layer_names:
                         act = batch[accessor]
-                        B = act.shape[0]
+                        batch_size = act.shape[0]
                         # Attempt to extract label
                         label = batch["label"] if "label" in batch else None
 
-                        for i in range(B):
+                        for i in range(batch_size):
                             l = label[i] if label else None
                             if torch.is_tensor(l):
                                 l = l.item()
