@@ -30,8 +30,24 @@ LEGACY_KEYS = {"encoder.weight", "pre_bias", "decoder.weight"}
 
 
 def migrate_one(ckpt_path: Path, hidden_dim: int, k: int) -> bool:
-    """Rewrite a single checkpoint file in-place. Returns True if modified."""
-    sd_full = torch.load(ckpt_path, map_location="cpu")
+    """Rewrite a single checkpoint file in-place. Returns True if modified.
+
+    Note: ``torch.load`` unpickles arbitrary code from the checkpoint, so
+    only run this on checkpoints from sources you trust (e.g. the sdxl-unbox
+    repo). We use ``weights_only=True`` where possible (PyTorch ≥2.0) to
+    restrict unpickling to tensors + a safelist of containers.
+    """
+    try:
+        sd_full = torch.load(ckpt_path, map_location="cpu", weights_only=True)
+    except (TypeError, RuntimeError):
+        # Older torch (no `weights_only` kwarg) or legacy checkpoints that
+        # need full pickle support. Fall back loudly — callers must trust
+        # the checkpoint source.
+        print(
+            f"  [WARN] {ckpt_path}: weights_only=True load failed, falling back "
+            "to full pickle. Only use this on trusted checkpoints."
+        )
+        sd_full = torch.load(ckpt_path, map_location="cpu")
     sd = sd_full.get("state_dict", sd_full)
 
     # Already migrated? (flat dict, has encoder.bias / k / threshold)

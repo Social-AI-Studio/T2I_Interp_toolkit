@@ -76,6 +76,42 @@ def main(cfg: DictConfig) -> None:
             config=OmegaConf.to_container(cfg, resolve=True),
         )
 
+    # Resolve layer_names + finalize output_dir BEFORE model/dataset load so
+    # the fingerprint can be written first. That way a crash during model load
+    # or dataset download still leaves a "what was attempted" record on disk.
+    _layer_names_cfg = OmegaConf.to_container(getattr(cfg, "layer_names", None), resolve=True)
+    layer_names = list(_layer_names_cfg) if _layer_names_cfg is not None else [cfg.layer_name]
+
+    OmegaConf.set_struct(cfg, False)
+    cfg.save_dir = os.path.abspath(cfg.save_dir)
+    cfg.output_dir = os.path.abspath(cfg.output_dir)
+    if layer_names:
+        parts = layer_names[0].split(".")
+        block = parts[1] if len(parts) > 1 else parts[0]
+        cfg.output_dir = f"{cfg.output_dir}_{block}"
+    alpha_suffix = float(getattr(cfg, "alpha", 0))
+    cfg.output_dir = f"{cfg.output_dir}_alpha={alpha_suffix:g}"
+    OmegaConf.set_struct(cfg, True)
+
+    # Run fingerprint: written BEFORE model load (matches README §"Reproducibility").
+    fingerprint = RunFingerprint.from_cfg(
+        cfg,
+        workflow="steer",
+        intervention={
+            "steer_type": getattr(cfg, "steer_type", None),
+            "layer_names": list(layer_names),
+            "alpha": getattr(cfg, "alpha", None),
+            "steer_steps": getattr(cfg, "steer_steps", None),
+            "guidance_scale": getattr(cfg, "guidance_scale", None),
+            "num_inference_steps": getattr(cfg, "num_inference_steps", None),
+        },
+    )
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    fingerprint.write(os.path.join(cfg.output_dir, "fingerprint.json"))
+    print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
+    if run is not None:
+        fingerprint.log_to_wandb(run)
+
     # 1. Model
     from diffusers import AutoPipelineForText2Image
 
@@ -122,45 +158,6 @@ def main(cfg: DictConfig) -> None:
         cfg.neg_labels = [label2idx[l] if l in label2idx else l for l in neg_labels]
         OmegaConf.set_struct(cfg, True)
         print(f"Mapped config labels: pos={cfg.pos_labels}, neg={cfg.neg_labels}")
-
-    # Resolve layer_names: support layer_names (list) or layer_name (str)
-    _layer_names_cfg = OmegaConf.to_container(getattr(cfg, "layer_names", None), resolve=True)
-    layer_names = list(_layer_names_cfg) if _layer_names_cfg is not None else [cfg.layer_name]
-
-    # Resolve relative paths to absolute immediately so they survive any CWD changes
-    OmegaConf.set_struct(cfg, False)
-    cfg.save_dir = os.path.abspath(cfg.save_dir)
-    cfg.output_dir = os.path.abspath(cfg.output_dir)
-
-    # Auto-suffix output_dir with the UNet block component and alpha so multirun
-    # jobs don't overwrite each other.
-    if layer_names:
-        parts = layer_names[0].split(".")
-        block = parts[1] if len(parts) > 1 else parts[0]
-        cfg.output_dir = f"{cfg.output_dir}_{block}"
-    alpha_suffix = float(getattr(cfg, "alpha", 0))
-    cfg.output_dir = f"{cfg.output_dir}_alpha={alpha_suffix:g}"
-    OmegaConf.set_struct(cfg, True)
-
-    # Run fingerprint: canonical record of every reproducibility-relevant input.
-    # Written next to output images and (if a W&B run is active) attached as an artifact.
-    fingerprint = RunFingerprint.from_cfg(
-        cfg,
-        workflow="steer",
-        intervention={
-            "steer_type": getattr(cfg, "steer_type", None),
-            "layer_names": list(layer_names),
-            "alpha": getattr(cfg, "alpha", None),
-            "steer_steps": getattr(cfg, "steer_steps", None),
-            "guidance_scale": getattr(cfg, "guidance_scale", None),
-            "num_inference_steps": getattr(cfg, "num_inference_steps", None),
-        },
-    )
-    os.makedirs(cfg.output_dir, exist_ok=True)
-    fingerprint.write(os.path.join(cfg.output_dir, "fingerprint.json"))
-    print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
-    if run is not None:
-        fingerprint.log_to_wandb(run)
 
     # 4. Resolve steer-type specific variables before collecting latents
     steer_type = getattr(cfg, "steer_type", "ksteer")
