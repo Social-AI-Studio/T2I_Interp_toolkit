@@ -1,4 +1,4 @@
-.PHONY: help install install-prod sync clean test test-unit test-integration test-cov lint format check train infer steer stitch sae localise init pre-commit notebook notebook-strip
+.PHONY: help install install-prod sync clean test test-unit test-integration test-cov lint format check train infer steer stitch sae localise init pre-commit notebook notebook-strip app
 
 # Default target
 help:
@@ -33,6 +33,9 @@ help:
 	@echo "Notebooks:"
 	@echo "  make notebook        Launch Jupyter Lab in notebooks/"
 	@echo "  make notebook-strip  Strip output cells from notebooks/*.ipynb"
+	@echo ""
+	@echo "Playground:"
+	@echo "  make app             Launch the Streamlit playground at localhost:8501"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean           Remove cache and build artifacts"
@@ -112,6 +115,10 @@ notebook:
 notebook-strip:
 	uv run nbstripout notebooks/*.ipynb
 	@echo "Stripped output cells from all notebooks."
+
+# Streamlit playground (no-code GUI for the four workflows)
+app:
+	uv run streamlit run app/streamlit_app.py
 
 # Cleanup
 clean:

@@ -112,6 +112,26 @@ W&B override example:
 t2i-localise wandb.project="attention-ablation" wandb.name="baseline-sweep"
 ```
 
+## Interactive playground (Streamlit)
+
+No-code GUI for the four workflows. Launches a local web app at
+`http://localhost:8501` with one page per workflow + a fingerprint browser:
+
+```bash
+make app
+```
+
+Each page exposes the same config knobs as the CLI (model preset, device,
+dtype, prompts, intervention strength, etc.), runs the underlying
+`t2i-*` command, streams the log live, and shows the generated images +
+the run's reproducibility fingerprint. Pages:
+
+- **Localisation** — pick a UNet layer + head, scale it, see the effect.
+- **Steering** — train CAA / K-Steer / LoReFT, sweep alpha.
+- **Stitching** — train an MLP mapper across activation spaces.
+- **SAE** — discover top-activating sparse features and modulate them.
+- **Fingerprints** — browse every past run's hash, model, seed, git SHA.
+
 ## Model presets
 
 Pick a model with one Hydra override — its CFG scale, denoising steps, and
