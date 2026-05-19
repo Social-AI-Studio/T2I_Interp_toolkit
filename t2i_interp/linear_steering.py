@@ -465,9 +465,9 @@ class KSteer(Steer):
         if not hasattr(self, "classifier") and mapper is not None:
             self.classifier = mapper
 
-        assert hasattr(
-            self, "classifier"
-        ), "Classifier not found. Please fit the model or provide a classifier_path."
+        assert hasattr(self, "classifier"), (
+            "Classifier not found. Please fit the model or provide a classifier_path."
+        )
 
         if avoid_idx is None:
             avoid_idx = []
@@ -1123,9 +1123,9 @@ class LoREEFT(Steer):
             else getattr(self, "lorefts", {names[0]: getattr(self, "loreft", None)})
         )
 
-        assert (
-            _lorefts is not None and len(_lorefts) > 0
-        ), "No trained LoReFT module found. Call fit() first."
+        assert _lorefts is not None and len(_lorefts) > 0, (
+            "No trained LoReFT module found. Call fit() first."
+        )
 
         if "clip" in str(names[0]).lower():
             # Multi-layer CLIP not fully scaled, falls back to single layer parser

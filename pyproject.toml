@@ -43,6 +43,7 @@ dependencies = [
     "nnsight>=0.7.0",
     "einops>=0.8.2",
     "streamlit>=1.57.0",
+    "pandas>=2.3.3",
 ]
 
 [project.optional-dependencies]
