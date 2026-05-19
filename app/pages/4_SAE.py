@@ -27,6 +27,20 @@ st.markdown(
     "Output is a grid: rows = features, columns = strengths."
 )
 
+st.info(
+    """
+**How this affects the picture.** An SAE expresses the model's dense
+activations as a sparse combination of ~5,000 *features* — each one
+ideally corresponds to a single interpretable concept (a texture, a
+color, an object part). Negative `strength` values *suppress* that
+feature in the activation; positive values *amplify* it. The grid below
+shows the same prompt regenerated with each top feature scaled to a
+range of strengths, so you can read off what concept each one encodes
+by watching what changes across each row.
+""",
+    icon="ℹ️",
+)
+
 # Surface missing checkpoints early — sae.ipynb / t2i-sae need these.
 ckpt_dir = Path("./sdxl-unbox/checkpoints")
 if not ckpt_dir.exists():
@@ -98,6 +112,28 @@ if st.button("Run", type="primary"):
         st.subheader(f"Feature modulation grid ({len(images)} image(s))")
         for img in images:
             st.image(str(img), caption=img.name, use_container_width=True)
+
+        st.markdown("##### How to read these results")
+        st.markdown(
+            """
+- **Each row = one feature** (e.g. feature `#1338`). The Top-K features
+  were the ones most active for your prompt.
+- **Each column = one strength value.** Left columns = the feature
+  suppressed; right columns = amplified.
+- **Across a row, look for what changes consistently.** If amplifying
+  feature 1338 progressively adds shininess to your subject across the
+  row → "1338" encodes a *shininess* concept. If amplifying it makes
+  the image redder → it encodes redness or warm tones.
+- **Compare different rows.** Different features should change different
+  visual properties. Two rows changing the same thing means the SAE
+  hasn't fully disentangled the concept.
+- **If amplifying breaks the image** → that feature wasn't really
+  meaningful for this prompt (or the strength was over-scaled).
+- **The leftmost (negative-strength) column** often reveals what the
+  feature was *suppressing* — sometimes more informative than the
+  amplification.
+"""
+        )
     else:
         st.warning("No images produced — check logs above.")
 

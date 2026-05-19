@@ -25,19 +25,47 @@ st.markdown(
     "the unaltered baseline to localise which head carries which concept."
 )
 
+st.info(
+    """
+**How this affects the picture.** A *head* is a small slice of an attention
+layer that specializes in one type of relationship between the prompt and
+the image (e.g. binding color words to color regions, or shape words to
+object outlines). Scaling a head by `factor=0` blanks out its contribution
+entirely; `factor=2.0` doubles it; negative values invert it. The baseline
+image is what the model produces normally; the *modified* image shows what
+happens when one specific head no longer functions. Comparing the two
+tells you what that head was doing.
+""",
+    icon="ℹ️",
+)
+
 # ── Sidebar config ────────────────────────────────────────────────────────────
 st.sidebar.header("Configuration")
 device, dtype = device_dtype_picker(default_device="mps")
 preset = model_preset_picker(default="(use config default)", options=("sd15", "sdxl_turbo"))
 
-prompt = st.sidebar.text_input("Prompt", value="a unicorn")
+prompt = st.sidebar.text_input(
+    "Prompt",
+    value="a unicorn",
+    help="The text prompt the model is conditioning on. Pick something where "
+    "you have a hypothesis about which heads carry which concept.",
+)
 target_layer = st.sidebar.text_input(
     "Target layer",
     value="down_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
-    help="Underscore-sanitised UNet path. Run a generation first then check the "
-    "logs for available layer names if unsure.",
+    help="Underscore-sanitised UNet path. `down_blocks_1` = early in the UNet "
+    "(rough composition); `mid_block` = mid (object identity); "
+    "`up_blocks_X` = late (textures + fine detail). Suffix `_attn2_out` "
+    "is the output of a cross-attention layer (image→text).",
 )
-target_head = st.sidebar.selectbox("Target head index", list(range(8)), index=0)
+target_head = st.sidebar.selectbox(
+    "Target head index",
+    list(range(8)),
+    index=0,
+    help="SD 1.x cross-attn layers have 8 parallel heads. Each is a "
+    "specialist on some aspect of the image-text binding; iterate over "
+    "them to find the one that carries your concept.",
+)
 factor = st.sidebar.slider(
     "Scale factor",
     -5.0,
@@ -47,8 +75,21 @@ factor = st.sidebar.slider(
     help="0.0 = zero-ablate the head; 1.0 = no change; >1.0 amplifies; "
     "negative = inverts the head's contribution.",
 )
-n_steps = st.sidebar.slider("Inference steps", 4, 50, 15)
-seed = st.sidebar.number_input("Seed", value=42, step=1)
+n_steps = st.sidebar.slider(
+    "Inference steps",
+    4,
+    50,
+    15,
+    help="Diffusion denoising steps. More = sharper output, but slower. "
+    "15 is plenty to see whether a head matters; bump to 30+ for paper-quality.",
+)
+seed = st.sidebar.number_input(
+    "Seed",
+    value=42,
+    step=1,
+    help="Same seed = same initial noise → comparisons isolate the head's "
+    "effect (not different starting points).",
+)
 
 # ── Build the override list ──────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_loc_")
@@ -99,6 +140,25 @@ if st.button("Run", type="primary"):
         for i, img in enumerate(images):
             with cols[i % len(cols)]:
                 st.image(str(img), caption=img.name, use_container_width=True)
+
+        st.markdown("##### How to read these results")
+        st.markdown(
+            """
+- **`baseline.png`** is the unmodified output — the model's default response
+  to your prompt at this seed.
+- **The other image(s)** are the same prompt with one head scaled by your
+  `factor`. Differences between them and the baseline are *caused by that
+  head*, holding everything else constant.
+- **If they look identical** → the head wasn't carrying your concept in
+  this context. Try another head or another layer.
+- **If a clear visual property changed** (object disappears, color shifts,
+  shape distorts, composition breaks) → that property was being controlled
+  by that head. You've localised it.
+- **If the image becomes noise** → the head was critical for the whole
+  forward pass; you need a more surgical scale (try `factor=0.5` instead
+  of `0.0`).
+"""
+        )
     else:
         st.warning("No images produced — check logs above.")
 

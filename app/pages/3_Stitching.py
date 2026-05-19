@@ -26,6 +26,23 @@ st.markdown(
     "through the mapper and injected at `layer_b`. Fig 4 in the paper."
 )
 
+st.info(
+    """
+**How this affects the picture.** Two parts of the model (or two different
+models) live in *different activation spaces* — their internal tensors
+have different shapes, semantics, and meanings. The mapper learns a
+translation between them: "given an activation at layer A that means
+something, what would the equivalent activation at layer B look like?"
+
+At inference, the model's normal forward pass is *re-routed* through the
+mapper at layer B. The generated image is what the model produces when
+its information flow has been rewired this way — a way to test whether
+two layers / models encode comparable information, and to transfer
+behavior between them without retraining.
+""",
+    icon="ℹ️",
+)
+
 # ── Sidebar config ───────────────────────────────────────────────────────────
 st.sidebar.header("Configuration")
 device, dtype = device_dtype_picker(default_device="mps")
@@ -89,6 +106,23 @@ if st.button("Run", type="primary"):
         for i, img in enumerate(images):
             with cols[i % len(cols)]:
                 st.image(str(img), caption=img.name, use_container_width=True)
+
+        st.markdown("##### How to read these results")
+        st.markdown(
+            """
+- **`mapper.pt`** is the trained mapper checkpoint — reusable across runs.
+- **`stitched_*.png`** is the prompt generated with the mapper rewiring
+  activations from `layer_a` into `layer_b`.
+- **If you get a coherent image related to the prompt** → the mapper
+  learned a useful translation between the two activation spaces. The
+  two layers do encode comparable information.
+- **If you get noise or unrelated content** → mapper didn't converge.
+  Try more training steps, a bigger `hidden_dim`, or more samples.
+- **If the stitched image looks identical to the baseline** → the
+  mapper is a no-op (rare); check that `inject_steps` actually fires
+  on the early step you chose.
+"""
+        )
     else:
         st.warning("No images produced — check logs above.")
 

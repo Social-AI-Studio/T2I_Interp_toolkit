@@ -26,6 +26,20 @@ st.markdown(
     "uses **LoReFT + SDXL-Turbo** to add spectacles to character prompts."
 )
 
+st.info(
+    """
+**How this affects the picture.** From a dataset of paired prompts (the
+'positive' has the target concept, the 'negative' doesn't), the toolkit
+learns a *direction in activation space* that, when added to a layer's
+output, biases generation toward the positive concept. At inference time,
+this direction is multiplied by `alpha` and added at the chosen layer.
+Higher `alpha` = stronger push toward the concept. Same prompt + same
+seed will now produce an image leaning toward the trained attribute,
+without retraining the model itself.
+""",
+    icon="ℹ️",
+)
+
 # ── Quick presets ───────────────────────────────────────────────────────────
 if "steer_preset" not in st.session_state:
     st.session_state.steer_preset = None
@@ -137,6 +151,24 @@ if st.button("Run", type="primary"):
         for i, img in enumerate(images):
             with cols[i % len(cols)]:
                 st.image(str(img), caption=img.name, use_container_width=True)
+
+        st.markdown("##### How to read these results")
+        st.markdown(
+            """
+- **`baseline_*`** images are generated **without** the steering vector —
+  the same prompt and seed the model would produce normally.
+- **`steered_*`** images apply the trained direction at `alpha`. They
+  should preserve the prompt's content while leaning toward the trained
+  concept.
+- **If steered ≈ baseline** → alpha is too low, or you trained on the
+  wrong layer. Push alpha up to 15-20.
+- **If steered looks like garbage / noise** → alpha is too high or the
+  adapter overfit a tiny dataset. Lower alpha or train on more samples.
+- **If steered shows the target concept but the original prompt is gone**
+  (e.g. you wanted "Jack Sparrow + spectacles" and got just "spectacles")
+  → alpha overpowered the prompt; reduce it.
+"""
+        )
     else:
         st.warning("No images produced — check logs above.")
 
