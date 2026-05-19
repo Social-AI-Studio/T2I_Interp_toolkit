@@ -26,15 +26,54 @@ st.markdown(
     "uses **LoReFT + SDXL-Turbo** to add spectacles to character prompts."
 )
 
+# ── Quick presets ───────────────────────────────────────────────────────────
+if "steer_preset" not in st.session_state:
+    st.session_state.steer_preset = None
+
+c1, c2, _ = st.columns([1, 1, 4])
+with c1:
+    if st.button(
+        "Reproduce Figure 2", help="LoReFT + SDXL-Turbo + spectacles prompts, paper-style"
+    ):
+        st.session_state.steer_preset = "fig2"
+with c2:
+    if st.button("Quick smoke run", help="Tiny scale just to confirm the wiring works"):
+        st.session_state.steer_preset = "smoke"
+
+PRESET_DEFAULTS = {
+    "fig2": {
+        "steer_type": "loreft",
+        "prompts": "A photo of Jack Sparrow\nA photo of Simba",
+        "alpha": 10.0,
+        "max_samples": 200,
+        "train_steps": 50,
+        "model_preset": "sdxl_turbo",
+    },
+    "smoke": {
+        "steer_type": "loreft",
+        "prompts": "A photo of a cat",
+        "alpha": 5.0,
+        "max_samples": 10,
+        "train_steps": 2,
+        "model_preset": "sdxl_turbo",
+    },
+}
+PD = PRESET_DEFAULTS.get(st.session_state.steer_preset, {})
+
 # ── Sidebar config ────────────────────────────────────────────────────────────
 st.sidebar.header("Configuration")
 device, dtype = device_dtype_picker(default_device="mps")
-preset = model_preset_picker(default="sdxl_turbo")
+preset = model_preset_picker(default=PD.get("model_preset", "sdxl_turbo"))
 
-steer_type = st.sidebar.selectbox("Steering method", ["loreft", "caa", "ksteer"], index=0)
+_steer_opts = ["loreft", "caa", "ksteer"]
+steer_type = st.sidebar.selectbox(
+    "Steering method",
+    _steer_opts,
+    index=_steer_opts.index(PD.get("steer_type", "loreft")),
+)
 prompts_raw = st.sidebar.text_area(
     "Prompts (one per line)",
-    value="A photo of Jack Sparrow\nA photo of Simba",
+    value=PD.get("prompts", "A photo of Jack Sparrow\nA photo of Simba"),
     help="Generated once as baseline, once steered.",
 )
 prompts = [p.strip() for p in prompts_raw.split("\n") if p.strip()]
@@ -42,12 +81,12 @@ alpha = st.sidebar.slider(
     "Alpha (steering strength)",
     0.0,
     30.0,
-    10.0,
+    float(PD.get("alpha", 10.0)),
     0.5,
     help="0.0 = no steering. Higher = stronger. SDXL-Turbo + LoReFT works well around 10-20.",
 )
-max_samples = st.sidebar.slider("Training samples", 10, 1000, 100)
-train_steps = st.sidebar.slider("Training steps", 2, 500, 50)
+max_samples = st.sidebar.slider("Training samples", 10, 1000, PD.get("max_samples", 100))
+train_steps = st.sidebar.slider("Training steps", 2, 500, PD.get("train_steps", 50))
 
 # ── Build overrides ──────────────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_steer_")
