@@ -1,23 +1,25 @@
 from __future__ import annotations
 
 import contextlib
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 import torch as t
 import torch.nn as nn
-from dictionary_learning.training import trainSAE
-from dictionary_learning.utils import hf_dataset_to_generator
 
 from t2i_interp.accessors.accessor import IOType, ModuleAccessor
-from t2i_interp.config.train_config import sae_trainer_config
 
 # from t2i_interp.accessors.blocks import SAEBlock # removed if unused
 from t2i_interp.t2i import T2IModel
 from t2i_interp.utils.generic import _extract_tensor_and_rebuild
-from t2i_interp.utils.T2I.buffer import t2IActivationBuffer
+
+# Note: `t2IActivationBuffer` used to live in utils/T2I/buffer.py but was
+# removed during the formatting refactor (PR #5). It's referenced by
+# SAEManager.train() below — that method will need a replacement buffer
+# implementation before it can be used. Import is deferred to keep
+# module load cheap and let the rest of SAEManager (capture/edit modes)
+# work for notebook-style analysis even without training support.
 
 
 @dataclass(frozen=True)
@@ -45,19 +47,16 @@ class SAEManager:
             self.model.clear_edits()
 
     def train(self, hf_dataset, module: ModuleAccessor, **kwargs):
-        generator = hf_dataset_to_generator(hf_dataset)
-        buffer = t2IActivationBuffer(generator, self.model, module, **kwargs)
-        trainer_config = sae_trainer_config(**kwargs)
-
-        save_dir = kwargs.pop("save_dir", None)
-        if save_dir:
-            save_dir = os.path.join(save_dir, module.attr_name.replace(".", "_"))
-
-        trainSAE(
-            data=buffer,
-            trainer_configs=trainer_config,
-            save_dir=save_dir,
-            **kwargs,
+        # The activation buffer class this method depended on
+        # (`t2IActivationBuffer`) was removed from `utils/T2I/buffer.py`
+        # in the formatting refactor (PR #5). Re-implementation is tracked
+        # in PLAN.md item D.7 (SAE eval / buffer rework). For now, callers
+        # who need SAE training should use the t2i-sae CLI or the
+        # dictionary_learning library directly.
+        raise NotImplementedError(
+            "SAEManager.train() requires the legacy t2IActivationBuffer which "
+            "was removed in PR #5. Use `t2i-sae` (Hydra-driven) or "
+            "dictionary_learning.training.trainSAE directly for now."
         )
 
     # -----------------------
@@ -465,21 +464,21 @@ class SAEManager:
                             target = (out_tensor - x_in) if _use_delta else out_tensor
 
                             x_flat, restore_fn = self._flatten_for_sae(target, _sae)
-                            N = x_flat.shape[0]
+                            n_items = x_flat.shape[0]
 
                             # Double batch for stable baseline error on second half
-                            x2 = t.cat([x_flat, x_flat], dim=0)  # [2N, D]
-                            z2 = _sae.encoder(x2)  # [2N, ...]
-                            z1 = z2[:N]
-                            z0 = z2[N:]
+                            x2 = t.cat([x_flat, x_flat], dim=0)  # [2*n_items, D]
+                            z2 = _sae.encoder(x2)
+                            z1 = z2[:n_items]
+                            z0 = z2[n_items:]
 
                             if _zfn is not None:
                                 z1 = _zfn(z1)
 
-                            r1 = _sae.decoder(z1)  # [N, D]
-                            r0 = _sae.decoder(z0)  # [N, D]
-                            e0 = x_flat - r0  # [N, D]
-                            edited_flat = r1 + e0  # [N, D]
+                            r1 = _sae.decoder(z1)
+                            r0 = _sae.decoder(z0)
+                            e0 = x_flat - r0
+                            edited_flat = r1 + e0
 
                             # capture
                             cache.setdefault(_name, []).append(
@@ -513,13 +512,13 @@ class SAEManager:
                             # For Input, target is x_in
                             target = x_in
                             x_flat, restore_fn = self._flatten_for_sae(target, _sae)
-                            N = x_flat.shape[0]
+                            n_items = x_flat.shape[0]
 
                             # Double batch strategy
                             x2 = t.cat([x_flat, x_flat], dim=0)
                             z2 = _sae.encoder(x2)
-                            z1 = z2[:N]
-                            z0 = z2[N:]
+                            z1 = z2[:n_items]
+                            z0 = z2[n_items:]
 
                             if _zfn is not None:
                                 z1 = _zfn(z1)

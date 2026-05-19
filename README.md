@@ -112,6 +112,88 @@ W&B override example:
 t2i-localise wandb.project="attention-ablation" wandb.name="baseline-sweep"
 ```
 
+## Model presets
+
+Pick a model with one Hydra override — its CFG scale, denoising steps, and
+dtype defaults compose in automatically:
+
+```bash
+t2i-steer model=sd15          # Stable Diffusion 1.5, CFG-guided, 30 steps
+t2i-steer model=sdxl          # SDXL base, CFG-guided, 30 steps
+t2i-steer model=sdxl_turbo    # SDXL-Turbo, CFG-free, 4 steps
+```
+
+Same syntax for the other three workflows:
+
+```bash
+t2i-stitch model=sdxl
+t2i-sae model=sdxl_turbo
+t2i-localise model=sd15
+```
+
+Add a new preset by dropping a YAML in
+[t2i_interp/config/model/](t2i_interp/config/model/).
+
+## Reproducibility & run fingerprints
+
+Every workflow run writes a `fingerprint.json` next to its output images:
+
+```json
+{
+  "fingerprint_hash": "875af5b2e5d8223e",
+  "workflow": "steer",
+  "model_id": "stabilityai/sdxl-turbo",
+  "dataset_id": "nirmalendu01/spectacles-bias-prompts-headshot",
+  "seed": 42,
+  "intervention": {
+    "steer_type": "loreft",
+    "alpha": 1.0,
+    "layer_names": ["unet.up_blocks.1.attentions.0.transformer_blocks.0.attn2"]
+  },
+  "git_sha": "f44e1c2…",
+  "git_dirty": false,
+  "config": { "...full resolved Hydra config..." }
+}
+```
+
+The 16-char `fingerprint_hash` is **machine-independent** — the same logical
+experiment from your laptop and a CUDA cluster produces the same hash. When a
+W&B run is active, the fingerprint is also uploaded as an artifact and surfaced
+in the run summary as `fingerprint/hash`, so you can filter sweeps by it. The
+JSON is written *before model load*, so even crashed runs leave a record of
+what was attempted.
+
+To set a seed:
+
+```bash
+t2i-steer seed=42
+```
+
+This seeds Python `random`, NumPy, and Torch (CPU + CUDA) globally before
+model load.
+
+## Reproducing Figure 2 (SDXL-Turbo + LoReFT spectacles)
+
+```bash
+t2i-steer --config-name=steer/loreft model=sdxl_turbo
+```
+
+That's the entire case study from the paper. To sweep over alpha:
+
+```bash
+t2i-steer --config-name=steer/loreft model=sdxl_turbo -m alpha=5,10,20
+```
+
+## Apple Silicon (MPS)
+
+Override device and dtype:
+
+```bash
+t2i-steer model=sdxl_turbo device=mps dtype=bfloat16
+```
+
+`bfloat16` is more numerically stable on MPS than `float16` for SDXL-Turbo.
+
 ## Config Locations
 
 - `t2i_interp/config/steer/run.yaml`

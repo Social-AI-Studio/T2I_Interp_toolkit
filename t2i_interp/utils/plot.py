@@ -1,14 +1,13 @@
-
 # import open_clip
 from collections.abc import Mapping, Sequence
-from typing import Any, Union
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 
-DataLike = Union[pd.DataFrame, Mapping[str, Any]]
+DataLike = pd.DataFrame | Mapping[str, Any]
 
 
 def plot_key_wise(
@@ -62,16 +61,16 @@ def plot_key_wise(
         df = df.sort_values(by=key_col, kind="mergesort")  # stable sort
 
     keys = df[key_col].astype(str).tolist()
-    values = df[list(value_cols)].to_numpy(dtype=float).T  # shape: (R, N)
-    R, N = values.shape
+    values = df[list(value_cols)].to_numpy(dtype=float).T  # shape: (n_rows, n_cols)
+    n_rows, n_cols = values.shape
 
     if figsize is None:
-        figsize = (12, max(2.0, 0.55 * R + 1.0))
+        figsize = (12, max(2.0, 0.55 * n_rows + 1.0))
 
     fig, axes = plt.subplots(
-        nrows=R, ncols=1, sharex=True, figsize=figsize, gridspec_kw={"hspace": 0.25}
+        nrows=n_rows, ncols=1, sharex=True, figsize=figsize, gridspec_kw={"hspace": 0.25}
     )
-    if R == 1:
+    if n_rows == 1:
         axes = [axes]
 
     # Handle NaNs nicely
@@ -88,15 +87,15 @@ def plot_key_wise(
     if scale == "global":
         vmin = np.nanmin(values)
         vmax = np.nanmax(values)
-        vmins = [vmin] * R
-        vmaxs = [vmax] * R
+        vmins = [vmin] * n_rows
+        vmaxs = [vmax] * n_rows
     else:
-        vmins = [np.nanmin(values[i]) for i in range(R)]
-        vmaxs = [np.nanmax(values[i]) for i in range(R)]
+        vmins = [np.nanmin(values[i]) for i in range(n_rows)]
+        vmaxs = [np.nanmax(values[i]) for i in range(n_rows)]
 
     im_last = None
-    for i, (ax, col) in enumerate(zip(axes, value_cols)):
-        row = values[i : i + 1, :]  # (1, N)
+    for i, (ax, col) in enumerate(zip(axes, value_cols, strict=False)):
+        row = values[i : i + 1, :]  # (1, n_cols)
         im = ax.imshow(
             row,
             aspect="auto",
@@ -116,9 +115,9 @@ def plot_key_wise(
 
     # X ticks (only bottom axis)
     axes[-1].set_xlabel(str(key_col))
-    if show_xticks and N > 0:
-        step = max(1, N // max_xticks)
-        tick_positions = list(range(0, N, step))
+    if show_xticks and n_cols > 0:
+        step = max(1, n_cols // max_xticks)
+        tick_positions = list(range(0, n_cols, step))
         axes[-1].set_xticks(tick_positions)
         axes[-1].set_xticklabels(
             [keys[j] for j in tick_positions], rotation=rotate_xticks, ha="right"
@@ -151,7 +150,7 @@ def _to_dataframe(
         raise TypeError("data must be a pandas DataFrame or a dict-like Mapping[str, ...].")
 
     # dict[str, scalar]  OR  dict[str, dict[str, scalar]]
-    keys = list(data.keys()) if preserve_order else sorted(list(data.keys()))
+    keys = list(data.keys()) if preserve_order else sorted(data.keys())
     first_val = next(iter(data.values())) if data else None
 
     if data and isinstance(first_val, Mapping):
@@ -547,7 +546,7 @@ def show_grid(images, labels, cols=3):
         axes = np.array([axes])
     axes = axes.flatten()
 
-    for i, (img, label) in enumerate(zip(images, labels)):
+    for i, (img, label) in enumerate(zip(images, labels, strict=False)):
         axes[i].imshow(img)
         axes[i].set_title(label, fontsize=10)
         axes[i].axis("off")

@@ -1,11 +1,10 @@
 import copy
 import fnmatch
 from collections.abc import Callable
-from typing import Union
 
 import torch.nn as nn
 
-ModuleOrFactory = Union[nn.Module, Callable[[nn.Module, str], nn.Module]]
+ModuleOrFactory = nn.Module | Callable[[nn.Module, str], nn.Module]
 
 
 def _parent_and_attr(model: nn.Module, dotted: str):
@@ -83,7 +82,7 @@ def replace_modules(
         matched_names = set()
         for pat in patterns:
             is_glob = any(ch in pat for ch in "*?[]")
-            for n, m in named:
+            for n, _m in named:
                 if n == "":
                     continue
                 ok = fnmatch.fnmatch(n, pat) if is_glob else (n == pat)
@@ -135,7 +134,7 @@ def replace_modules(
 # replaced = replace_modules(
 #     unet,
 #     module_to_replace="**attn2",      # all cross-attn modules in diffusers UNet
-#     new_module=HookedCrossAttention.wrap_factory,
+#     new_module=lambda old, name: MyHookedAttn(old, name),  # factory(old_module, name)
 #     copy_state=True                  # state copied by default
 # )
 # print("replaced:", replaced)

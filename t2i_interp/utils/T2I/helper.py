@@ -41,10 +41,9 @@ def high_level_layers(model):
     # Counter for the list
     c = 0
     # Stores the relevant layers to perform causal tracing on
-    relevant_modules = []
     # Total list of all modules
     named_module_list = []
-    for n, m in model.unet.named_modules():
+    for n, _m in model.unet.named_modules():
         c += 1
         named_module_list.append(n)
 

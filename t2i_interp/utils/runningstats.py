@@ -54,7 +54,7 @@ class WandbUpdater(Updater):
         # assert isinstance(u, TrainUpdate)
         if not isinstance(u, TrainUpdate):
             return
-        data = {"step": u.step, **{k: v for k, v in u.parts.items()}}
+        data = {"step": u.step, **dict(u.parts.items())}
         if u.extras:
             data.update(u.extras)
         self.wandb.log(data)
@@ -98,7 +98,7 @@ class SimpleUpdater(Updater):
     def log(self, u: Update | TrainUpdate) -> None:
         # Check subclass TrainUpdate FIRST because it inherits from Update
         if isinstance(u, TrainUpdate):
-            data = {"step": u.step, **{k: v for k, v in u.parts.items()}}
+            data = {"step": u.step, **dict(u.parts.items())}
             if getattr(u, "extras", None):
                 data.update(u.extras)
             self.pbar.set_postfix(data, refresh=True)
@@ -162,7 +162,7 @@ class SimpleFileLogger(Updater):  # (Updater) if you want to inherit
 
     def log(self, u: Update | TrainUpdate) -> None:
         if isinstance(u, TrainUpdate):
-            data = {"step": u.step, **{k: v for k, v in u.parts.items()}}
+            data = {"step": u.step, **dict(u.parts.items())}
             if getattr(u, "extras", None):
                 data.update(u.extras)
             logger.info(

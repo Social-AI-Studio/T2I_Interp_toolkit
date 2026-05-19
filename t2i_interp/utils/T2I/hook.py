@@ -1,13 +1,12 @@
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from typing import Optional
 
 import torch as t
 
 from t2i_interp.utils.generic import StopForward, _extract_tensor, _extract_tensor_and_rebuild
 
 Tensor = t.Tensor
-StepIndex = Optional[int | str | Iterable[int] | slice]
+StepIndex = int | str | Iterable[int] | slice | None
 # Policy = Union[
 #     Callable[..., Tensor],
 #     Mapping[Union[int, str], Callable[..., Tensor]],
@@ -57,7 +56,7 @@ class BaseHook:
 
         # iterable of ints
         try:
-            idx_set = set(int(x) for x in step_index)  # may raise TypeError
+            idx_set = {int(x) for x in step_index}  # may raise TypeError
         except TypeError as e:
             raise TypeError(
                 f"step_index must be None, 'all', int, slice, or an iterable of ints; got {type(step_index)}"

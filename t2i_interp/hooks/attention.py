@@ -60,7 +60,7 @@ class HookedCrossAttention(nn.Module):
         v = self.to_v(context)
         v = self.hook_v_out(v)
 
-        q, k, v = map(lambda t: rearrange(t, "b n (h d) -> (b h) n d", h=h), (q, k, v))
+        q, k, v = (rearrange(t, "b n (h d) -> (b h) n d", h=h) for t in (q, k, v))
 
         # force cast to fp32 to avoid overflowing
         if _ATTN_PRECISION == "fp32":
@@ -85,7 +85,3 @@ class HookedCrossAttention(nn.Module):
         out = rearrange(out, "(b h) n d -> b n (h d)", h=h)
         out = self.hook_attn_out(out)
         return self.to_out(out)
-
-    @classmethod
-    def wrap_factory(old, name):
-        return Dummy(old, name=name)

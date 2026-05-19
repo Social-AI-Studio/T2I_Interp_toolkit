@@ -5,6 +5,8 @@ t2i-steer model_key=CompVis/stable-diffusion-v1-4 device=cuda:1
 t2i-steer alpha=20 steer_steps=10
 """
 
+import os
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
@@ -37,8 +39,6 @@ def main(cfg: DictConfig) -> None:
     ]:
         sys.modules.setdefault(_xf, types.ModuleType(_xf))
 
-    import os
-
     import transformers
     import wandb
     from diffusers.utils import logging as diffusers_logging
@@ -49,6 +49,7 @@ def main(cfg: DictConfig) -> None:
 
     from t2i_interp.linear_steering import KSteer
     from t2i_interp.mapper import MLPMapper
+    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.buffer import ActivationsDataloader, PairedLoader
@@ -58,7 +59,29 @@ def main(cfg: DictConfig) -> None:
     print("=== t2i-steer config ===")
     print(OmegaConf.to_yaml(cfg))
 
-    # Optional wandb initialization
+    # Reproducibility: seed all RNGs before model load / data ops.
+    seed_everything(getattr(cfg, "seed", None))
+
+    # Resolve layer_names + finalize output_dir BEFORE wandb.init / fingerprint
+    # / model load so all three downstream snapshots see the SAME `cfg`
+    # (W&B's run.config, the fingerprint JSON, and the actual output path
+    # should all agree).
+    _layer_names_cfg = OmegaConf.to_container(getattr(cfg, "layer_names", None), resolve=True)
+    layer_names = list(_layer_names_cfg) if _layer_names_cfg is not None else [cfg.layer_name]
+
+    OmegaConf.set_struct(cfg, False)
+    cfg.save_dir = os.path.abspath(cfg.save_dir)
+    cfg.output_dir = os.path.abspath(cfg.output_dir)
+    if layer_names:
+        parts = layer_names[0].split(".")
+        block = parts[1] if len(parts) > 1 else parts[0]
+        cfg.output_dir = f"{cfg.output_dir}_{block}"
+    alpha_suffix = float(getattr(cfg, "alpha", 0))
+    cfg.output_dir = f"{cfg.output_dir}_alpha={alpha_suffix:g}"
+    OmegaConf.set_struct(cfg, True)
+
+    # Optional wandb initialization — must come AFTER cfg.output_dir is
+    # finalized so the W&B run snapshot matches the fingerprint's snapshot.
     run = None
     if getattr(cfg, "wandb", None) and cfg.wandb.get("project"):
         base_name = cfg.wandb.get("name", None)
@@ -71,6 +94,25 @@ def main(cfg: DictConfig) -> None:
             tags=cfg.wandb.get("tags", []),
             config=OmegaConf.to_container(cfg, resolve=True),
         )
+
+    # Run fingerprint: written BEFORE model load (matches README §"Reproducibility").
+    fingerprint = RunFingerprint.from_cfg(
+        cfg,
+        workflow="steer",
+        intervention={
+            "steer_type": getattr(cfg, "steer_type", None),
+            "layer_names": list(layer_names),
+            "alpha": getattr(cfg, "alpha", None),
+            "steer_steps": getattr(cfg, "steer_steps", None),
+            "guidance_scale": getattr(cfg, "guidance_scale", None),
+            "num_inference_steps": getattr(cfg, "num_inference_steps", None),
+        },
+    )
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    fingerprint.write(os.path.join(cfg.output_dir, "fingerprint.json"))
+    print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
+    if run is not None:
+        fingerprint.log_to_wandb(run)
 
     # 1. Model
     from diffusers import AutoPipelineForText2Image
@@ -97,7 +139,7 @@ def main(cfg: DictConfig) -> None:
     data_key = getattr(cfg, "label_col", None)
     if data_key and isinstance(ds_train[0][data_key], str):
         print(f"Converting string column '{data_key}' to integer indices.")
-        unique_labels = sorted(list(set(ds_train[data_key])))
+        unique_labels = sorted(set(ds_train[data_key]))
         label2idx = {lbl: i for i, lbl in enumerate(unique_labels)}
         ds_train = ds_train.map(
             lambda x: {f"{data_key}_idx": label2idx[x[data_key]]}, desc=f"Mapping {data_key}"
@@ -118,25 +160,6 @@ def main(cfg: DictConfig) -> None:
         cfg.neg_labels = [label2idx[l] if l in label2idx else l for l in neg_labels]
         OmegaConf.set_struct(cfg, True)
         print(f"Mapped config labels: pos={cfg.pos_labels}, neg={cfg.neg_labels}")
-
-    # Resolve layer_names: support layer_names (list) or layer_name (str)
-    _layer_names_cfg = OmegaConf.to_container(getattr(cfg, "layer_names", None), resolve=True)
-    layer_names = list(_layer_names_cfg) if _layer_names_cfg is not None else [cfg.layer_name]
-
-    # Resolve relative paths to absolute immediately so they survive any CWD changes
-    OmegaConf.set_struct(cfg, False)
-    cfg.save_dir = os.path.abspath(cfg.save_dir)
-    cfg.output_dir = os.path.abspath(cfg.output_dir)
-
-    # Auto-suffix output_dir with the UNet block component and alpha so multirun
-    # jobs don't overwrite each other.
-    if layer_names:
-        parts = layer_names[0].split(".")
-        block = parts[1] if len(parts) > 1 else parts[0]
-        cfg.output_dir = f"{cfg.output_dir}_{block}"
-    alpha_suffix = float(getattr(cfg, "alpha", 0))
-    cfg.output_dir = f"{cfg.output_dir}_alpha={alpha_suffix:g}"
-    OmegaConf.set_struct(cfg, True)
 
     # 4. Resolve steer-type specific variables before collecting latents
     steer_type = getattr(cfg, "steer_type", "ksteer")
@@ -278,9 +301,7 @@ def main(cfg: DictConfig) -> None:
             and label.shape[1] > 1
         ):
             # Multi-dimensional label (like race+gender)
-            output_dims = (
-                [label.shape[1]] if len(label.shape) == 2 else [d for d in label.shape[1:]]
-            )
+            output_dims = [label.shape[1]] if len(label.shape) == 2 else list(label.shape[1:])
             # Since MLPMapperTwoHeads expects exactly 2 dims, if not 2, just use MLPMapper with flat output_dim
             if len(output_dims) == 2:
                 from t2i_interp.mapper import MLPMapperTwoHeads
@@ -306,14 +327,14 @@ def main(cfg: DictConfig) -> None:
                 else:
                     act = batch_data
                     label = None
-                B = act.shape[0]
+                batch_size = act.shape[0]
                 if isinstance(label, list):
                     label = label[0]
                 if torch.is_tensor(label):
                     label = label.cpu().tolist()
                 if not isinstance(label, list) and label is not None:
-                    label = [label] * B
-                for i in range(B):
+                    label = [label] * batch_size
+                for i in range(batch_size):
                     l = label[i] if label else None
                     if torch.is_tensor(l):
                         l = l.item()
@@ -367,24 +388,10 @@ def main(cfg: DictConfig) -> None:
             if getattr(cfg, "delete_cache", False):
                 _delete_layer_cache(layer_name)
     elif mapper is not None:
-        train_loader = ActivationsDataloader(
-            train_latents_dir,
-            layer_names,
-            prompt_col=prompt_cols[0],
-            batch_size=getattr(cfg, "batch_size", 32),
-            flatten=True,
-            limit=cfg.max_samples,
-        )
-        val_loader = None
-        if hasattr(cfg, "val_prompt_col"):
-            val_loader = ActivationsDataloader(
-                val_latents_dir,
-                layer_names,
-                prompt_col=getattr(cfg, "val_prompt_col", None),
-                batch_size=getattr(cfg, "batch_size", 32),
-                flatten=True,
-                limit=cfg.max_samples,
-            )
+        # KSteer / mapper-based path. Reuses the train_loader / val_loader
+        # built upstream from the latent tar files — the old code re-created
+        # them here referencing undefined `train_latents_dir` / `val_latents_dir`
+        # vars (NameError on every ksteer run), see PLAN.md item B.7.
 
         def _get_target_labels(loader, attr_name="default"):
             """Extract pos_acts and neg_acts from dataloader to train linear stealers"""
@@ -419,11 +426,11 @@ def main(cfg: DictConfig) -> None:
                 for batch in loader.iterate():
                     for accessor in layer_names:
                         act = batch[accessor]
-                        B = act.shape[0]
+                        batch_size = act.shape[0]
                         # Attempt to extract label
                         label = batch["label"] if "label" in batch else None
 
-                        for i in range(B):
+                        for i in range(batch_size):
                             l = label[i] if label else None
                             if torch.is_tensor(l):
                                 l = l.item()

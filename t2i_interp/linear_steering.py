@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Generator
 from copy import deepcopy
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from t2i_interp.loreft import LoReFTLayer  # noqa: F401
 
 import numpy as np
 import torch as th
@@ -117,10 +122,6 @@ class KSteer(Steer):
             data_loader_kwargs=cfg_dict.get("data_loader_kwargs", {}),
         )
 
-        columns = cfg_dict.get("columns", ["label"])
-        if "target_column" in kwargs:
-            columns = [kwargs["target_column"]]
-
         # optim
         if optimizers is None:
             optimizers = [th.optim.Adam(mapper.parameters(), lr=cfg.lr)]
@@ -192,7 +193,7 @@ class KSteer(Steer):
 
                 if gt is not None:
                     # Both are lists of tensors now
-                    loss = sum(loss_fn(m, g) for m, g in zip(mapped, gt))
+                    loss = sum(loss_fn(m, g) for m, g in zip(mapped, gt, strict=False))
                 else:
                     # Unsupervised or custom case
                     # Unwrap if single item to behave like standard loss input
@@ -201,8 +202,7 @@ class KSteer(Steer):
 
                 loss.backward()
                 if cfg.grad_clip_norm is not None:
-                    for opt in optimizers:
-                        th.nn.utils.clip_grad_norm_(mapper.parameters(), cfg.grad_clip_norm)
+                    th.nn.utils.clip_grad_norm_(mapper.parameters(), cfg.grad_clip_norm)
 
                 for opt in optimizers:
                     opt.step()
@@ -372,7 +372,7 @@ class KSteer(Steer):
             mapped_val = normalize_batch(mapper(val_act), cfg.training_device)
 
             if gt_val is not None:
-                for m_val, g_val in zip(mapped_val, gt_val):
+                for m_val, g_val in zip(mapped_val, gt_val, strict=False):
                     _, predicted = th.max(m_val, 1)
                     val_correct += (predicted == g_val).sum().item()
                     val_total += g_val.shape[0]
@@ -465,9 +465,9 @@ class KSteer(Steer):
         if not hasattr(self, "classifier") and mapper is not None:
             self.classifier = mapper
 
-        assert hasattr(self, "classifier"), (
-            "Classifier not found. Please fit the model or provide a classifier_path."
-        )
+        assert hasattr(
+            self, "classifier"
+        ), "Classifier not found. Please fit the model or provide a classifier_path."
 
         if avoid_idx is None:
             avoid_idx = []
@@ -617,7 +617,10 @@ class CAA(Steer):
             alphas = [1.0] * len(steering_vecs)
         # zip and apply steering vecs, alphas
         acts += sum(
-            [alpha * vec.to(acts.device, acts.dtype) for vec, alpha in zip(steering_vecs, alphas)]
+            [
+                alpha * vec.to(acts.device, acts.dtype)
+                for vec, alpha in zip(steering_vecs, alphas, strict=False)
+            ]
         )
         return acts
 
@@ -667,7 +670,7 @@ class CAA(Steer):
 
         hooks = {
             mod: UNetAlterHook(policy=make_policy(vec, alpha))
-            for mod, vec, alpha in zip(modules, steering_vecs, alphas)
+            for mod, vec, alpha in zip(modules, steering_vecs, alphas, strict=False)
         }
 
         with TraceDict(modules, hooks):
@@ -706,7 +709,7 @@ class LoREEFT(Steer):
         device: str = "cuda:0",
         log_steps: int = 100,
         **kwargs,
-    ) -> Generator[Update, None, "LoReFTLayer"]:
+    ) -> Generator[Update, None, LoReFTLayer]:
         """Train LoReFT on a pre-extracted CLIP text-encoder hidden layer.
 
         Activations are read from pre-built ``loader`` / ``val_loader`` tars
@@ -825,7 +828,7 @@ class LoREEFT(Steer):
         device: str = "cuda:0",
         log_steps: int = 100,
         **gen_config,
-    ) -> Generator[Update, None, "LoReFTLayer"]:
+    ) -> Generator[Update, None, LoReFTLayer]:
         """Train LoReFT on a UNet hidden layer via forward-pass hooks.
 
         Teacher and base activations are captured by running the full UNet
@@ -859,8 +862,6 @@ class LoREEFT(Steer):
         """
         from t2i_interp.loreft import LoReFTLayer, StepConditionalLoReFT
 
-        pipe = self.model.pipeline
-        module = self.model.resolve_accessor(layer_name).module
         # Infer true d_model and num_steps from the first batch, then reset so
         # the full loader is available for training (PairedLoader.iterate() eagerly
         # consumes all pairs via list(zip(...)) on first call, exhausting child loaders).
@@ -975,7 +976,7 @@ class LoREEFT(Steer):
         # UNet-specific
         d_model: int = 1_024,
         **kwargs,
-    ) -> Generator[Update, None, "LoReFTLayer"]:
+    ) -> Generator[Update, None, LoReFTLayer]:
         """Fit a LoReFT layer on either the CLIP encoder or a UNet module.
 
         Dispatches to :meth:`train_loreft_on_clip` when ``layer_name``
@@ -1122,9 +1123,9 @@ class LoREEFT(Steer):
             else getattr(self, "lorefts", {names[0]: getattr(self, "loreft", None)})
         )
 
-        assert _lorefts is not None and len(_lorefts) > 0, (
-            "No trained LoReFT module found. Call fit() first."
-        )
+        assert (
+            _lorefts is not None and len(_lorefts) > 0
+        ), "No trained LoReFT module found. Call fit() first."
 
         if "clip" in str(names[0]).lower():
             # Multi-layer CLIP not fully scaled, falls back to single layer parser

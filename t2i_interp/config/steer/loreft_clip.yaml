@@ -15,7 +15,7 @@ defaults:
   - /wandb@wandb
 
 # Model
-model_key: runwayml/stable-diffusion-v1-5
+model_key: stable-diffusion-v1-5/stable-diffusion-v1-5
 device: cuda:0
 dtype: float16
 

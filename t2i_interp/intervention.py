@@ -140,8 +140,8 @@ class ScalingAttentionIntervention(DiffusionIntervention):
             n_heads = self.n_heads or accessor.heads
             # If still None, we can't proceed easily unless module has config
 
-            def policy(x, **ctx):
-                if n_heads is None:
+            def policy(x, _n_heads=n_heads, _accessor=accessor, **ctx):
+                if _n_heads is None:
                     # Try to guess or fail
                     return x
 
@@ -153,17 +153,17 @@ class ScalingAttentionIntervention(DiffusionIntervention):
 
                 # reshape
                 if orig_ndim == 3:
-                    hs = hs.view(hs.shape[0], S, n_heads, -1)
+                    hs = hs.view(hs.shape[0], S, _n_heads, -1)
                 elif orig_ndim == 2:
-                    hs = hs.view(S, n_heads, -1)
+                    hs = hs.view(S, _n_heads, -1)
 
                 # Selection logic
                 sel = self.selection or {}
-                spatial_idx_sel = sel.get("spatial_location", None)
+                sel.get("spatial_location", None)
                 head_idx_sel = sel.get("heads", None)
 
-                if type(head_idx_sel) == dict:
-                    head_idx_sel = head_idx_sel.get(accessor.attr_name, None)
+                if isinstance(head_idx_sel, dict):
+                    head_idx_sel = head_idx_sel.get(_accessor.attr_name, None)
 
                 # Implement indexing helper or simplify
                 # For brevity, assuming simple slicing or factor scaling on whole if None
@@ -214,9 +214,11 @@ class FeatureIntervention(DiffusionIntervention):
 
 
 def run_intervention(
-    model: T2IModel, prompts: list[str], interventions: list[DiffusionIntervention] = [], **kwargs
+    model: T2IModel, prompts: list[str], interventions: list[DiffusionIntervention] = None, **kwargs
 ) -> Output:
     # Collect all hooks
+    if interventions is None:
+        interventions = []
     all_hooks = {}
     for intervention in interventions:
         intervention_hooks = intervention.get_hooks()

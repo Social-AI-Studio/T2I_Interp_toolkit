@@ -6,14 +6,18 @@
 defaults:
   - /wandb@wandb
   - _self_
+  - optional /model: null   # override: t2i-steer --config-name=steer/caa model=sdxl_turbo
 
 wandb:
   sweep_report_type: "caa_alpha"
 
 # Model
-model_key: runwayml/stable-diffusion-v1-5
+model_key: stable-diffusion-v1-5/stable-diffusion-v1-5
 device: cuda:0
 dtype: float16
+
+# Reproducibility
+seed: null   # int → torch.manual_seed; null → unseeded
 
 # Dataset
 dataset_name: nirmalendu01/spectacles-bias-prompts-headshot-captioned

@@ -28,6 +28,7 @@ dependencies = [
     "torch>=2.0.0",
     "accelerate>=1.10.0",
     "pillow>=10.0.0",
+    "matplotlib>=3.7.0",
     "numpy>=1.24.0",
     "tqdm>=4.65.0",
     "loguru>=0.7.0",
@@ -38,6 +39,9 @@ dependencies = [
     "pyyaml>=6.0",
     "hydra-core>=1.3.0",
     "omegaconf>=2.3.0",
+    "webdataset>=1.0.2",
+    "nnsight>=0.7.0",
+    "einops>=0.8.2",
 ]
 
 [project.optional-dependencies]
@@ -47,6 +51,11 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.5.0",
     "pre-commit>=3.5.0",
+    # Needed by `make notebook` + nbconvert (notebook execution in tests/CI).
+    "jupyter>=1.0.0",
+    "nbconvert>=7.0.0",
+    "nbformat>=5.0.0",
+    "nbstripout>=0.7.0",
 ]
 ray = [
     "ray>=2.7.0",
@@ -58,11 +67,12 @@ notebook = [
 ]
 
 [project.scripts]
-t2i           = "t2i_interp.cli:main"
-t2i-steer     = "t2i_interp.scripts.run_steer:main"
-t2i-stitch    = "t2i_interp.scripts.run_stitch:main"
-t2i-sae       = "t2i_interp.scripts.run_sae:main"
-t2i-localise  = "t2i_interp.scripts.run_localisation:main"
+t2i              = "t2i_interp.cli:main"
+t2i-steer        = "t2i_interp.scripts.run_steer:main"
+t2i-stitch       = "t2i_interp.scripts.run_stitch:main"
+t2i-sae          = "t2i_interp.scripts.run_sae:main"
+t2i-localise     = "t2i_interp.scripts.run_localisation:main"
+t2i-migrate-sae  = "t2i_interp.scripts.migrate_sae_ckpt:main"
 
 [project.urls]
 Homepage = "https://github.com/Social-AI-Studio/T2I_Interp_toolkit"
@@ -80,6 +90,10 @@ packages = ["t2i_interp", "dictionary_learning"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# `dictionary_learning/` is a vendored third-party fork — upstream owns its
+# style. `notebooks/` use exploratory conventions (top-level capitalized
+# constants, unused fixtures) where strict linting fights the medium.
+extend-exclude = ["dictionary_learning", "notebooks"]
 
 [tool.ruff.lint]
 select = [
@@ -97,11 +111,34 @@ ignore = [
     "B008",  # do not perform function calls in argument defaults
     "C901",  # too complex
     "E741",  # ambiguous variable name
+    # Universal PyTorch / torchvision aliases — `import torch.nn.functional as F`
+    # and `import torchvision.transforms as T` are the canonical idioms.
+    "N812",
+    # PyTorch hook control-flow signals (e.g. `StopForward`) are exceptions
+    # by mechanism, not errors by meaning — the `*Error` suffix is misleading.
+    "N818",
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"__init__.py" = ["F401", "F403"]
-"tests/**/*.py" = ["B011", "N802"]
+# N999 fires on every __init__.py because ruff resolves module names relative
+# to the repo root (`T2I_Interp_toolkit`) which has caps; the actual Python
+# package is the lowercase `t2i_interp`. Unfixable without renaming the repo.
+"__init__.py" = ["N999"]
+# N806 (uppercase locals) is allowed in tensor-shape-heavy modules where
+# B/N/D/H/W/L/S/A/F/R/U/X are standard ML/PyTorch shape conventions
+# (B=batch, N=batch dim, D=feature dim, H=height, W=width, X=design matrix).
+# Lowercasing makes math-dense code harder to read for ML reviewers.
+"t2i_interp/intervention.py" = ["N806"]
+"t2i_interp/linear_steering.py" = ["N806", "N803"]
+"t2i_interp/loreft.py" = ["N806"]
+"t2i_interp/t2i.py" = ["N806"]
+"t2i_interp/utils/T2I/attn_policy.py" = ["N806"]
+"t2i_interp/utils/T2I/buffer.py" = ["N806"]
+"t2i_interp/utils/T2I/collect_latents.py" = ["N806"]
+"t2i_interp/utils/concept_detection.py" = ["N806"]
+"t2i_interp/utils/generic.py" = ["N806"]
+"t2i_interp/utils/nethook.py" = ["N806"]
+"t2i_interp/utils/utils.py" = ["N806", "N803"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -145,4 +182,9 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+]
+
+[dependency-groups]
+dev = [
+    "nbstripout>=0.9.1",
 ]

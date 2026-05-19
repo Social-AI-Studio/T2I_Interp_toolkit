@@ -5,6 +5,8 @@ t2i-stitch dataset_name=my/ds num_steps=2000
 t2i-stitch inject_steps=[0,1,2]
 """
 
+import os
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
@@ -31,8 +33,6 @@ def main(cfg: DictConfig) -> None:
     ]:
         sys.modules.setdefault(_xf, types.ModuleType(_xf))
 
-    import os
-
     import torch as th
     import transformers
     import wandb
@@ -44,6 +44,7 @@ def main(cfg: DictConfig) -> None:
     from datasets import load_dataset
 
     from t2i_interp.mapper import MLPMapper
+    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
     from t2i_interp.stitch import Stitcher
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
@@ -58,6 +59,9 @@ def main(cfg: DictConfig) -> None:
     print("=== t2i-stitch config ===")
     print(OmegaConf.to_yaml(cfg))
 
+    # Reproducibility: seed all RNGs before model load / data ops.
+    seed_everything(getattr(cfg, "seed", None))
+
     # Optional wandb initialization
     run = None
     if getattr(cfg, "wandb", None) and cfg.wandb.get("project"):
@@ -68,6 +72,26 @@ def main(cfg: DictConfig) -> None:
             tags=cfg.wandb.get("tags", []),
             config=OmegaConf.to_container(cfg, resolve=True),
         )
+
+    # Run fingerprint: canonical record of every reproducibility-relevant input.
+    fingerprint = RunFingerprint.from_cfg(
+        cfg,
+        workflow="stitch",
+        intervention={
+            "mode": getattr(cfg, "mode", None),
+            "layer_a": getattr(cfg, "layer_a", None),
+            "layer_b": getattr(cfg, "layer_b", None),
+            "model_key_b": getattr(cfg, "model_key_b", None),
+            "inject_steps": list(getattr(cfg, "inject_steps", []) or []),
+            "steer_alpha": getattr(cfg, "steer_alpha", None),
+            "num_inference_steps": getattr(cfg, "num_inference_steps", None),
+        },
+    )
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    fingerprint.write(os.path.join(cfg.output_dir, "fingerprint.json"))
+    print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
+    if run is not None:
+        fingerprint.log_to_wandb(run)
 
     # 1. Models
     # model_a: owns layer_a (source activations)

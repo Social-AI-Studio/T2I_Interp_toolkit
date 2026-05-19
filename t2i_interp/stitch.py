@@ -31,7 +31,7 @@ class Stitcher:
         model: T2IModel,
         module_to_skip: nn.Module,
         replacement: nn.Module,
-    ) -> StitchResult:
+    ) -> None:
         """
         Replace a submodule with:
           - 'identity' -> returns input
@@ -75,7 +75,7 @@ class Stitcher:
         model_b: T2IModel,
         module_a: str,
         module_b: str,
-    ) -> StitchResult:
+    ) -> None:
         """
         Join two models at specified modules.
         - model_a: first model (gets module_b inserted)
@@ -168,22 +168,31 @@ class Stitcher:
         # ------------------------------------------------------------------
         step_counter = [0]
 
+        # The mapper may have been trained in a different dtype than the
+        # model runs in (e.g. mapper in fp32, pipeline in fp16). Match the
+        # mapper's parameter dtype on the way in, restore act_b's dtype on
+        # the way out — otherwise matmuls fail with "mat1 and mat2 must
+        # have the same dtype" (CPU) or MPSNDArrayMatrixMultiplication
+        # kernel errors (Apple Silicon).
+        mapper_param = next(mapper.parameters(), None)
+        mapper_dtype = mapper_param.dtype if mapper_param is not None else th.float32
+
         def _inject_policy(act_b: th.Tensor, **_) -> th.Tensor:
             current_step = step_counter[0]
             step_counter[0] += 1
             if not act_a_cache or current_step not in _inject_steps:
                 return act_b
-            act_a = act_a_cache[0].to(device=act_b.device, dtype=act_b.dtype)
-            B = act_b.shape[0]
-            if act_a.shape[0] < B:
-                act_a = act_a.repeat(B // act_a.shape[0], *([1] * (act_a.ndim - 1)))
+            act_a = act_a_cache[0].to(device=act_b.device, dtype=mapper_dtype)
+            batch_size = act_b.shape[0]
+            if act_a.shape[0] < batch_size:
+                act_a = act_a.repeat(batch_size // act_a.shape[0], *([1] * (act_a.ndim - 1)))
             flat = act_a.reshape(act_a.shape[0], -1)
             with th.no_grad():
-                mapped_flat = mapper(flat)
+                mapped_flat = mapper(flat).to(act_b.dtype)
             return (
                 mapped_flat.reshape(act_b.shape)
                 if mapped_flat.numel() == act_b.numel()
-                else mapped_flat.reshape(B, *act_b.shape[1:])
+                else mapped_flat.reshape(batch_size, *act_b.shape[1:])
             )
 
         alter = UNetAlterHook(policy=_inject_policy)
@@ -292,8 +301,10 @@ class Stitcher:
                     return act_b
                 d = delta_b.to(device=act_b.device, dtype=act_b.dtype)
                 # Broadcast delta to match act_b spatial shape
-                B = act_b.shape[0]
-                d_expanded = d.reshape(act_b.shape[1:]).unsqueeze(0).expand(B, *act_b.shape[1:])
+                batch_size = act_b.shape[0]
+                d_expanded = (
+                    d.reshape(act_b.shape[1:]).unsqueeze(0).expand(batch_size, *act_b.shape[1:])
+                )
                 return act_b + d_expanded
 
             return UNetAlterHook(policy=_policy)
@@ -320,7 +331,7 @@ class Stitcher:
 
         # Interleave: steered_0, baseline_0, steered_1, baseline_1, ...
         pairs = []
-        for s, b in zip(steered_imgs, baseline_imgs):
+        for s, b in zip(steered_imgs, baseline_imgs, strict=False):
             pairs.extend([s, b])
         return pairs
 
@@ -433,8 +444,10 @@ class Stitcher:
                 if step not in _inject_steps:
                     return act_b
                 d = delta_b.to(device=act_b.device, dtype=act_b.dtype)
-                B = act_b.shape[0]
-                d_expanded = d.reshape(act_b.shape[1:]).unsqueeze(0).expand(B, *act_b.shape[1:])
+                batch_size = act_b.shape[0]
+                d_expanded = (
+                    d.reshape(act_b.shape[1:]).unsqueeze(0).expand(batch_size, *act_b.shape[1:])
+                )
                 return act_b + d_expanded
 
             return UNetAlterHook(policy=_policy)
@@ -459,7 +472,7 @@ class Stitcher:
             ).images
 
         pairs = []
-        for s, b in zip(steered_imgs, baseline_imgs):
+        for s, b in zip(steered_imgs, baseline_imgs, strict=False):
             pairs.extend([s, b])
         return pairs
 

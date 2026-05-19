@@ -144,7 +144,7 @@ class TraceDict(OrderedDict, contextlib.AbstractContextManager):
             try:
                 it = iter(it)
                 prev = next(it)
-                seen = set([prev])
+                seen = {prev}
             except StopIteration:
                 return
             for item in it:
@@ -156,9 +156,9 @@ class TraceDict(OrderedDict, contextlib.AbstractContextManager):
 
         for is_last, layer in flag_last_unseen(layers):
 
-            def optional_dict(obj):
+            def optional_dict(obj, _layer=layer):
                 if isinstance(obj, dict):
-                    return obj.get(layer, None)
+                    return obj.get(_layer, None)
                 return obj
 
             self[layer] = Trace(
@@ -182,7 +182,7 @@ class TraceDict(OrderedDict, contextlib.AbstractContextManager):
             return True
 
     def close(self):
-        for layer, trace in reversed(self.items()):
+        for _layer, trace in reversed(self.items()):
             trace.close()
 
 
@@ -233,7 +233,7 @@ def recursive_copy(x, clone=None, detach=None, retain_grad=None):
             [recursive_copy(v, clone=clone, detach=detach, retain_grad=retain_grad) for v in x]
         )
     else:
-        assert False, f"Unknown type {type(x)} cannot be broken into tensors."
+        raise AssertionError(f"Unknown type {type(x)} cannot be broken into tensors.")
 
 
 def subsequence(
@@ -336,7 +336,7 @@ def hierarchical_subsequence(sequential, first, last, after, upto, share_weights
             including_children = True
     for name in [first, last, after, upto]:
         if name is not None:
-            raise ValueError("Layer %s not found" % ".".join(name))
+            raise ValueError("Layer {} not found".format(".".join(name)))
     # Omit empty subsequences except at the outermost level,
     # where we should not return None.
     if not len(included_children) and depth > 0:
@@ -358,7 +358,7 @@ def set_requires_grad(requires_grad, *models):
         elif isinstance(model, (torch.nn.Parameter, torch.Tensor)):
             model.requires_grad = requires_grad
         else:
-            assert False, "unknown type %r" % type(model)
+            raise AssertionError(f"unknown type {type(model)!r}")
 
 
 def get_module(model, name):

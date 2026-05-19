@@ -52,12 +52,21 @@ logs/
 nohup.out
 .wandb/
 
+# Workflow output dirs (defaults from t2i_interp/config/*/run.yaml)
+output_images/
+latents_cache/
+multirun/
+test_run/
+smoke_out/
+
 # Model weights and checkpoints
 *.pt
 *.pth
 *.ckpt
 *.safetensors
 dictionaries/
+# SAE checkpoints downloaded by `t2i-migrate-sae`
+sdxl-unbox/
 
 # Temporary files
 *.tmp
@@ -67,9 +76,12 @@ dictionaries/
 paper-dump.txt
 paper.pdf
 PLAN.md
+openreview.txt
 
 
 
 
 
-
+notebook_runs/
+cli_verify/
+tmp_out/

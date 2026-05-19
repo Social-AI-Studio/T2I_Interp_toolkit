@@ -1,0 +1,10 @@
+# @package _global_
+# Stable Diffusion XL base 1.0 — CFG-guided, 30-step.
+#
+# Compose into any workflow:
+#   t2i-steer model=sdxl
+model_key: stabilityai/stable-diffusion-xl-base-1.0
+dtype: float16
+guidance_scale: 7.5
+conditional_only: true
+num_inference_steps: 30

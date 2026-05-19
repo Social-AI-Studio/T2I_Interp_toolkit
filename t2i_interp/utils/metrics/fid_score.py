@@ -1,19 +1,25 @@
 # fid_score.py
 # pip install clean-fid pillow
 
+from __future__ import annotations
+
 import argparse
 import os
 import tempfile
+from typing import TYPE_CHECKING
 
 from cleanfid import fid
 from PIL import Image
+
+if TYPE_CHECKING:
+    from t2i_interp.utils.output import Output
 
 
 class FIDScorer:
     def __init__(self, mode: str = "clean"):
         self.mode = mode
 
-    def compute(self, out: "Output", ref_dir: str = None) -> "Output":
+    def compute(self, out: Output, ref_dir: str = None) -> Output:
         from t2i_interp.utils.output import Output
 
         if not isinstance(out, Output):

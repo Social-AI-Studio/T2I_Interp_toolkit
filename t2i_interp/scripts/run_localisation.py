@@ -5,6 +5,8 @@ t2i-localise factor=0.5 prompt="a dragon"
 t2i-localise sweep_all_layers=true target_heads=[0,1,2]
 """
 
+import os
+
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
@@ -14,8 +16,6 @@ from t2i_interp.utils.utils import save_json
 
 @hydra.main(config_path=config_dir(), config_name="localisation/run", version_base=None)
 def main(cfg: DictConfig) -> None:
-    import os
-
     import matplotlib
     import torch
     import wandb
@@ -25,12 +25,18 @@ def main(cfg: DictConfig) -> None:
     from diffusers import StableDiffusionPipeline
     from tqdm import tqdm
 
+    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.hook import UNetAlterHook
 
     print("=== t2i-localise config ===")
     print(OmegaConf.to_yaml(cfg))
+
+    # Reproducibility: seed all RNGs before model load / data ops.
+    # (run_localisation also creates a per-tensor torch.Generator below for
+    # the baseline image — that uses cfg.seed too, kept for backwards compat.)
+    seed_everything(getattr(cfg, "seed", None))
 
     # Optional wandb initialization
     run = None
@@ -42,6 +48,25 @@ def main(cfg: DictConfig) -> None:
             tags=cfg.wandb.get("tags", []),
             config=OmegaConf.to_container(cfg, resolve=True),
         )
+
+    # Run fingerprint: canonical record of every reproducibility-relevant input.
+    fingerprint = RunFingerprint.from_cfg(
+        cfg,
+        workflow="localisation",
+        intervention={
+            "target_layer": getattr(cfg, "target_layer", None),
+            "target_heads": list(getattr(cfg, "target_heads", []) or []),
+            "factor": getattr(cfg, "factor", None),
+            "start_step": getattr(cfg, "start_step", None),
+            "end_step": getattr(cfg, "end_step", None),
+            "num_inference_steps": getattr(cfg, "num_inference_steps", None),
+        },
+    )
+    os.makedirs(cfg.output_dir, exist_ok=True)
+    fingerprint.write(os.path.join(cfg.output_dir, "fingerprint.json"))
+    print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
+    if run is not None:
+        fingerprint.log_to_wandb(run)
 
     # 1. Model
     model = T2IModel(
@@ -132,18 +157,18 @@ def main(cfg: DictConfig) -> None:
         InferenceSpec(
             name=f"{name}__h{h}",
             inference_fn=run_head,
-            kwargs=dict(
-                model=model,
-                acc=acc,
-                head_idx=h,
-                factor=cfg.factor,
-                start_step=cfg.start_step,
-                end_step=cfg.end_step,
-                prompt=cfg.prompt,
-                n_steps=cfg.num_inference_steps,
-                seed=cfg.seed,
-                guidance_scale=cfg.guidance_scale,
-            ),
+            kwargs={
+                "model": model,
+                "acc": acc,
+                "head_idx": h,
+                "factor": cfg.factor,
+                "start_step": cfg.start_step,
+                "end_step": cfg.end_step,
+                "prompt": cfg.prompt,
+                "n_steps": cfg.num_inference_steps,
+                "seed": cfg.seed,
+                "guidance_scale": cfg.guidance_scale,
+            },
         )
         for name, acc in sweep.items()
         for h in (target_heads if target_heads is not None else range(acc.module.heads))
@@ -152,16 +177,16 @@ def main(cfg: DictConfig) -> None:
     results = [Inference(s).run_inference() for s in tqdm(specs)]
 
     # 6. Save per-layer grids to local & W&B
-    layer_names = sorted(set(s.name.split("__h")[0] for s in specs))
+    layer_names = sorted({s.name.split("__h")[0] for s in specs})
     wandb_grids = []
 
     for layer in layer_names:
-        ls = [(s, r) for s, r in zip(specs, results) if s.name.startswith(layer)]
+        ls = [(s, r) for s, r in zip(specs, results, strict=False) if s.name.startswith(layer)]
         fig, axes = plt.subplots(1, len(ls) + 1, figsize=(4 * (len(ls) + 1), 4))
         axes[0].imshow(baseline)
         axes[0].set_title("baseline")
         axes[0].axis("off")
-        for ax, (s, r) in zip(axes[1:], ls):
+        for ax, (s, r) in zip(axes[1:], ls, strict=False):
             ax.imshow(r.preds[0])
             ax.set_title(s.name.split("__")[1])
             ax.axis("off")

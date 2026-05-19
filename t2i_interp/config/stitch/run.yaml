@@ -6,12 +6,16 @@
 defaults:
   - _self_
   - /wandb@wandb
+  - optional /model: null   # override model_a: t2i-stitch model=sdxl_turbo
 
 wandb:
   sweep_report_type: stitch_steer
 
+# Reproducibility
+seed: null   # int → torch.manual_seed; null → unseeded
+
 # Model
-model_key: runwayml/stable-diffusion-v1-5
+model_key: stable-diffusion-v1-5/stable-diffusion-v1-5
 model_key_b: null   # set to a different model key to enable cross-model stitching; null = same as model_key
 
 # Optional LoRA adapter for model_b (e.g. LCM-LoRA).

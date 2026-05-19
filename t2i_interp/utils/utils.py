@@ -7,6 +7,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from itertools import islice
+from pathlib import Path
 from typing import (
     Any,
     TypeVar,
@@ -32,8 +33,6 @@ T = TypeVar("T")
 #     AutoEncoderNew,
 #     JumpReluAutoEncoder,
 # )
-
-from pathlib import Path
 
 
 def reshape_like(vec, x):
@@ -135,7 +134,7 @@ def get_nested_folders(path: str) -> list[str]:
     """
     folder_names = []
 
-    for root, dirs, files in os.walk(path):
+    for root, _dirs, files in os.walk(path):
         if "ae.pt" in files:
             folder_names.append(root)
 
@@ -179,7 +178,7 @@ def get_nested_folders(path: str) -> list[str]:
 #     return dictionary, config
 
 
-def encode_prompt(prompt: str, model: DiffusionModel):
+def encode_prompt(prompt: str, model: Any):
     prompt_embeds, negative_prompt_embeds = model.pipeline.encode_prompt(
         prompt, model.device, 1, True, None
     )  # tokens for empty prompt
@@ -476,7 +475,7 @@ class ShardedActivationMemmapDataset:
         row = int(global_idx - self._prefix[s])
         return s, row
 
-    def _load_indices(self, idxs: np.ndarray) -> t.Tensor:
+    def _load_indices(self, idxs: np.ndarray) -> torch.Tensor:
         """
         Load a set of global row indices, grouping by shard to minimize opens.
         Returns a torch tensor of shape [B, D] on CPU (optionally pinned),
