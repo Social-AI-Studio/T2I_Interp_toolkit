@@ -225,13 +225,19 @@ st.divider()
 st.subheader("Start here")
 st.markdown(
     """
-- **Never used the toolkit before?** → Click **Localisation** in the sidebar.
-  It's the fastest workflow (~30 sec on MPS warm) and the most visually
-  intuitive.
-- **Want to reproduce the paper's headline result?** → Click **Steering**,
-  pick `loreft` + `sdxl_turbo`, and click *Reproduce Figure 2*.
-- **Looking for past runs?** → Click **Fingerprints**.
-- **Need a vocab refresher** (CFG, alpha, attn2, LoReFT, …)? → Click **Glossary**.
+- **Not sure which tool you need?** → Click **Recipes** in the sidebar.
+  Each card is a *goal* (add an attribute, find where a concept lives,
+  discover internal features, …) with the matching workflow + suggested
+  config.
+- **Already know which workflow you want?** → Click straight to
+  **Localisation**, **Steering**, **Stitching**, or **SAE**. Each page
+  has its own "common goals this serves" expander and a free-form
+  *What are you trying to achieve?* text box that gets shown back in
+  the results.
+- **Want to reproduce the paper's headline result?** → Steering →
+  *Reproduce Figure 2*.
+- **Looking for past runs?** → **Fingerprints**.
+- **Need a vocab refresher** (CFG, alpha, attn2, LoReFT, …)? → **Glossary**.
 """
 )
 

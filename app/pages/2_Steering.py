@@ -26,6 +26,27 @@ st.markdown(
     "uses **LoReFT + SDXL-Turbo** to add spectacles to character prompts."
 )
 
+with st.expander("**Common goals this page serves**", expanded=False):
+    st.markdown(
+        """
+- **Add an attribute** to existing prompts (paper Fig 2 — spectacles).
+- **Shift outputs toward a specific demographic** (paper Fig 3 — "photo of
+  a man" → Black).
+- **Suppress / erase an unwanted concept** (use negative alpha — subtract
+  the direction rather than add it).
+- **Inject an emotion or style** (paper Fig 3 — "photo of a child" → sad).
+
+See the **Recipes** page (sidebar) for one-click presets including
+"Reproduce Figure 2".
+"""
+    )
+
+goal = st.text_input(
+    "What are you trying to achieve? (optional)",
+    placeholder='e.g. "Add spectacles to portraits" or "Reduce gender bias for \'doctor\'"',
+    help="For your own notes. Shown back in the results panel.",
+)
+
 st.info(
     """
 **How this affects the picture.** From a dataset of paired prompts (the
@@ -143,6 +164,9 @@ if st.button("Run", type="primary"):
             status.update(label="Run failed — see logs above", state="error")
 
     st.divider()
+
+    if goal:
+        st.markdown(f"**Goal:** _{goal}_")
 
     images = collect_images(out_dir)
     if images:

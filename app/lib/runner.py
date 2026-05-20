@@ -17,13 +17,13 @@ from dataclasses import dataclass
 @dataclass
 class WorkflowResult:
     returncode: int
-    output_dir: str          # absolute path the CLI used as cfg.output_dir
-    log: str                  # full stdout+stderr text
+    output_dir: str  # absolute path the CLI used as cfg.output_dir
+    log: str  # full stdout+stderr text
 
 
 def run_workflow(
-    command: str,                 # one of "t2i-localise" / "t2i-steer" / "t2i-stitch" / "t2i-sae"
-    overrides: list[str],         # Hydra "key=value" overrides (also: "--config-name=...")
+    command: str,  # one of "t2i-localise" / "t2i-steer" / "t2i-stitch" / "t2i-sae"
+    overrides: list[str],  # Hydra "key=value" overrides (also: "--config-name=...")
     output_dir: str,
     cwd: str | None = None,
     env: dict[str, str] | None = None,

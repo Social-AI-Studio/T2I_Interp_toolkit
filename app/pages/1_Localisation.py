@@ -25,6 +25,28 @@ st.markdown(
     "the unaltered baseline to localise which head carries which concept."
 )
 
+with st.expander("**Common goals this page serves**", expanded=False):
+    st.markdown(
+        """
+- **Find where a concept lives in the UNet.** Sweep all heads with `factor=0.0`
+  and watch which ablations break the concept.
+- **Test a hypothesis** that a *specific* head carries a specific behaviour
+  (e.g. head 3 of `mid_block` binds colour words).
+- **Build a "concept map" of the model** — which layers are about composition,
+  which are about texture, which are about identity?
+
+See the **Recipes** page (sidebar) for one-click presets.
+"""
+    )
+
+# Optional goal-text input so the user keeps their experiment intent visible
+goal = st.text_input(
+    "What are you trying to achieve? (optional)",
+    placeholder='e.g. "Test whether head 3 of mid_block carries the unicorn-ness"',
+    help="For your own notes. Not sent to the model — just shown in the result "
+    "panel so you remember what you were testing.",
+)
+
 st.info(
     """
 **How this affects the picture.** A *head* is a small slice of an attention
@@ -132,6 +154,9 @@ if st.button("Run", type="primary"):
             status.update(label="Run failed — see logs above", state="error")
 
     st.divider()
+
+    if goal:
+        st.markdown(f"**Goal:** _{goal}_")
 
     images = collect_images(out_dir)
     if images:

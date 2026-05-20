@@ -27,6 +27,29 @@ st.markdown(
     "Output is a grid: rows = features, columns = strengths."
 )
 
+with st.expander("**Common goals this page serves**", expanded=False):
+    st.markdown(
+        """
+- **Discover what features your model uses for a given prompt.** Capture
+  the top-K most-active features, then modulate them and see what each
+  one encodes.
+- **Find a feature that controls a specific visual property** (shininess,
+  texture, colour, object part). Iterate over prompts and watch which
+  features change predictably.
+- **Build a "feature steering" recipe.** Once you've found a feature index
+  that controls what you want, fix the modulation strength and apply it
+  permanently to all generations.
+
+See the **Recipes** page for one-click feature-discovery walkthroughs.
+"""
+    )
+
+goal = st.text_input(
+    "What are you trying to achieve? (optional)",
+    placeholder='e.g. "Find a feature that controls shininess in fruit images"',
+    help="For your own notes. Shown back in the results panel.",
+)
+
 st.info(
     """
 **How this affects the picture.** An SAE expresses the model's dense
@@ -106,6 +129,9 @@ if st.button("Run", type="primary"):
             status.update(label="Run failed — see logs above", state="error")
 
     st.divider()
+
+    if goal:
+        st.markdown(f"**Goal:** _{goal}_")
 
     images = collect_images(out_dir)
     if images:

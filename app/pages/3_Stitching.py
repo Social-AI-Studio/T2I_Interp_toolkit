@@ -26,6 +26,28 @@ st.markdown(
     "through the mapper and injected at `layer_b`. Fig 4 in the paper."
 )
 
+with st.expander("**Common goals this page serves**", expanded=False):
+    st.markdown(
+        """
+- **Transfer a behaviour between two models** (e.g. base SD 1.5 ↔
+  fine-tuned variant) without retraining. The paper's §4 case study.
+- **Check whether two layers encode comparable information.** If a small
+  mapper can stitch them, the two activations carry the same kind of
+  content; if not, they don't.
+- **Move a steering direction across models.** Train a mapper, then
+  apply a steering vector learned in model A inside model B's activation
+  space.
+
+See the **Recipes** page for concrete walkthroughs.
+"""
+    )
+
+goal = st.text_input(
+    "What are you trying to achieve? (optional)",
+    placeholder='e.g. "Can SD1.5 text-encoder output stand in for unet.conv_out?"',
+    help="For your own notes. Shown back in the results panel.",
+)
+
 st.info(
     """
 **How this affects the picture.** Two parts of the model (or two different
@@ -98,6 +120,9 @@ if st.button("Run", type="primary"):
             status.update(label="Run failed — see logs above", state="error")
 
     st.divider()
+
+    if goal:
+        st.markdown(f"**Goal:** _{goal}_")
 
     images = collect_images(out_dir)
     if images:
