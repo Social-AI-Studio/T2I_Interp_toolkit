@@ -44,6 +44,7 @@ dependencies = [
     "einops>=0.8.2",
     "streamlit>=1.57.0",
     "pandas>=2.3.3",
+    "anthropic>=0.104.1",
 ]
 
 [project.optional-dependencies]
