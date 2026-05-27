@@ -56,6 +56,39 @@ class Recipe:
 # Standard prompt blocks reused across recipes.
 _SPECTACLES_PROMPTS = "A photo of Jack Sparrow\nA photo of Simba\nA photo of Mickey Mouse"
 
+# Inline pairs that lets the spectacles recipe run fully offline (no HF download).
+# Each line is `<teacher with-spectacles> | <base without-spectacles>` — run_steer.py
+# maps pos→teacher_prompt, neg→base_prompt for LoReFT.
+_SPECTACLES_INLINE_PAIRS = (
+    "A photo of Jack Sparrow with spectacles | A photo of Jack Sparrow\n"
+    "A photo of Simba with spectacles | A photo of Simba\n"
+    "A photo of Mickey Mouse with spectacles | A photo of Mickey Mouse\n"
+    "A photo of Spider-Man with spectacles | A photo of Spider-Man\n"
+    "A photo of a businessman with spectacles | A photo of a businessman\n"
+    "A photo of a scientist with spectacles | A photo of a scientist\n"
+    "A photo of a doctor with spectacles | A photo of a doctor\n"
+    "A photo of a librarian with spectacles | A photo of a librarian\n"
+    "A photo of a professor with spectacles | A photo of a professor\n"
+    "A photo of a teacher with spectacles | A photo of a teacher\n"
+    "A photo of a student with spectacles | A photo of a student\n"
+    "A photo of a man with spectacles | A photo of a man"
+)
+
+# Generic prompts the Stitching mapper trains on (one per line — fed to both
+# models since cross-model behaviour transfer typically uses the same prompt).
+_STITCH_GENERIC_PROMPTS = (
+    "a photo of a person\n"
+    "a photo of a cat\n"
+    "a photo of a landscape\n"
+    "a photo of a still life\n"
+    "a photo of a city street\n"
+    "a photo of a forest\n"
+    "a photo of a beach\n"
+    "a portrait of a woman\n"
+    "a portrait of a man\n"
+    "a photo of a sunset"
+)
+
 # Inline pair catalogues (pos | neg, one per line). Used by recipes whose target
 # concept doesn't have a published HuggingFace dataset in the CAA/LoReFT schema —
 # run_steer.py builds an in-memory Dataset from these pairs.
@@ -107,17 +140,17 @@ RECIPES: list[Recipe] = [
         title="Add spectacles to character portraits (paper Fig 2)",
         objective="I want my generated portraits to **wear spectacles**, without retraining.",
         description=(
-            "Trains a tiny LoReFT adapter (a few thousand parameters) on paired prompts "
-            "(with-spectacles vs without). At inference, injects the learned direction "
-            "across UNet cross-attention blocks. Reproduces Figure 2 of the paper."
+            "Trains a tiny LoReFT adapter on **12 inline (with-spectacles, "
+            "base) prompt pairs**. At inference, injects the learned direction "
+            "across UNet cross-attention blocks. Reproduces Figure 2 of the "
+            "paper end-to-end with **zero network calls** — fully offline."
         ),
         workflow="Steering",
         settings=[
             ("Method", "loreft"),
             ("Model preset", "sdxl_turbo"),
             ("Alpha", "10.0"),
-            ("Training samples", "200"),
-            ("Training steps", "50"),
+            ("Inline pairs", "12 spectacles pairs (pre-filled)"),
         ],
         page_path="pages/2_Steering.py",
         fields={
@@ -125,10 +158,11 @@ RECIPES: list[Recipe] = [
             "model_preset": "sdxl_turbo",
             "prompts": _SPECTACLES_PROMPTS,
             "alpha": 10.0,
-            "max_samples": 200,
-            "train_steps": 50,
+            "max_samples": 100,
+            "train_steps": 100,
+            "inline_pairs": _SPECTACLES_INLINE_PAIRS,
         },
-        goal_text="Add spectacles to character portraits (paper Fig 2 reproduction).",
+        goal_text="Add spectacles to character portraits (paper Fig 2 reproduction, inline pairs).",
     ),
     Recipe(
         title="Shift generations toward a specific demographic (paper Fig 3)",
@@ -403,16 +437,17 @@ RECIPES: list[Recipe] = [
         title="Transfer a behaviour between two models",
         objective="I have a fine-tuned SD 1.5 with a behaviour I like. Get it into a different model.",
         description=(
-            "Train a small MLP mapper between the two models' activation spaces. At "
-            "inference, the source model's activations flow through the mapper into the "
+            "Trains a small MLP mapper between the two models' activation spaces "
+            "on **10 inline generic prompts** (no HF dataset). At inference, "
+            "the source model's activations flow through the mapper into the "
             "target. Paper §4 case study."
         ),
         workflow="Stitching",
         settings=[
             ("Mode", "train"),
             ("Hidden dim", "512"),
-            ("Train samples", "100"),
             ("Mapper steps", "200"),
+            ("Inline prompts", "10 generic prompts (pre-filled)"),
         ],
         page_path="pages/3_Stitching.py",
         fields={
@@ -422,22 +457,26 @@ RECIPES: list[Recipe] = [
             "num_steps": 200,
             "num_inference_steps": 15,
             "model_preset": "sd15",
+            "inline_pairs": _STITCH_GENERIC_PROMPTS,
         },
-        goal_text="Transfer a fine-tuned model's behaviour into a different model via a mapper.",
+        goal_text="Transfer a fine-tuned model's behaviour via a mapper (inline prompts).",
     ),
     Recipe(
         title="Check whether two layers encode comparable information",
         objective="Are the model's early UNet layers redundant with the text encoder? Prove it.",
         description=(
-            "If a small mapper can be trained to translate layer A → layer B and the "
-            "resulting stitched image stays coherent → the two layers carry comparable "
-            "information. If noise → they don't."
+            "Trains a small mapper from layer A → layer B on **10 inline generic "
+            "prompts**. If the resulting stitched image stays coherent → the two "
+            "layers carry comparable information. If noise → they don't. "
+            "Smaller `hidden_dim` keeps the test honest (a big mapper can paper "
+            "over real incompatibility)."
         ),
         workflow="Stitching",
         settings=[
             ("Mode", "train"),
-            ("Hidden dim", "256  (small — bigger = mapper can paper over real incompat)"),
+            ("Hidden dim", "256  (small — keeps the test honest)"),
             ("Mapper steps", "100"),
+            ("Inline prompts", "10 generic prompts (pre-filled)"),
         ],
         page_path="pages/3_Stitching.py",
         fields={
@@ -447,8 +486,9 @@ RECIPES: list[Recipe] = [
             "num_steps": 100,
             "num_inference_steps": 15,
             "model_preset": "sd15",
+            "inline_pairs": _STITCH_GENERIC_PROMPTS,
         },
-        goal_text="Diagnose whether two layers encode comparable information (small mapper test).",
+        goal_text="Diagnose layer comparability with a small mapper (inline prompts).",
     ),
 ]
 

@@ -41,7 +41,7 @@ def main(cfg: DictConfig) -> None:
 
     diffusers_logging.set_verbosity_error()
     transformers.logging.set_verbosity_error()
-    from datasets import load_dataset
+    from datasets import Dataset, DatasetDict, load_dataset
 
     from t2i_interp.mapper import MLPMapper
     from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
@@ -197,10 +197,61 @@ def main(cfg: DictConfig) -> None:
     mode = getattr(cfg, "mode", "train")
     ds_full = ds_train = ds_val = None
 
+    def _load_inline_pairs_dataset(cfg):
+        """Build an in-memory `DatasetDict` for the mapper from inline prompts.
+
+        Accepted entry shapes inside `cfg.inline_pairs` (or
+        `cfg.inline_pairs_file` JSON):
+          * `{"a": str, "b": str}` — paired prompts (one per model)
+          * `{"pos": str, "neg": str}` — same shape used by run_steer.py;
+            `pos` → `prompt_b`, `neg` → `prompt_a`
+          * plain `str` — same prompt fed into both models (the common case
+            for cross-model behaviour transfer)
+
+        Patches `cfg.prompt_col_a` / `cfg.prompt_col_b` to point at the
+        in-memory column names so the rest of the script is source-agnostic.
+        """
+        raw = getattr(cfg, "inline_pairs", None)
+        pairs = OmegaConf.to_container(raw, resolve=True) if raw else []
+        if not pairs:
+            path = getattr(cfg, "inline_pairs_file", None)
+            if path and os.path.exists(path):
+                import json
+
+                with open(path) as f:
+                    pairs = json.load(f)
+        if not pairs:
+            return None
+
+        rows = []
+        for p in pairs:
+            if isinstance(p, dict):
+                a = p.get("a") or p.get("neg") or ""
+                b = p.get("b") or p.get("pos") or ""
+            else:
+                a = b = str(p)
+            if a and b:
+                rows.append({"prompt_a": a, "prompt_b": b})
+        if not rows:
+            return None
+
+        OmegaConf.set_struct(cfg, False)
+        cfg.prompt_col_a = "prompt_a"
+        cfg.prompt_col_b = "prompt_b"
+        OmegaConf.set_struct(cfg, True)
+
+        n_val = max(1, len(rows) // 5)
+        return DatasetDict(
+            {
+                "train": Dataset.from_list(rows),
+                "validation": Dataset.from_list(rows[-n_val:]),
+            }
+        )
+
     # steer_contrast / steer_transfer don't need a training dataset
     needs_dataset = mode not in ("steer_contrast", "steer_transfer")
     if needs_dataset:
-        ds_full = load_dataset(cfg.dataset_name)
+        ds_full = _load_inline_pairs_dataset(cfg) or load_dataset(cfg.dataset_name)
         ds_train = ds_full["train"]
         ds_val = (
             ds_full.get("validation")
