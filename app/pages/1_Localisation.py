@@ -17,6 +17,32 @@ from app.lib import (
 
 st.set_page_config(page_title="Localisation • T2I-Interp", layout="wide")
 
+# ── Defaults + recipe-payload intake ─────────────────────────────────────────
+_LOC_DEFAULTS: dict[str, object] = {
+    "loc_goal": "",
+    "loc_prompt": "a unicorn",
+    "loc_target_layer": "down_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
+    "loc_target_head": 0,
+    "loc_factor": 0.0,
+    "loc_n_steps": 15,
+    "loc_seed": 42,
+    "loc_model_preset": "(use config default)",
+}
+for _k, _v in _LOC_DEFAULTS.items():
+    st.session_state.setdefault(_k, _v)
+
+_payload = st.session_state.get("recipe_payload")
+if _payload and _payload.get("workflow") == "Localisation":
+    del st.session_state["recipe_payload"]
+    if _payload.get("goal"):
+        st.session_state["loc_goal"] = _payload["goal"]
+    for _fk, _fv in _payload.get("fields", {}).items():
+        _sk = f"loc_{_fk}"
+        if _sk in _LOC_DEFAULTS:
+            st.session_state[_sk] = _fv
+
+# ── Page body ────────────────────────────────────────────────────────────────
+
 st.title("Localisation — head ablation sweeps")
 
 st.markdown(
@@ -32,19 +58,21 @@ with st.expander("**Common goals this page serves**", expanded=False):
   and watch which ablations break the concept.
 - **Test a hypothesis** that a *specific* head carries a specific behaviour
   (e.g. head 3 of `mid_block` binds colour words).
-- **Build a "concept map" of the model** — which layers are about composition,
-  which are about texture, which are about identity?
+- **Compare early vs late UNet layers** to map their responsibilities.
 
-See the **Recipes** page (sidebar) for one-click presets.
+See the **Recipes** page (sidebar) for one-click presets — clicking *Open*
+there will pre-fill the form below.
 """
     )
 
-# Optional goal-text input so the user keeps their experiment intent visible
-goal = st.text_input(
+st.text_input(
     "What are you trying to achieve? (optional)",
     placeholder='e.g. "Test whether head 3 of mid_block carries the unicorn-ness"',
-    help="For your own notes. Not sent to the model — just shown in the result "
-    "panel so you remember what you were testing.",
+    help=(
+        "Stored in the run fingerprint and shown back in the result panel. "
+        "Pre-filled automatically if you arrived from a Recipe."
+    ),
+    key="loc_goal",
 )
 
 st.info(
@@ -64,54 +92,67 @@ tells you what that head was doing.
 # ── Sidebar config ────────────────────────────────────────────────────────────
 st.sidebar.header("Configuration")
 device, dtype = device_dtype_picker(default_device="mps")
-preset = model_preset_picker(default="(use config default)", options=("sd15", "sdxl_turbo"))
+preset = model_preset_picker(
+    default=str(st.session_state.get("loc_model_preset", "(use config default)")),
+    options=("sd15", "sdxl_turbo"),
+    key="loc_model_preset",
+)
 
-prompt = st.sidebar.text_input(
+st.sidebar.text_input(
     "Prompt",
-    value="a unicorn",
     help="The text prompt the model is conditioning on. Pick something where "
     "you have a hypothesis about which heads carry which concept.",
+    key="loc_prompt",
 )
-target_layer = st.sidebar.text_input(
+st.sidebar.text_input(
     "Target layer",
-    value="down_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
     help="Underscore-sanitised UNet path. `down_blocks_1` = early in the UNet "
     "(rough composition); `mid_block` = mid (object identity); "
     "`up_blocks_X` = late (textures + fine detail). Suffix `_attn2_out` "
     "is the output of a cross-attention layer (image→text).",
+    key="loc_target_layer",
 )
-target_head = st.sidebar.selectbox(
+st.sidebar.selectbox(
     "Target head index",
     list(range(8)),
-    index=0,
     help="SD 1.x cross-attn layers have 8 parallel heads. Each is a "
     "specialist on some aspect of the image-text binding; iterate over "
     "them to find the one that carries your concept.",
+    key="loc_target_head",
 )
-factor = st.sidebar.slider(
+st.sidebar.slider(
     "Scale factor",
     -5.0,
     5.0,
-    0.0,
-    0.5,
+    step=0.5,
     help="0.0 = zero-ablate the head; 1.0 = no change; >1.0 amplifies; "
     "negative = inverts the head's contribution.",
+    key="loc_factor",
 )
-n_steps = st.sidebar.slider(
+st.sidebar.slider(
     "Inference steps",
     4,
     50,
-    15,
     help="Diffusion denoising steps. More = sharper output, but slower. "
     "15 is plenty to see whether a head matters; bump to 30+ for paper-quality.",
+    key="loc_n_steps",
 )
-seed = st.sidebar.number_input(
+st.sidebar.number_input(
     "Seed",
-    value=42,
     step=1,
     help="Same seed = same initial noise → comparisons isolate the head's "
     "effect (not different starting points).",
+    key="loc_seed",
 )
+
+# Pull session-state values for the override list
+prompt = str(st.session_state["loc_prompt"])
+target_layer = str(st.session_state["loc_target_layer"])
+target_head = int(st.session_state["loc_target_head"])
+factor = float(st.session_state["loc_factor"])
+n_steps = int(st.session_state["loc_n_steps"])
+seed = int(st.session_state["loc_seed"])
+goal = str(st.session_state["loc_goal"])
 
 # ── Build the override list ──────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_loc_")

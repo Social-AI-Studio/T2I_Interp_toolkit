@@ -42,16 +42,27 @@ def device_dtype_picker(default_device: str | None = None) -> tuple[str, str]:
 def model_preset_picker(
     default: str = "sdxl_turbo",
     options: tuple[str, ...] = ("sd15", "sdxl", "sdxl_turbo"),
+    key: str | None = None,
 ) -> str | None:
     """Sidebar picker for the `model=...` Hydra preset. None = use the
-    workflow's config-default model_key."""
+    workflow's config-default model_key.
+
+    If `key` is passed, the widget binds to `st.session_state[key]` — seed
+    that key beforehand (e.g. from a Recipes payload) to pre-fill it.
+    """
     labels = ["(use config default)"] + list(options)
-    default_idx = labels.index(default) if default in labels else 0
-    pick = st.sidebar.selectbox(
-        "Model preset",
-        labels,
-        index=default_idx,
-        help="Set to `(use config default)` to keep whatever the workflow's "
-        "run.yaml already points at; otherwise overrides via Hydra `model=...`.",
+    help_text = (
+        "Set to `(use config default)` to keep whatever the workflow's "
+        "run.yaml already points at; otherwise overrides via Hydra `model=...`."
     )
+    if key is not None:
+        # When binding to session_state, set the initial value there once —
+        # passing both `index=` and `key=` triggers a warning if the key is
+        # already set. Subsequent renders read directly from session_state.
+        if key not in st.session_state:
+            st.session_state[key] = default if default in labels else labels[0]
+        pick = st.sidebar.selectbox("Model preset", labels, key=key, help=help_text)
+    else:
+        default_idx = labels.index(default) if default in labels else 0
+        pick = st.sidebar.selectbox("Model preset", labels, index=default_idx, help=help_text)
     return None if pick == "(use config default)" else pick

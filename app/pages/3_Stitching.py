@@ -17,6 +17,31 @@ from app.lib import (
 
 st.set_page_config(page_title="Stitching • T2I-Interp", layout="wide")
 
+# ── Defaults + recipe-payload intake ─────────────────────────────────────────
+_STITCH_DEFAULTS: dict[str, object] = {
+    "stitch_goal": "",
+    "stitch_prompts": "a photo of a person",
+    "stitch_hidden_dim": 256,
+    "stitch_max_samples": 50,
+    "stitch_num_steps": 50,
+    "stitch_num_inference_steps": 15,
+    "stitch_model_preset": "sd15",
+}
+for _k, _v in _STITCH_DEFAULTS.items():
+    st.session_state.setdefault(_k, _v)
+
+_payload = st.session_state.get("recipe_payload")
+if _payload and _payload.get("workflow") == "Stitching":
+    del st.session_state["recipe_payload"]
+    if _payload.get("goal"):
+        st.session_state["stitch_goal"] = _payload["goal"]
+    for _fk, _fv in _payload.get("fields", {}).items():
+        _sk = f"stitch_{_fk}"
+        if _sk in _STITCH_DEFAULTS:
+            st.session_state[_sk] = _fv
+
+# ── Page body ────────────────────────────────────────────────────────────────
+
 st.title("Stitching — cross-layer activation mapper")
 
 st.markdown(
@@ -38,14 +63,19 @@ with st.expander("**Common goals this page serves**", expanded=False):
   apply a steering vector learned in model A inside model B's activation
   space.
 
-See the **Recipes** page for concrete walkthroughs.
+See the **Recipes** page for concrete walkthroughs — clicking *Open*
+there will pre-fill the form below.
 """
     )
 
-goal = st.text_input(
+st.text_input(
     "What are you trying to achieve? (optional)",
     placeholder='e.g. "Can SD1.5 text-encoder output stand in for unet.conv_out?"',
-    help="For your own notes. Shown back in the results panel.",
+    help=(
+        "Stored in the run fingerprint and shown back in the results panel. "
+        "Pre-filled automatically if you arrived from a Recipe."
+    ),
+    key="stitch_goal",
 )
 
 st.info(
@@ -68,16 +98,25 @@ behavior between them without retraining.
 # ── Sidebar config ───────────────────────────────────────────────────────────
 st.sidebar.header("Configuration")
 device, dtype = device_dtype_picker(default_device="mps")
-preset = model_preset_picker(default="sd15")
+preset = model_preset_picker(
+    default=str(st.session_state.get("stitch_model_preset", "sd15")),
+    key="stitch_model_preset",
+)
 
-prompts_raw = st.sidebar.text_area("Prompts", value="a photo of a person")
-prompts = [p.strip() for p in prompts_raw.split("\n") if p.strip()]
-
+st.sidebar.text_area("Prompts", key="stitch_prompts")
 st.sidebar.markdown("**Quick-mode params** (drop hidden_dim/samples for speed)")
-hidden_dim = st.sidebar.slider("Mapper hidden_dim", 64, 1024, 256, step=64)
-max_samples = st.sidebar.slider("Train samples", 10, 500, 50)
-num_steps = st.sidebar.slider("Mapper training steps", 5, 1000, 50)
-num_inference_steps = st.sidebar.slider("Inference steps", 4, 50, 15)
+st.sidebar.slider("Mapper hidden_dim", 64, 1024, step=64, key="stitch_hidden_dim")
+st.sidebar.slider("Train samples", 10, 500, key="stitch_max_samples")
+st.sidebar.slider("Mapper training steps", 5, 1000, key="stitch_num_steps")
+st.sidebar.slider("Inference steps", 4, 50, key="stitch_num_inference_steps")
+
+prompts_raw = str(st.session_state["stitch_prompts"])
+prompts = [p.strip() for p in prompts_raw.split("\n") if p.strip()]
+hidden_dim = int(st.session_state["stitch_hidden_dim"])
+max_samples = int(st.session_state["stitch_max_samples"])
+num_steps = int(st.session_state["stitch_num_steps"])
+num_inference_steps = int(st.session_state["stitch_num_inference_steps"])
+goal = str(st.session_state["stitch_goal"])
 
 # ── Build overrides ──────────────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_stitch_")

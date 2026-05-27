@@ -4,13 +4,16 @@
 2. **Describe your goal** — free-form text, analyzed by Claude
 3. **Browse all recipes** — the card gallery
 
-Solves "I see 4 tools but don't know which one I need" by always letting
-the user start from a *goal* rather than a tool.
+Each recipe has both human-readable `settings` (for display) and a
+machine-readable `fields` dict (for pre-filling workflow page widgets).
+Clicking *Open* drops a payload into `st.session_state["recipe_payload"]`
+which the workflow page consumes on next render.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 import streamlit as st
 
@@ -39,15 +42,27 @@ class Recipe:
     title: str
     objective: str
     description: str
-    workflow: str
-    settings: list[tuple[str, str]]
+    workflow: str  # "Steering" | "Localisation" | "Stitching" | "SAE"
+    settings: list[tuple[str, str]]  # display strings (key, value)
     page_path: str
-    preset_session_key: str | None = None
+    # Machine-readable defaults — keys must match what the target workflow
+    # page seeds into st.session_state. See the `_apply_payload` helper at
+    # the top of each workflow page for the accepted keys.
+    fields: dict[str, Any] = field(default_factory=dict)
+    # Text seeded into the workflow page's `goal` field on arrival.
+    goal_text: str = ""
 
 
-RECIPES = [
+# Standard prompt blocks reused across recipes.
+_SPECTACLES_PROMPTS = "A photo of Jack Sparrow\nA photo of Simba\nA photo of Mickey Mouse"
+_DEMOGRAPHIC_PROMPTS_POS = "photo of a Black man"
+_DEMOGRAPHIC_PROMPTS_NEG = "photo of a man"
+
+
+RECIPES: list[Recipe] = [
+    # ── Steering ─────────────────────────────────────────────────────────────
     Recipe(
-        title="Add an attribute to a portrait (paper headline)",
+        title="Add spectacles to character portraits (paper Fig 2)",
         objective="I want my generated portraits to **wear spectacles**, without retraining.",
         description=(
             "Trains a tiny LoReFT adapter (a few thousand parameters) on paired prompts "
@@ -63,10 +78,18 @@ RECIPES = [
             ("Training steps", "50"),
         ],
         page_path="pages/2_Steering.py",
-        preset_session_key="steer_preset",
+        fields={
+            "method": "loreft",
+            "model_preset": "sdxl_turbo",
+            "prompts": _SPECTACLES_PROMPTS,
+            "alpha": 10.0,
+            "max_samples": 200,
+            "train_steps": 50,
+        },
+        goal_text="Add spectacles to character portraits (paper Fig 2 reproduction).",
     ),
     Recipe(
-        title="Shift generations toward a specific demographic",
+        title="Shift generations toward a specific demographic (paper Fig 3)",
         objective='I want "photo of a man" to lean toward **Black men** without changing the model.',
         description=(
             "Uses CAA: compute the difference between average activations for "
@@ -78,10 +101,19 @@ RECIPES = [
             ("Method", "caa"),
             ("Model preset", "sd15"),
             ("Alpha", "8.0"),
-            ("Positive prompts", "photo of a Black man"),
-            ("Negative prompts", "photo of a man"),
+            ("Positive prompts", _DEMOGRAPHIC_PROMPTS_POS),
+            ("Negative prompts", _DEMOGRAPHIC_PROMPTS_NEG),
         ],
         page_path="pages/2_Steering.py",
+        fields={
+            "method": "caa",
+            "model_preset": "sd15",
+            "prompts": _DEMOGRAPHIC_PROMPTS_POS,
+            "alpha": 8.0,
+            "max_samples": 150,
+            "train_steps": 50,
+        },
+        goal_text="Shift 'photo of a man' generations toward Black men (paper Fig 3).",
     ),
     Recipe(
         title="Suppress / erase an unwanted concept",
@@ -94,11 +126,73 @@ RECIPES = [
         workflow="Steering",
         settings=[
             ("Method", "caa"),
-            ("Alpha", "-5.0 to -15.0  (negative!)"),
-            ("Training samples", "100-200"),
+            ("Alpha", "-10.0 (negative!)"),
+            ("Training samples", "150"),
         ],
         page_path="pages/2_Steering.py",
+        fields={
+            "method": "caa",
+            "model_preset": "sd15",
+            "prompts": "a man holding a cigarette\na person smoking",
+            "alpha": -10.0,
+            "max_samples": 150,
+            "train_steps": 50,
+        },
+        goal_text="Suppress an unwanted concept (e.g. cigarettes) via negative alpha.",
     ),
+    Recipe(
+        title="Apply a painterly art style without LoRA training",
+        objective="I want my generations to look **more painterly / impressionist** without a LoRA.",
+        description=(
+            "Steering a style is the same machinery as steering a concept: train a "
+            "direction on `painterly photo of X` vs `photo of X` and inject at "
+            "inference. Faster and lighter than a LoRA, fully composable with prompt."
+        ),
+        workflow="Steering",
+        settings=[
+            ("Method", "loreft"),
+            ("Model preset", "sdxl_turbo"),
+            ("Alpha", "12.0"),
+            ("Training samples", "150"),
+        ],
+        page_path="pages/2_Steering.py",
+        fields={
+            "method": "loreft",
+            "model_preset": "sdxl_turbo",
+            "prompts": "a painterly photo of a landscape\nan impressionist portrait",
+            "alpha": 12.0,
+            "max_samples": 150,
+            "train_steps": 50,
+        },
+        goal_text="Make generations look painterly / impressionist (style steering).",
+    ),
+    Recipe(
+        title="Reduce gender stereotyping for occupation prompts",
+        objective='I want "a doctor" / "a nurse" / "a CEO" prompts to **stop defaulting to one gender**.',
+        description=(
+            "Train a CAA direction on `a woman doctor` (positive) vs `a man doctor` "
+            "(negative). At inference, use a small positive alpha to tilt the model "
+            "toward the under-represented direction; sweep alpha to find the balance."
+        ),
+        workflow="Steering",
+        settings=[
+            ("Method", "caa"),
+            ("Model preset", "sd15"),
+            ("Alpha", "5.0"),
+            ("Training samples", "100"),
+        ],
+        page_path="pages/2_Steering.py",
+        fields={
+            "method": "caa",
+            "model_preset": "sd15",
+            "prompts": "a woman doctor\na woman CEO\na woman engineer",
+            "alpha": 5.0,
+            "max_samples": 100,
+            "train_steps": 50,
+        },
+        goal_text="Reduce gender stereotyping for occupation prompts (doctor/CEO/etc.).",
+    ),
+    # ── Localisation ─────────────────────────────────────────────────────────
     Recipe(
         title="Find where a concept lives in the UNet",
         objective='Which **attention heads** are responsible for "unicorn-ness" / "redness" / face structure?',
@@ -114,10 +208,20 @@ RECIPES = [
             ("Scale factor", "0.0  (zero-ablate)"),
         ],
         page_path="pages/1_Localisation.py",
+        fields={
+            "prompt": "a unicorn in a forest",
+            "target_layer": "down_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
+            "target_head": 0,
+            "factor": 0.0,
+            "n_steps": 15,
+            "seed": 42,
+            "model_preset": "sd15",
+        },
+        goal_text="Sweep all attention heads to find which carry 'unicorn-ness'.",
     ),
     Recipe(
         title="Test a specific head you suspect carries a concept",
-        objective="I have a hypothesis that head 3 of layer X binds colour words. Verify it.",
+        objective="I have a hypothesis that head 3 of mid_block binds **colour words**. Verify it.",
         description=(
             "Run two generations: one with the head at `factor=1.0` (baseline) and one at "
             "`factor=0.0` (ablated). If the colour-related behaviour changes between the two, "
@@ -125,11 +229,49 @@ RECIPES = [
         ),
         workflow="Localisation",
         settings=[
-            ("Target head", "your suspect head"),
-            ("Scale factor", "0.0  (compare against the baseline)"),
+            ("Target head", "3"),
+            ("Target layer", "mid_block.attentions.0..."),
+            ("Scale factor", "0.0 (compare to baseline)"),
         ],
         page_path="pages/1_Localisation.py",
+        fields={
+            "prompt": "a red apple on a wooden table",
+            "target_layer": "mid_block_attentions_0_transformer_blocks_0_attn2_out",
+            "target_head": 3,
+            "factor": 0.0,
+            "n_steps": 20,
+            "seed": 42,
+            "model_preset": "sd15",
+        },
+        goal_text="Test whether head 3 of mid_block binds colour words.",
     ),
+    Recipe(
+        title="Compare early vs late UNet layers",
+        objective="Are early UNet layers about **composition** and late layers about **texture**?",
+        description=(
+            "Pick a single head, ablate it in an early `down_blocks` layer for one run, "
+            "and a late `up_blocks` layer for another. Compare what changes between them — "
+            "the type of change reveals what each layer's responsibilities are."
+        ),
+        workflow="Localisation",
+        settings=[
+            ("Prompt", "a busy city street at dusk"),
+            ("Target layer", "(early: down_blocks_1, late: up_blocks_2)"),
+            ("Scale factor", "0.0"),
+        ],
+        page_path="pages/1_Localisation.py",
+        fields={
+            "prompt": "a busy city street at dusk",
+            "target_layer": "down_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
+            "target_head": 0,
+            "factor": 0.0,
+            "n_steps": 20,
+            "seed": 42,
+            "model_preset": "sd15",
+        },
+        goal_text="Compare an early UNet layer ablation against a late one for the same prompt.",
+    ),
+    # ── SAE ──────────────────────────────────────────────────────────────────
     Recipe(
         title="Discover what features activate for my prompt",
         objective="I want to know **which sparse features** the model uses for my prompt.",
@@ -145,9 +287,44 @@ RECIPES = [
             ("Strengths", "[-5, +5]"),
         ],
         page_path="pages/4_SAE.py",
+        fields={
+            "prompt": "a red apple on a wooden table",
+            "strength_lo": -5.0,
+            "strength_hi": 5.0,
+            "n_features_to_plot": 4,
+            "n_top_features": 10,
+            "model_preset": "sdxl_turbo",
+        },
+        goal_text="Discover the top sparse features that activate for my prompt.",
     ),
     Recipe(
-        title="Amplify or suppress a specific visual feature",
+        title="Find a feature that controls a specific visual property",
+        objective="Which feature makes images **shinier** / **more textured** / **more saturated**?",
+        description=(
+            "Run feature discovery for a prompt where your target property is prominent "
+            "(e.g. 'a glossy red apple' for shininess). Each row in the output grid shows "
+            "one feature scaled across negative→positive. Watch the columns for the row "
+            "where the property changes consistently."
+        ),
+        workflow="SAE",
+        settings=[
+            ("Prompt", "a glossy red apple"),
+            ("Strengths", "[-8, +8] (wide sweep)"),
+            ("Top features", "6"),
+        ],
+        page_path="pages/4_SAE.py",
+        fields={
+            "prompt": "a glossy red apple",
+            "strength_lo": -8.0,
+            "strength_hi": 8.0,
+            "n_features_to_plot": 6,
+            "n_top_features": 15,
+            "model_preset": "sdxl_turbo",
+        },
+        goal_text="Find a sparse feature that controls a specific visual property (e.g. shininess).",
+    ),
+    Recipe(
+        title="Amplify or suppress a known feature index",
         objective="I found feature 1338 makes apples shinier. Amplify it consistently.",
         description=(
             "Once you've found a feature index that controls a concept you care about, "
@@ -156,11 +333,22 @@ RECIPES = [
         ),
         workflow="SAE",
         settings=[
-            ("Modulation grid", "1 row (your feature), 1 column (your strength)"),
-            ("Strength", "tune by trial; ±5 is a strong push"),
+            ("Prompt", "your generation prompt"),
+            ("Strengths", "[+5] (single fixed amplification)"),
+            ("Top features to modulate", "1"),
         ],
         page_path="pages/4_SAE.py",
+        fields={
+            "prompt": "a red apple on a wooden table",
+            "strength_lo": 0.0,
+            "strength_hi": 5.0,
+            "n_features_to_plot": 1,
+            "n_top_features": 5,
+            "model_preset": "sdxl_turbo",
+        },
+        goal_text="Amplify a known sparse feature index that controls a concept I care about.",
     ),
+    # ── Stitching ────────────────────────────────────────────────────────────
     Recipe(
         title="Transfer a behaviour between two models",
         objective="I have a fine-tuned SD 1.5 with a behaviour I like. Get it into a different model.",
@@ -172,10 +360,20 @@ RECIPES = [
         workflow="Stitching",
         settings=[
             ("Mode", "train"),
-            ("layer_a / layer_b", "matching cross-attn blocks"),
-            ("Hidden dim", "256-1024"),
+            ("Hidden dim", "512"),
+            ("Train samples", "100"),
+            ("Mapper steps", "200"),
         ],
         page_path="pages/3_Stitching.py",
+        fields={
+            "prompts": "a photo of a person\na photo of a landscape\na photo of a still life",
+            "hidden_dim": 512,
+            "max_samples": 100,
+            "num_steps": 200,
+            "num_inference_steps": 15,
+            "model_preset": "sd15",
+        },
+        goal_text="Transfer a fine-tuned model's behaviour into a different model via a mapper.",
     ),
     Recipe(
         title="Check whether two layers encode comparable information",
@@ -188,11 +386,30 @@ RECIPES = [
         workflow="Stitching",
         settings=[
             ("Mode", "train"),
-            ("Hidden dim", "small (128-256) — bigger = mapper can paper over real incompatibility"),
+            ("Hidden dim", "256  (small — bigger = mapper can paper over real incompat)"),
+            ("Mapper steps", "100"),
         ],
         page_path="pages/3_Stitching.py",
+        fields={
+            "prompts": "a photo of a person",
+            "hidden_dim": 256,
+            "max_samples": 50,
+            "num_steps": 100,
+            "num_inference_steps": 15,
+            "model_preset": "sd15",
+        },
+        goal_text="Diagnose whether two layers encode comparable information (small mapper test).",
     ),
 ]
+
+
+def _apply_recipe(r: Recipe) -> None:
+    """Store recipe payload in session_state. Workflow page reads + pops it."""
+    st.session_state["recipe_payload"] = {
+        "workflow": r.workflow,
+        "goal": r.goal_text or r.objective,
+        "fields": r.fields,
+    }
 
 
 def _render_recipe_card(r: Recipe, key_suffix: str = "") -> None:
@@ -206,12 +423,16 @@ def _render_recipe_card(r: Recipe, key_suffix: str = "") -> None:
             st.markdown("**Suggested config:**")
             for k, v in r.settings:
                 st.markdown(f"  - **{k}**: `{v}`")
+            if r.fields:
+                st.caption(
+                    "Clicking *Open* pre-fills these settings on the workflow page. "
+                    "You can still adjust anything before pressing Run."
+                )
         with c_action:
             st.markdown("")
             st.markdown("")
             if st.button(f"Open {r.workflow}", key=f"go_{r.title[:30]}{key_suffix}"):
-                if r.preset_session_key:
-                    st.session_state[r.preset_session_key] = "fig2"
+                _apply_recipe(r)
                 st.switch_page(r.page_path)
 
 
@@ -245,16 +466,19 @@ with tab_wizard:
                 "Add an attribute (spectacles, beard, a style…)",
                 "Shift a demographic (gender, race, age…)",
                 "Suppress / erase a concept (NSFW, bias, a style I don't want)",
+                "Apply an art style (painterly, impressionist…)",
             ],
             index=0,
             key="wizard_action",
         )
         if action.startswith("Add"):
-            matching = [r for r in RECIPES if "Add an attribute" in r.title]
+            matching = [r for r in RECIPES if "spectacles" in r.title.lower()]
         elif action.startswith("Shift"):
-            matching = [r for r in RECIPES if "demographic" in r.title]
+            matching = [r for r in RECIPES if "demographic" in r.title.lower()]
+        elif action.startswith("Suppress"):
+            matching = [r for r in RECIPES if "suppress" in r.title.lower()]
         else:
-            matching = [r for r in RECIPES if "Suppress" in r.title]
+            matching = [r for r in RECIPES if "painterly" in r.title.lower()]
 
     elif intent.startswith("Find"):
         sub = st.radio(
@@ -262,31 +486,35 @@ with tab_wizard:
             [
                 "Exploring — I don't yet know which head matters",
                 "Testing — I suspect a specific head/layer",
+                "Mapping — compare what early vs late layers do",
             ],
             index=0,
             key="wizard_loc_action",
         )
-        matching = (
-            [r for r in RECIPES if "Find where" in r.title]
-            if sub.startswith("Exploring")
-            else [r for r in RECIPES if "Test a specific" in r.title]
-        )
+        if sub.startswith("Exploring"):
+            matching = [r for r in RECIPES if "Find where" in r.title]
+        elif sub.startswith("Testing"):
+            matching = [r for r in RECIPES if "Test a specific" in r.title]
+        else:
+            matching = [r for r in RECIPES if "early vs late" in r.title]
 
     elif intent.startswith("Understand"):
         sub = st.radio(
             "**Are you discovering features or amplifying a known one?**",
             [
                 "Discovering — what features even activate for my prompt?",
+                "Hunting — find the feature that controls a property I care about",
                 "Amplifying — I already know a feature index I want to push on",
             ],
             index=0,
             key="wizard_sae_action",
         )
-        matching = (
-            [r for r in RECIPES if "Discover what features" in r.title]
-            if sub.startswith("Discovering")
-            else [r for r in RECIPES if "Amplify" in r.title]
-        )
+        if sub.startswith("Discovering"):
+            matching = [r for r in RECIPES if "Discover what features" in r.title]
+        elif sub.startswith("Hunting"):
+            matching = [r for r in RECIPES if "controls a specific visual property" in r.title]
+        else:
+            matching = [r for r in RECIPES if "Amplify" in r.title]
 
     else:  # "Move behavior"
         sub = st.radio(
@@ -305,9 +533,12 @@ with tab_wizard:
         )
 
     st.markdown("---")
-    st.markdown(f"### Recommended workflow: **{matching[0].workflow}**")
-    for r in matching:
-        _render_recipe_card(r, key_suffix="_wiz")
+    if matching:
+        st.markdown(f"### Recommended workflow: **{matching[0].workflow}**")
+        for r in matching:
+            _render_recipe_card(r, key_suffix="_wiz")
+    else:
+        st.info("No recipe matches that combination yet — try Browse all recipes.")
 
 
 # ── Tab 2: Describe your goal (LLM-routed) ───────────────────────────────────
@@ -325,7 +556,8 @@ with tab_llm:
         st.markdown(
             "Describe your goal in your own words. Claude (haiku-4.5) reads the "
             "available workflows + recipes and picks the best match for you, "
-            "with reasoning + a starting config."
+            "with reasoning + a starting config. The *Open* button will pre-fill "
+            "the workflow page with your goal text — adjust the rest before running."
         )
 
         goal_text = st.text_area(
@@ -343,6 +575,7 @@ with tab_llm:
                 try:
                     match: RecipeMatch = analyze_goal(goal_text.strip())
                     st.session_state["last_llm_match"] = match
+                    st.session_state["last_llm_user_goal"] = goal_text.strip()
                 except Exception as e:
                     st.error(f"Claude call failed: {type(e).__name__}: {e}")
                     st.session_state.pop("last_llm_match", None)
@@ -359,8 +592,21 @@ with tab_llm:
                 st.markdown("**Suggested starting config:**")
                 for label, value in match.suggested_config:
                     st.markdown(f"  - **{label}**: `{value}`")
+                st.caption(
+                    "Claude's suggested config is shown above for reference. "
+                    "Clicking *Open* will land you on the workflow page with your "
+                    "goal text pre-filled — set the sliders/inputs to match the "
+                    "suggestion (or your own values) before pressing Run."
+                )
 
                 if st.button(f"Open {match.workflow} →", type="primary", key="llm_open_btn"):
+                    st.session_state["recipe_payload"] = {
+                        "workflow": match.workflow,
+                        "goal": st.session_state.get("last_llm_user_goal", ""),
+                        "fields": {},  # Claude's suggestions are free-form strings,
+                        # so we don't try to parse them into widget values — just
+                        # show them in the result panel via the goal text.
+                    }
                     st.switch_page(match.page_path)
 
 

@@ -18,6 +18,31 @@ from app.lib import (
 
 st.set_page_config(page_title="SAE • T2I-Interp", layout="wide")
 
+# ── Defaults + recipe-payload intake ─────────────────────────────────────────
+_SAE_DEFAULTS: dict[str, object] = {
+    "sae_goal": "",
+    "sae_prompt": "a red apple",
+    "sae_strength_lo": -5.0,
+    "sae_strength_hi": 5.0,
+    "sae_n_features_to_plot": 2,
+    "sae_n_top_features": 10,
+    "sae_model_preset": "sdxl_turbo",
+}
+for _k, _v in _SAE_DEFAULTS.items():
+    st.session_state.setdefault(_k, _v)
+
+_payload = st.session_state.get("recipe_payload")
+if _payload and _payload.get("workflow") == "SAE":
+    del st.session_state["recipe_payload"]
+    if _payload.get("goal"):
+        st.session_state["sae_goal"] = _payload["goal"]
+    for _fk, _fv in _payload.get("fields", {}).items():
+        _sk = f"sae_{_fk}"
+        if _sk in _SAE_DEFAULTS:
+            st.session_state[_sk] = _fv
+
+# ── Page body ────────────────────────────────────────────────────────────────
+
 st.title("Sparse Autoencoders — feature discovery + modulation")
 
 st.markdown(
@@ -30,24 +55,24 @@ st.markdown(
 with st.expander("**Common goals this page serves**", expanded=False):
     st.markdown(
         """
-- **Discover what features your model uses for a given prompt.** Capture
-  the top-K most-active features, then modulate them and see what each
-  one encodes.
+- **Discover what features your model uses for a given prompt.**
 - **Find a feature that controls a specific visual property** (shininess,
-  texture, colour, object part). Iterate over prompts and watch which
-  features change predictably.
-- **Build a "feature steering" recipe.** Once you've found a feature index
-  that controls what you want, fix the modulation strength and apply it
-  permanently to all generations.
+  texture, colour, object part).
+- **Amplify or suppress a known feature index** to bias all generations.
 
-See the **Recipes** page for one-click feature-discovery walkthroughs.
+See the **Recipes** page for one-click presets — clicking *Open* there
+will pre-fill the form below.
 """
     )
 
-goal = st.text_input(
+st.text_input(
     "What are you trying to achieve? (optional)",
     placeholder='e.g. "Find a feature that controls shininess in fruit images"',
-    help="For your own notes. Shown back in the results panel.",
+    help=(
+        "Stored in the run fingerprint and shown back in the results panel. "
+        "Pre-filled automatically if you arrived from a Recipe."
+    ),
+    key="sae_goal",
 )
 
 st.info(
@@ -78,17 +103,27 @@ if not ckpt_dir.exists():
 # ── Sidebar config ───────────────────────────────────────────────────────────
 st.sidebar.header("Configuration")
 device, dtype = device_dtype_picker(default_device="mps")
-preset = model_preset_picker(default="sdxl_turbo")
+preset = model_preset_picker(
+    default=str(st.session_state.get("sae_model_preset", "sdxl_turbo")),
+    key="sae_model_preset",
+)
 
-prompt = st.sidebar.text_input("Prompt", value="a red apple")
+st.sidebar.text_input("Prompt", key="sae_prompt")
 
 st.sidebar.markdown("**Strengths to modulate each feature by**")
-strength_lo = st.sidebar.slider("Min strength", -20.0, 0.0, -5.0, 0.5)
-strength_hi = st.sidebar.slider("Max strength", 0.0, 20.0, 5.0, 0.5)
-strengths = sorted({strength_lo, 0.0, strength_hi})  # always include baseline
+st.sidebar.slider("Min strength", -20.0, 0.0, step=0.5, key="sae_strength_lo")
+st.sidebar.slider("Max strength", 0.0, 20.0, step=0.5, key="sae_strength_hi")
 
-n_features_to_plot = st.sidebar.slider("Top features to modulate", 1, 6, 2)
-n_top_features = st.sidebar.slider("Capture top-K features", 2, 20, 10)
+st.sidebar.slider("Top features to modulate", 1, 6, key="sae_n_features_to_plot")
+st.sidebar.slider("Capture top-K features", 2, 20, key="sae_n_top_features")
+
+prompt = str(st.session_state["sae_prompt"])
+strength_lo = float(st.session_state["sae_strength_lo"])
+strength_hi = float(st.session_state["sae_strength_hi"])
+strengths = sorted({strength_lo, 0.0, strength_hi})  # always include baseline
+n_features_to_plot = int(st.session_state["sae_n_features_to_plot"])
+n_top_features = int(st.session_state["sae_n_top_features"])
+goal = str(st.session_state["sae_goal"])
 
 # ── Build overrides ──────────────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_sae_")

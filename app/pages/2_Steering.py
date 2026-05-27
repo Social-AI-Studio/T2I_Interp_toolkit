@@ -17,6 +17,36 @@ from app.lib import (
 
 st.set_page_config(page_title="Steering • T2I-Interp", layout="wide")
 
+# ── Defaults + recipe-payload intake ─────────────────────────────────────────
+# Every recipe-controllable widget on this page is keyed into session_state
+# so the Recipes page can pre-fill it via st.session_state["recipe_payload"].
+# Order matters: set defaults first (idempotent), then overwrite with payload
+# *before* any widgets render.
+
+_STEER_DEFAULTS: dict[str, object] = {
+    "steer_goal": "",
+    "steer_method": "loreft",
+    "steer_model_preset": "sdxl_turbo",
+    "steer_prompts": "A photo of Jack Sparrow\nA photo of Simba",
+    "steer_alpha": 10.0,
+    "steer_max_samples": 100,
+    "steer_train_steps": 50,
+}
+for _k, _v in _STEER_DEFAULTS.items():
+    st.session_state.setdefault(_k, _v)
+
+_payload = st.session_state.get("recipe_payload")
+if _payload and _payload.get("workflow") == "Steering":
+    del st.session_state["recipe_payload"]
+    if _payload.get("goal"):
+        st.session_state["steer_goal"] = _payload["goal"]
+    for _fk, _fv in _payload.get("fields", {}).items():
+        _sk = f"steer_{_fk}"
+        if _sk in _STEER_DEFAULTS:
+            st.session_state[_sk] = _fv
+
+# ── Page body ────────────────────────────────────────────────────────────────
+
 st.title("Steering — concept direction injection")
 
 st.markdown(
@@ -34,17 +64,21 @@ with st.expander("**Common goals this page serves**", expanded=False):
   a man" → Black).
 - **Suppress / erase an unwanted concept** (use negative alpha — subtract
   the direction rather than add it).
-- **Inject an emotion or style** (paper Fig 3 — "photo of a child" → sad).
+- **Apply a style** (painterly, impressionist, photorealistic) without a LoRA.
 
-See the **Recipes** page (sidebar) for one-click presets including
-"Reproduce Figure 2".
+See the **Recipes** page (sidebar) for one-click presets — clicking *Open*
+there will pre-fill the form below.
 """
     )
 
-goal = st.text_input(
+st.text_input(
     "What are you trying to achieve? (optional)",
     placeholder='e.g. "Add spectacles to portraits" or "Reduce gender bias for \'doctor\'"',
-    help="For your own notes. Shown back in the results panel.",
+    help=(
+        "Stored in the run fingerprint and shown back in the results panel. "
+        "Pre-filled automatically if you arrived from a Recipe."
+    ),
+    key="steer_goal",
 )
 
 st.info(
@@ -61,67 +95,76 @@ without retraining the model itself.
     icon="ℹ️",
 )
 
-# ── Quick presets ───────────────────────────────────────────────────────────
-if "steer_preset" not in st.session_state:
-    st.session_state.steer_preset = None
-
+# ── Quick presets (in-page, not via Recipes) ─────────────────────────────────
 c1, c2, _ = st.columns([1, 1, 4])
 with c1:
     if st.button(
         "Reproduce Figure 2", help="LoReFT + SDXL-Turbo + spectacles prompts, paper-style"
     ):
-        st.session_state.steer_preset = "fig2"
+        st.session_state["steer_method"] = "loreft"
+        st.session_state["steer_model_preset"] = "sdxl_turbo"
+        st.session_state["steer_prompts"] = "A photo of Jack Sparrow\nA photo of Simba"
+        st.session_state["steer_alpha"] = 10.0
+        st.session_state["steer_max_samples"] = 200
+        st.session_state["steer_train_steps"] = 50
+        st.rerun()
 with c2:
     if st.button("Quick smoke run", help="Tiny scale just to confirm the wiring works"):
-        st.session_state.steer_preset = "smoke"
-
-PRESET_DEFAULTS = {
-    "fig2": {
-        "steer_type": "loreft",
-        "prompts": "A photo of Jack Sparrow\nA photo of Simba",
-        "alpha": 10.0,
-        "max_samples": 200,
-        "train_steps": 50,
-        "model_preset": "sdxl_turbo",
-    },
-    "smoke": {
-        "steer_type": "loreft",
-        "prompts": "A photo of a cat",
-        "alpha": 5.0,
-        "max_samples": 10,
-        "train_steps": 2,
-        "model_preset": "sdxl_turbo",
-    },
-}
-PD = PRESET_DEFAULTS.get(st.session_state.steer_preset, {})
+        st.session_state["steer_method"] = "loreft"
+        st.session_state["steer_model_preset"] = "sdxl_turbo"
+        st.session_state["steer_prompts"] = "A photo of a cat"
+        st.session_state["steer_alpha"] = 5.0
+        st.session_state["steer_max_samples"] = 10
+        st.session_state["steer_train_steps"] = 2
+        st.rerun()
 
 # ── Sidebar config ────────────────────────────────────────────────────────────
 st.sidebar.header("Configuration")
 device, dtype = device_dtype_picker(default_device="mps")
-preset = model_preset_picker(default=PD.get("model_preset", "sdxl_turbo"))
+preset = model_preset_picker(
+    default=str(st.session_state.get("steer_model_preset", "sdxl_turbo")),
+    key="steer_model_preset",
+)
 
-_steer_opts = ["loreft", "caa", "ksteer"]
-steer_type = st.sidebar.selectbox(
+st.sidebar.selectbox(
     "Steering method",
-    _steer_opts,
-    index=_steer_opts.index(PD.get("steer_type", "loreft")),
+    ["loreft", "caa", "ksteer"],
+    key="steer_method",
 )
-prompts_raw = st.sidebar.text_area(
+st.sidebar.text_area(
     "Prompts (one per line)",
-    value=PD.get("prompts", "A photo of Jack Sparrow\nA photo of Simba"),
     help="Generated once as baseline, once steered.",
+    key="steer_prompts",
 )
-prompts = [p.strip() for p in prompts_raw.split("\n") if p.strip()]
-alpha = st.sidebar.slider(
+st.sidebar.slider(
     "Alpha (steering strength)",
-    0.0,
+    -30.0,
     30.0,
-    float(PD.get("alpha", 10.0)),
-    0.5,
-    help="0.0 = no steering. Higher = stronger. SDXL-Turbo + LoReFT works well around 10-20.",
+    step=0.5,
+    help="0.0 = no steering. Higher = stronger. Negative = subtract the "
+    "direction (suppression). SDXL-Turbo + LoReFT works well around 10-20.",
+    key="steer_alpha",
 )
-max_samples = st.sidebar.slider("Training samples", 10, 1000, PD.get("max_samples", 100))
-train_steps = st.sidebar.slider("Training steps", 2, 500, PD.get("train_steps", 50))
+st.sidebar.slider(
+    "Training samples",
+    10,
+    1000,
+    key="steer_max_samples",
+)
+st.sidebar.slider(
+    "Training steps",
+    2,
+    500,
+    key="steer_train_steps",
+)
+
+steer_type = str(st.session_state["steer_method"])
+prompts_raw = str(st.session_state["steer_prompts"])
+prompts = [p.strip() for p in prompts_raw.split("\n") if p.strip()]
+alpha = float(st.session_state["steer_alpha"])
+max_samples = int(st.session_state["steer_max_samples"])
+train_steps = int(st.session_state["steer_train_steps"])
+goal = str(st.session_state["steer_goal"])
 
 # ── Build overrides ──────────────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_steer_")
