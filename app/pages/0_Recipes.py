@@ -55,8 +55,50 @@ class Recipe:
 
 # Standard prompt blocks reused across recipes.
 _SPECTACLES_PROMPTS = "A photo of Jack Sparrow\nA photo of Simba\nA photo of Mickey Mouse"
-_DEMOGRAPHIC_PROMPTS_POS = "photo of a Black man"
-_DEMOGRAPHIC_PROMPTS_NEG = "photo of a man"
+
+# Inline pair catalogues (pos | neg, one per line). Used by recipes whose target
+# concept doesn't have a published HuggingFace dataset in the CAA/LoReFT schema —
+# run_steer.py builds an in-memory Dataset from these pairs.
+_DEMOGRAPHIC_PAIRS = (
+    "photo of a Black man | photo of a man\n"
+    "portrait of a Black man | portrait of a man\n"
+    "photograph of a Black father | photograph of a father\n"
+    "headshot of a Black man | headshot of a man\n"
+    "photo of a Black businessman | photo of a businessman\n"
+    "portrait of a Black athlete | portrait of an athlete\n"
+    "photo of a Black doctor | photo of a doctor\n"
+    "photo of a Black teacher | photo of a teacher"
+)
+_CIGARETTE_PAIRS = (
+    "a man holding a cigarette | a man holding a pen\n"
+    "a person smoking | a person resting\n"
+    "a man smoking outside | a man standing outside\n"
+    "a woman with a cigarette | a woman with a coffee cup\n"
+    "a person lighting a cigarette | a person lighting a candle\n"
+    "close-up of someone smoking | close-up of someone yawning\n"
+    "a hand holding a cigarette | a hand holding a phone\n"
+    "a character with a cigarette | a character with a coffee"
+)
+_PAINTERLY_PAIRS = (
+    "a painterly portrait of a man | a photo of a man\n"
+    "an impressionist painting of a woman | a photo of a woman\n"
+    "a painterly landscape with mountains | a photo of a landscape with mountains\n"
+    "an oil painting of a still life with apples | a photo of a still life with apples\n"
+    "a painterly portrait of a child | a photo of a child\n"
+    "an impressionist garden scene | a photo of a garden scene\n"
+    "a painterly seascape at sunset | a photo of a seascape at sunset\n"
+    "a painterly street market | a photo of a street market"
+)
+_OCCUPATION_PAIRS = (
+    "a woman doctor | a doctor\n"
+    "a woman CEO | a CEO\n"
+    "a woman engineer | an engineer\n"
+    "a woman scientist | a scientist\n"
+    "a woman pilot | a pilot\n"
+    "a woman programmer | a programmer\n"
+    "a woman surgeon | a surgeon\n"
+    "a woman professor | a professor"
+)
 
 
 RECIPES: list[Recipe] = [
@@ -92,42 +134,45 @@ RECIPES: list[Recipe] = [
         title="Shift generations toward a specific demographic (paper Fig 3)",
         objective='I want "photo of a man" to lean toward **Black men** without changing the model.',
         description=(
-            "Uses CAA: compute the difference between average activations for "
-            "`photo of a Black man` and `photo of a man`, then add that direction "
-            "to the base model at generation time. Reproduces Figure 3."
+            "Uses CAA on **8 inline prompt pairs** (Black-versioned vs neutral). "
+            "Computes the mean activation difference between the two groups, "
+            "then adds that direction to the base model at generation time. "
+            "Inspired by Figure 3 of the paper."
         ),
         workflow="Steering",
         settings=[
             ("Method", "caa"),
             ("Model preset", "sd15"),
             ("Alpha", "8.0"),
-            ("Positive prompts", _DEMOGRAPHIC_PROMPTS_POS),
-            ("Negative prompts", _DEMOGRAPHIC_PROMPTS_NEG),
+            ("Inline pairs", "8 demographic pairs (pre-filled)"),
+            ("Inference prompts", "photo of a man\\nphoto of a person"),
         ],
         page_path="pages/2_Steering.py",
         fields={
             "method": "caa",
             "model_preset": "sd15",
-            "prompts": _DEMOGRAPHIC_PROMPTS_POS,
+            "prompts": "photo of a man\nphoto of a person",
             "alpha": 8.0,
-            "max_samples": 150,
+            "max_samples": 100,
             "train_steps": 50,
+            "inline_pairs": _DEMOGRAPHIC_PAIRS,
         },
-        goal_text="Shift 'photo of a man' generations toward Black men (paper Fig 3).",
+        goal_text="Shift 'photo of a man' generations toward Black men (paper Fig 3, inline pairs).",
     ),
     Recipe(
-        title="Suppress / erase an unwanted concept",
-        objective="I want my model to **not** generate cigarettes / weapons / NSFW content.",
+        title="Suppress / erase an unwanted concept (cigarettes)",
+        objective="I want my model to **not** generate cigarettes / smoking content.",
         description=(
-            "Train a steering direction for the unwanted concept (positive = has-concept), "
-            "then inject with a **negative alpha** at inference. Subtracts the direction "
-            "instead of adding it."
+            "Trains a CAA direction for the unwanted concept (positive = has-cigarette, "
+            "negative = a benign substitute), then injects with a **negative alpha** "
+            "at inference. Subtracts the direction instead of adding it. Swap the "
+            "inline pairs to suppress any other concept (weapons, NSFW, …)."
         ),
         workflow="Steering",
         settings=[
             ("Method", "caa"),
             ("Alpha", "-10.0 (negative!)"),
-            ("Training samples", "150"),
+            ("Inline pairs", "8 cigarette pairs (pre-filled)"),
         ],
         page_path="pages/2_Steering.py",
         fields={
@@ -135,62 +180,67 @@ RECIPES: list[Recipe] = [
             "model_preset": "sd15",
             "prompts": "a man holding a cigarette\na person smoking",
             "alpha": -10.0,
-            "max_samples": 150,
+            "max_samples": 100,
             "train_steps": 50,
+            "inline_pairs": _CIGARETTE_PAIRS,
         },
-        goal_text="Suppress an unwanted concept (e.g. cigarettes) via negative alpha.",
+        goal_text="Suppress cigarettes via negative-alpha CAA (inline pairs).",
     ),
     Recipe(
         title="Apply a painterly art style without LoRA training",
         objective="I want my generations to look **more painterly / impressionist** without a LoRA.",
         description=(
-            "Steering a style is the same machinery as steering a concept: train a "
-            "direction on `painterly photo of X` vs `photo of X` and inject at "
-            "inference. Faster and lighter than a LoRA, fully composable with prompt."
+            "Trains a LoReFT adapter on 8 inline (base, teacher) pairs where the "
+            "teacher prompts add 'painterly'/'impressionist' modifiers. At "
+            "inference the adapter biases the model toward the teacher style — "
+            "faster and lighter than a LoRA, fully composable with prompt."
         ),
         workflow="Steering",
         settings=[
             ("Method", "loreft"),
             ("Model preset", "sdxl_turbo"),
             ("Alpha", "12.0"),
-            ("Training samples", "150"),
+            ("Inline pairs", "8 painterly pairs (pre-filled)"),
         ],
         page_path="pages/2_Steering.py",
         fields={
             "method": "loreft",
             "model_preset": "sdxl_turbo",
-            "prompts": "a painterly photo of a landscape\nan impressionist portrait",
+            "prompts": "a photo of a person\na photo of a landscape",
             "alpha": 12.0,
-            "max_samples": 150,
-            "train_steps": 50,
+            "max_samples": 100,
+            "train_steps": 100,
+            "inline_pairs": _PAINTERLY_PAIRS,
         },
-        goal_text="Make generations look painterly / impressionist (style steering).",
+        goal_text="Make generations look painterly / impressionist (LoReFT, inline pairs).",
     ),
     Recipe(
         title="Reduce gender stereotyping for occupation prompts",
-        objective='I want "a doctor" / "a nurse" / "a CEO" prompts to **stop defaulting to one gender**.',
+        objective='I want "a doctor" / "a CEO" prompts to **stop defaulting to one gender**.',
         description=(
-            "Train a CAA direction on `a woman doctor` (positive) vs `a man doctor` "
-            "(negative). At inference, use a small positive alpha to tilt the model "
-            "toward the under-represented direction; sweep alpha to find the balance."
+            "Trains a CAA direction on 8 inline pairs (`a woman <occupation>` "
+            "positive vs `a <occupation>` negative). At inference, applies a "
+            "small positive alpha to tilt the model toward the under-represented "
+            "direction. Sweep alpha to find the balance."
         ),
         workflow="Steering",
         settings=[
             ("Method", "caa"),
             ("Model preset", "sd15"),
             ("Alpha", "5.0"),
-            ("Training samples", "100"),
+            ("Inline pairs", "8 occupation pairs (pre-filled)"),
         ],
         page_path="pages/2_Steering.py",
         fields={
             "method": "caa",
             "model_preset": "sd15",
-            "prompts": "a woman doctor\na woman CEO\na woman engineer",
+            "prompts": "a doctor\na CEO\nan engineer",
             "alpha": 5.0,
             "max_samples": 100,
             "train_steps": 50,
+            "inline_pairs": _OCCUPATION_PAIRS,
         },
-        goal_text="Reduce gender stereotyping for occupation prompts (doctor/CEO/etc.).",
+        goal_text="Reduce gender stereotyping for occupation prompts (CAA, inline pairs).",
     ),
     # ── Localisation ─────────────────────────────────────────────────────────
     Recipe(

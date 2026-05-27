@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import tempfile
 import time
 
@@ -31,6 +33,11 @@ _STEER_DEFAULTS: dict[str, object] = {
     "steer_alpha": 10.0,
     "steer_max_samples": 100,
     "steer_train_steps": 50,
+    # Inline training pairs (positive | negative, one per line). When empty,
+    # the page falls back to the workflow's default HuggingFace dataset
+    # (currently the spectacles dataset). When set, run_steer.py builds an
+    # in-memory dataset from these pairs and trains on them directly.
+    "steer_inline_pairs": "",
 }
 for _k, _v in _STEER_DEFAULTS.items():
     st.session_state.setdefault(_k, _v)
@@ -158,6 +165,28 @@ st.sidebar.slider(
     key="steer_train_steps",
 )
 
+# Inline training pairs — open by default if pre-filled by a recipe, else collapsed.
+with st.sidebar.expander(
+    "Training data (inline pairs)",
+    expanded=bool(st.session_state.get("steer_inline_pairs", "").strip()),
+):
+    st.text_area(
+        "Prompt pairs — one per line, `positive | negative`",
+        help=(
+            "When set, trains on these inline pairs instead of the workflow's "
+            "default HuggingFace dataset (currently the spectacles dataset). "
+            "For CAA each `positive` becomes a label=1 caption and each "
+            "`negative` becomes a label=0 caption; for LoReFT each pair becomes "
+            "one (base=negative, teacher=positive) row.\n\nLeave empty to use "
+            "the configured HF dataset."
+        ),
+        placeholder=(
+            "photo of a Black man | photo of a man\nphoto of a Black woman | photo of a woman"
+        ),
+        height=160,
+        key="steer_inline_pairs",
+    )
+
 steer_type = str(st.session_state["steer_method"])
 prompts_raw = str(st.session_state["steer_prompts"])
 prompts = [p.strip() for p in prompts_raw.split("\n") if p.strip()]
@@ -165,9 +194,36 @@ alpha = float(st.session_state["steer_alpha"])
 max_samples = int(st.session_state["steer_max_samples"])
 train_steps = int(st.session_state["steer_train_steps"])
 goal = str(st.session_state["steer_goal"])
+inline_pairs_text = str(st.session_state.get("steer_inline_pairs", ""))
+
+
+def _parse_inline_pairs(raw: str) -> list[dict[str, str]]:
+    """Parse 'pos | neg' lines into [{'pos': ..., 'neg': ...}, ...]."""
+    out: list[dict[str, str]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or "|" not in line:
+            continue
+        left, right = line.split("|", 1)
+        pos, neg = left.strip(), right.strip()
+        if pos and neg:
+            out.append({"pos": pos, "neg": neg})
+    return out
+
+
+inline_pairs = _parse_inline_pairs(inline_pairs_text)
 
 # ── Build overrides ──────────────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_steer_")
+
+# Inline pairs go via a JSON sidecar file — Hydra's list-of-dict override
+# syntax is awkward for prompts containing spaces/commas.
+inline_pairs_file: str | None = None
+if inline_pairs:
+    inline_pairs_file = os.path.join(out_dir, "inline_pairs.json")
+    with open(inline_pairs_file, "w") as f:
+        json.dump(inline_pairs, f)
+
 overrides = [
     f"--config-name=steer/{steer_type}",
     f"device={device}",
@@ -183,9 +239,13 @@ overrides = [
 ]
 if preset:
     overrides.append(f"model={preset}")
+if inline_pairs_file:
+    overrides.append(f"inline_pairs_file={inline_pairs_file}")
 
 st.subheader("CLI equivalent")
 st.code("t2i-steer " + " ".join(overrides[:8]) + " …", language="bash")
+if inline_pairs:
+    st.caption(f"Training on **{len(inline_pairs)} inline pair(s)** — the HF dataset is skipped.")
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 if st.button("Run", type="primary"):

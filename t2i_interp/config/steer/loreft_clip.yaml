@@ -19,7 +19,10 @@ model_key: stable-diffusion-v1-5/stable-diffusion-v1-5
 device: cuda:0
 dtype: float16
 
-# Dataset
+# Dataset — set `inline_pairs_file` (JSON path) or `inline_pairs` (list of
+# {pos, neg} dicts) to skip the HF dataset and train on inline prompt pairs.
+inline_pairs: null
+inline_pairs_file: null
 dataset_name: nirmalendu01/spectacles-bias-prompts-headshot
 prompt_cols: ["base_prompt", "with_spectacles_prompt"]
 max_samples: 100

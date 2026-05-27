@@ -45,7 +45,7 @@ def main(cfg: DictConfig) -> None:
 
     diffusers_logging.set_verbosity_error()
     transformers.logging.set_verbosity_error()
-    from datasets import load_dataset
+    from datasets import Dataset, DatasetDict, load_dataset
 
     from t2i_interp.linear_steering import KSteer
     from t2i_interp.mapper import MLPMapper
@@ -122,8 +122,64 @@ def main(cfg: DictConfig) -> None:
     )
     model.pipeline.set_progress_bar_config(disable=True)
 
-    # 2. Dataset
-    ds_full = load_dataset(cfg.dataset_name)
+    def _load_inline_pairs_dataset(cfg):
+        """Build an in-memory `DatasetDict` from inline positive/negative
+        prompt pairs (Streamlit playground / quick demos), and patch `cfg`
+        with the matching column names so the rest of the script is unaware
+        of the source. Returns `None` if no inline pairs are configured —
+        the caller falls back to `load_dataset(cfg.dataset_name)`.
+
+        Two input shapes are accepted:
+          * `cfg.inline_pairs`: a list of {pos, neg} dicts directly in the
+            config (works for both CLI YAML and Hydra overrides).
+          * `cfg.inline_pairs_file`: a path to a JSON file holding the same
+            list — used by the Streamlit page to avoid Hydra's awkward
+            list-of-dict override syntax for prompts containing spaces.
+        """
+        raw_inline = getattr(cfg, "inline_pairs", None)
+        pairs = OmegaConf.to_container(raw_inline, resolve=True) if raw_inline else []
+        if not pairs:
+            pairs_file = getattr(cfg, "inline_pairs_file", None)
+            if pairs_file and os.path.exists(pairs_file):
+                import json
+
+                with open(pairs_file) as f:
+                    pairs = json.load(f)
+        if not pairs:
+            return None
+
+        steer_type_early = getattr(cfg, "steer_type", "caa")
+        if steer_type_early == "loreft":
+            # LoReFT wants paired columns on the SAME row: one base, one teacher.
+            rows = [{"base_prompt": p["neg"], "teacher_prompt": p["pos"]} for p in pairs]
+            patch = {"prompt_cols": ["base_prompt", "teacher_prompt"]}
+        else:
+            # CAA / KSteer want a single `prompt_col` + binary label per row.
+            rows = []
+            for p in pairs:
+                rows.append({"caption": p["pos"], "label": 1})
+                rows.append({"caption": p["neg"], "label": 0})
+            patch = {
+                "prompt_col": "caption",
+                "label_col": "label",
+                "pos_labels": [1],
+                "neg_labels": [0],
+            }
+        OmegaConf.set_struct(cfg, False)
+        for k, v in patch.items():
+            setattr(cfg, k, v)
+        OmegaConf.set_struct(cfg, True)
+
+        n_val = max(1, len(rows) // 5)
+        return DatasetDict(
+            {
+                "train": Dataset.from_list(rows),
+                "validation": Dataset.from_list(rows[-n_val:]),
+            }
+        )
+
+    # 2. Dataset — either inline prompt pairs (playground) or a HuggingFace dataset.
+    ds_full = _load_inline_pairs_dataset(cfg) or load_dataset(cfg.dataset_name)
     ds_train = ds_full["train"]
     ds_val = (
         ds_full.get("validation")

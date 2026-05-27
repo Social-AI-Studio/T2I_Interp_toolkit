@@ -17,7 +17,12 @@ dtype: float16
 seed: null   # int → torch.manual_seed; null → unseeded
 
 # Dataset
-# Note for LoReFT: Your dataset needs two prompt columns, one for base(student) and one for teacher
+# Note for LoReFT: Your dataset needs two prompt columns, one for base(student) and one for teacher.
+# Set `inline_pairs_file` (JSON path) or `inline_pairs` (list of {pos, neg}
+# dicts) to skip the HF dataset and train on inline prompt pairs; `pos` becomes
+# the teacher prompt and `neg` becomes the base/student prompt.
+inline_pairs: null
+inline_pairs_file: null
 dataset_name: nirmalendu01/spectacles-bias-prompts-headshot
 prompt_cols: ["base_prompt", "with_spectacles_prompt"] # e.g. ["student", "teacher"]
 max_samples: 100
