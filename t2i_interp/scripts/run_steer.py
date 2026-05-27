@@ -148,6 +148,16 @@ def main(cfg: DictConfig) -> None:
         if not pairs:
             return None
 
+        # Validate input shape early — easier to debug than a downstream KeyError.
+        for i, p in enumerate(pairs):
+            if not isinstance(p, dict) or "pos" not in p or "neg" not in p:
+                raise ValueError(
+                    f"inline_pairs[{i}] must be a dict with 'pos' and 'neg' keys; "
+                    f"got {type(p).__name__}={p!r}"
+                )
+            if not p["pos"] or not p["neg"]:
+                raise ValueError(f"inline_pairs[{i}] has empty 'pos' or 'neg': {p!r}")
+
         steer_type_early = getattr(cfg, "steer_type", "caa")
         if steer_type_early == "loreft":
             # LoReFT wants paired columns on the SAME row: one base, one teacher.
@@ -170,11 +180,18 @@ def main(cfg: DictConfig) -> None:
             setattr(cfg, k, v)
         OmegaConf.set_struct(cfg, True)
 
-        n_val = max(1, len(rows) // 5)
+        # Disjoint train/val split. For very small datasets (≤3 rows) we
+        # reuse train as val rather than empty-out train — useful for
+        # smoke tests; validation metrics are meaningless either way.
+        if len(rows) <= 3:
+            train_rows, val_rows = rows, rows
+        else:
+            n_val = max(1, len(rows) // 5)
+            train_rows, val_rows = rows[:-n_val], rows[-n_val:]
         return DatasetDict(
             {
-                "train": Dataset.from_list(rows),
-                "validation": Dataset.from_list(rows[-n_val:]),
+                "train": Dataset.from_list(train_rows),
+                "validation": Dataset.from_list(val_rows),
             }
         )
 

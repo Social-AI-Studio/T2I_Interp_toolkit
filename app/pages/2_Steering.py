@@ -197,21 +197,40 @@ goal = str(st.session_state["steer_goal"])
 inline_pairs_text = str(st.session_state.get("steer_inline_pairs", ""))
 
 
-def _parse_inline_pairs(raw: str) -> list[dict[str, str]]:
-    """Parse 'pos | neg' lines into [{'pos': ..., 'neg': ...}, ...]."""
+def _parse_inline_pairs(raw: str) -> tuple[list[dict[str, str]], list[int]]:
+    """Parse 'pos | neg' lines. Returns (pairs, skipped_line_numbers)."""
     out: list[dict[str, str]] = []
-    for line in raw.splitlines():
+    skipped: list[int] = []
+    for idx, line in enumerate(raw.splitlines(), start=1):
         line = line.strip()
-        if not line or "|" not in line:
+        if not line:
+            continue
+        if "|" not in line:
+            skipped.append(idx)
             continue
         left, right = line.split("|", 1)
         pos, neg = left.strip(), right.strip()
         if pos and neg:
             out.append({"pos": pos, "neg": neg})
-    return out
+        else:
+            skipped.append(idx)
+    return out, skipped
 
 
-inline_pairs = _parse_inline_pairs(inline_pairs_text)
+inline_pairs, _inline_skipped = _parse_inline_pairs(inline_pairs_text)
+if inline_pairs_text.strip() and not inline_pairs:
+    st.sidebar.warning(
+        "Inline pairs textarea is non-empty but no valid `positive | negative` "
+        "lines were found. The HF dataset will be used instead. "
+        "Format each line as `positive prompt | negative prompt`.",
+        icon="⚠️",
+    )
+elif _inline_skipped:
+    st.sidebar.warning(
+        f"Skipped {len(_inline_skipped)} line(s) without a `|` separator "
+        f"(line(s) {', '.join(map(str, _inline_skipped))}).",
+        icon="⚠️",
+    )
 
 # ── Build overrides ──────────────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_steer_")

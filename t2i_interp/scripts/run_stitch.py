@@ -224,14 +224,25 @@ def main(cfg: DictConfig) -> None:
             return None
 
         rows = []
-        for p in pairs:
+        for i, p in enumerate(pairs):
             if isinstance(p, dict):
                 a = p.get("a") or p.get("neg") or ""
                 b = p.get("b") or p.get("pos") or ""
+                if not a or not b:
+                    raise ValueError(
+                        f"inline_pairs[{i}] dict must yield non-empty prompts via "
+                        f"{{a, b}} or {{pos, neg}} keys; got {p!r}"
+                    )
+            elif isinstance(p, str):
+                if not p.strip():
+                    raise ValueError(f"inline_pairs[{i}] is an empty string")
+                a = b = p
             else:
-                a = b = str(p)
-            if a and b:
-                rows.append({"prompt_a": a, "prompt_b": b})
+                raise ValueError(
+                    f"inline_pairs[{i}] must be str or dict with a/b or pos/neg keys; "
+                    f"got {type(p).__name__}={p!r}"
+                )
+            rows.append({"prompt_a": a, "prompt_b": b})
         if not rows:
             return None
 
@@ -240,11 +251,17 @@ def main(cfg: DictConfig) -> None:
         cfg.prompt_col_b = "prompt_b"
         OmegaConf.set_struct(cfg, True)
 
-        n_val = max(1, len(rows) // 5)
+        # Disjoint train/val split. Very small datasets (≤3 rows) reuse train
+        # as val — smoke-test friendly; val metrics are meaningless either way.
+        if len(rows) <= 3:
+            train_rows, val_rows = rows, rows
+        else:
+            n_val = max(1, len(rows) // 5)
+            train_rows, val_rows = rows[:-n_val], rows[-n_val:]
         return DatasetDict(
             {
-                "train": Dataset.from_list(rows),
-                "validation": Dataset.from_list(rows[-n_val:]),
+                "train": Dataset.from_list(train_rows),
+                "validation": Dataset.from_list(val_rows),
             }
         )
 

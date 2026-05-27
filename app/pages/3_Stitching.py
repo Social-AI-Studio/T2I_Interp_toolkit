@@ -144,10 +144,11 @@ goal = str(st.session_state["stitch_goal"])
 inline_pairs_text = str(st.session_state.get("stitch_inline_pairs", ""))
 
 
-def _parse_inline_stitch(raw: str) -> list[dict[str, str] | str]:
-    """Parse 'prompt' or 'a | b' lines into the inline-pair JSON shape."""
+def _parse_inline_stitch(raw: str) -> tuple[list[dict[str, str] | str], list[int]]:
+    """Parse 'prompt' or 'a | b' lines. Returns (entries, skipped_line_numbers)."""
     out: list[dict[str, str] | str] = []
-    for line in raw.splitlines():
+    skipped: list[int] = []
+    for idx, line in enumerate(raw.splitlines(), start=1):
         line = line.strip()
         if not line:
             continue
@@ -155,12 +156,27 @@ def _parse_inline_stitch(raw: str) -> list[dict[str, str] | str]:
             a, b = (s.strip() for s in line.split("|", 1))
             if a and b:
                 out.append({"a": a, "b": b})
+            else:
+                skipped.append(idx)
         else:
             out.append(line)
-    return out
+    return out, skipped
 
 
-inline_pairs = _parse_inline_stitch(inline_pairs_text)
+inline_pairs, _inline_skipped = _parse_inline_stitch(inline_pairs_text)
+if inline_pairs_text.strip() and not inline_pairs:
+    st.sidebar.warning(
+        "Inline prompts textarea is non-empty but no valid lines were found. "
+        "The HF dataset will be used instead. Each line should be either "
+        "a single prompt or `prompt_a | prompt_b`.",
+        icon="⚠️",
+    )
+elif _inline_skipped:
+    st.sidebar.warning(
+        f"Skipped {len(_inline_skipped)} malformed line(s) "
+        f"(line(s) {', '.join(map(str, _inline_skipped))}).",
+        icon="⚠️",
+    )
 
 # ── Build overrides ──────────────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_stitch_")

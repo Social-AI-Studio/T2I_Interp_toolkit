@@ -17,8 +17,9 @@ from typing import Any
 
 import streamlit as st
 
-from app.lib import RecipeMatch, analyze_goal
+from app.lib import WORKFLOW_TO_PAGE, RecipeMatch, analyze_goal
 from app.lib import is_available as llm_is_available
+from app.lib.workflows import WORKFLOW_ORDER
 
 st.set_page_config(page_title="Recipes • T2I-Interp", layout="wide")
 
@@ -42,15 +43,19 @@ class Recipe:
     title: str
     objective: str
     description: str
-    workflow: str  # "Steering" | "Localisation" | "Stitching" | "SAE"
+    workflow: str  # one of WORKFLOW_TO_PAGE's keys
     settings: list[tuple[str, str]]  # display strings (key, value)
-    page_path: str
     # Machine-readable defaults — keys must match what the target workflow
     # page seeds into st.session_state. See the `_apply_payload` helper at
     # the top of each workflow page for the accepted keys.
     fields: dict[str, Any] = field(default_factory=dict)
     # Text seeded into the workflow page's `goal` field on arrival.
     goal_text: str = ""
+
+    @property
+    def page_path(self) -> str:
+        """Derive the target page from `workflow` via the shared mapping."""
+        return WORKFLOW_TO_PAGE[self.workflow]
 
 
 # Standard prompt blocks reused across recipes.
@@ -152,7 +157,6 @@ RECIPES: list[Recipe] = [
             ("Alpha", "10.0"),
             ("Inline pairs", "12 spectacles pairs (pre-filled)"),
         ],
-        page_path="pages/2_Steering.py",
         fields={
             "method": "loreft",
             "model_preset": "sdxl_turbo",
@@ -181,7 +185,6 @@ RECIPES: list[Recipe] = [
             ("Inline pairs", "8 demographic pairs (pre-filled)"),
             ("Inference prompts", "photo of a man\\nphoto of a person"),
         ],
-        page_path="pages/2_Steering.py",
         fields={
             "method": "caa",
             "model_preset": "sd15",
@@ -208,7 +211,6 @@ RECIPES: list[Recipe] = [
             ("Alpha", "-10.0 (negative!)"),
             ("Inline pairs", "8 cigarette pairs (pre-filled)"),
         ],
-        page_path="pages/2_Steering.py",
         fields={
             "method": "caa",
             "model_preset": "sd15",
@@ -236,7 +238,6 @@ RECIPES: list[Recipe] = [
             ("Alpha", "12.0"),
             ("Inline pairs", "8 painterly pairs (pre-filled)"),
         ],
-        page_path="pages/2_Steering.py",
         fields={
             "method": "loreft",
             "model_preset": "sdxl_turbo",
@@ -264,7 +265,6 @@ RECIPES: list[Recipe] = [
             ("Alpha", "5.0"),
             ("Inline pairs", "8 occupation pairs (pre-filled)"),
         ],
-        page_path="pages/2_Steering.py",
         fields={
             "method": "caa",
             "model_preset": "sd15",
@@ -291,7 +291,6 @@ RECIPES: list[Recipe] = [
             ("Target heads", "[0..7]  (sweep all)"),
             ("Scale factor", "0.0  (zero-ablate)"),
         ],
-        page_path="pages/1_Localisation.py",
         fields={
             "prompt": "a unicorn in a forest",
             "target_layer": "down_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
@@ -317,7 +316,6 @@ RECIPES: list[Recipe] = [
             ("Target layer", "mid_block.attentions.0..."),
             ("Scale factor", "0.0 (compare to baseline)"),
         ],
-        page_path="pages/1_Localisation.py",
         fields={
             "prompt": "a red apple on a wooden table",
             "target_layer": "mid_block_attentions_0_transformer_blocks_0_attn2_out",
@@ -343,7 +341,6 @@ RECIPES: list[Recipe] = [
             ("Target layer", "(early: down_blocks_1, late: up_blocks_2)"),
             ("Scale factor", "0.0"),
         ],
-        page_path="pages/1_Localisation.py",
         fields={
             "prompt": "a busy city street at dusk",
             "target_layer": "down_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
@@ -370,7 +367,6 @@ RECIPES: list[Recipe] = [
             ("Top features to modulate", "4-6"),
             ("Strengths", "[-5, +5]"),
         ],
-        page_path="pages/4_SAE.py",
         fields={
             "prompt": "a red apple on a wooden table",
             "strength_lo": -5.0,
@@ -396,7 +392,6 @@ RECIPES: list[Recipe] = [
             ("Strengths", "[-8, +8] (wide sweep)"),
             ("Top features", "6"),
         ],
-        page_path="pages/4_SAE.py",
         fields={
             "prompt": "a glossy red apple",
             "strength_lo": -8.0,
@@ -421,7 +416,6 @@ RECIPES: list[Recipe] = [
             ("Strengths", "[+5] (single fixed amplification)"),
             ("Top features to modulate", "1"),
         ],
-        page_path="pages/4_SAE.py",
         fields={
             "prompt": "a red apple on a wooden table",
             "strength_lo": 0.0,
@@ -449,7 +443,6 @@ RECIPES: list[Recipe] = [
             ("Mapper steps", "200"),
             ("Inline prompts", "10 generic prompts (pre-filled)"),
         ],
-        page_path="pages/3_Stitching.py",
         fields={
             "prompts": "a photo of a person\na photo of a landscape\na photo of a still life",
             "hidden_dim": 512,
@@ -478,7 +471,6 @@ RECIPES: list[Recipe] = [
             ("Mapper steps", "100"),
             ("Inline prompts", "10 generic prompts (pre-filled)"),
         ],
-        page_path="pages/3_Stitching.py",
         fields={
             "prompts": "a photo of a person",
             "hidden_dim": 256,
@@ -709,7 +701,7 @@ with tab_gallery:
         "Grouped by workflow."
     )
 
-    for wf in ["Steering", "Localisation", "SAE", "Stitching"]:
+    for wf in WORKFLOW_ORDER:
         wf_recipes = [r for r in RECIPES if r.workflow == wf]
         if not wf_recipes:
             continue

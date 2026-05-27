@@ -17,6 +17,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from app.lib.workflows import WORKFLOW_TO_PAGE
+
 # Hard-coded recipe catalogue. Keep this in sync with app/pages/0_Recipes.py.
 WORKFLOW_DESCRIPTIONS = """
 The toolkit has four workflows:
@@ -132,13 +134,12 @@ RECOMMEND_RECIPE_TOOL = {
 }
 
 
-# Page-path mapping must stay in sync with 0_Recipes.py
-WORKFLOW_TO_PAGE = {
-    "Steering": "pages/2_Steering.py",
-    "Localisation": "pages/1_Localisation.py",
-    "Stitching": "pages/3_Stitching.py",
-    "SAE": "pages/4_SAE.py",
-}
+# NOTE: WORKFLOW_DESCRIPTIONS above is intentionally separate from each
+# recipe's UI `description` in 0_Recipes.py — this prose is the LLM's
+# routing context (full sentences, all four workflows in one block) while
+# recipe `description`s are short card blurbs. WORKFLOW_TO_PAGE is the only
+# value that must stay in sync, hence the shared import from
+# `app/lib/workflows.py`.
 
 
 @dataclass(frozen=True)
