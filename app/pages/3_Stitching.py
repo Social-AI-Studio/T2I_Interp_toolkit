@@ -78,11 +78,82 @@ st.text_input(
     "What are you trying to achieve? (optional)",
     placeholder='e.g. "Can SD1.5 text-encoder output stand in for unet.conv_out?"',
     help=(
-        "Stored in the run fingerprint and shown back in the results panel. "
-        "Pre-filled automatically if you arrived from a Recipe."
+        "A label for your run — stored in the fingerprint and echoed in the "
+        "results panel. **Does not** drive training; see the 'Training data' "
+        "section below for the prompts the mapper actually learns from."
     ),
     key="stitch_goal",
 )
+
+
+# ── Training data source banner ──────────────────────────────────────────────
+
+
+def _parse_inline_stitch(raw: str) -> tuple[list[dict[str, str] | str], list[int]]:
+    """Parse 'prompt' or 'a | b' lines. Returns (entries, skipped_line_numbers)."""
+    out: list[dict[str, str] | str] = []
+    skipped: list[int] = []
+    for idx, line in enumerate(raw.splitlines(), start=1):
+        line = line.strip()
+        if not line:
+            continue
+        if "|" in line:
+            a, b = (s.strip() for s in line.split("|", 1))
+            if a and b:
+                out.append({"a": a, "b": b})
+            else:
+                skipped.append(idx)
+        else:
+            out.append(line)
+    return out, skipped
+
+
+_pre_inline, _pre_skipped = _parse_inline_stitch(
+    str(st.session_state.get("stitch_inline_pairs", ""))
+)
+
+st.subheader("Training data")
+if _pre_inline:
+    st.success(
+        f"**Training mapper on {len(_pre_inline)} inline prompt(s)** — no "
+        "network call for data. Edit the prompts in the sidebar's *Training "
+        "data (inline prompts)* section.",
+        icon="✅",
+    )
+else:
+    st.info(
+        "**Training mapper on HuggingFace dataset "
+        "`nirmalendu01/spectacles-bias-prompts`** (default). Paste prompts "
+        "into the sidebar textarea below to train on your own content instead.",
+        icon="🌐",
+    )
+
+
+with st.expander(
+    "**Tips for picking mapper training prompts**",
+    expanded=False,
+):
+    st.markdown(
+        """
+- **What kind of prompts?** Generic, *diverse* content (people, objects,
+  scenes, styles). The mapper learns a translation between the two layers'
+  activation spaces — varied prompts cover more of that space.
+- **Same prompt for both models?** Yes, by default. One prompt per line.
+  Both models see the same prompt and the mapper learns to translate
+  activation_a → activation_b for that prompt.
+- **Different prompts per model (concept transfer)?** Use
+  `prompt_a | prompt_b` syntax on a line. Useful when you want the mapper
+  to encode a *concept difference* (e.g. `a photo of X | a painterly X`).
+- **How many?** 10–30 prompts is plenty for a small `hidden_dim` mapper.
+  Push to 100+ if you bump `hidden_dim` to 1024 or train for many steps.
+- **`hidden_dim` choice.** Small (128–256) keeps the test honest — a tiny
+  mapper that converges is real evidence the two layers carry comparable
+  information. Big (512+) can paper over real incompatibility.
+- **Failure modes.** *Stitched image is noise* → mapper didn't converge:
+  more steps or more prompts. *Stitched looks identical to baseline* →
+  `inject_steps` didn't fire (rare).
+"""
+    )
 
 st.info(
     """
@@ -130,9 +201,17 @@ with st.sidebar.expander(
             "to use the workflow's default HuggingFace dataset."
         ),
         placeholder=("a photo of a person\na photo of a cat\na photo of a landscape"),
-        height=160,
+        height=200,
         key="stitch_inline_pairs",
     )
+    _live_parsed, _live_skipped = _parse_inline_stitch(
+        str(st.session_state.get("stitch_inline_pairs", ""))
+    )
+    if _live_parsed:
+        st.caption(
+            f"✅ **{len(_live_parsed)} valid prompt(s)** parsed"
+            + (f" · {len(_live_skipped)} skipped" if _live_skipped else "")
+        )
 
 prompts_raw = str(st.session_state["stitch_prompts"])
 prompts = [p.strip() for p in prompts_raw.split("\n") if p.strip()]
@@ -141,34 +220,15 @@ max_samples = int(st.session_state["stitch_max_samples"])
 num_steps = int(st.session_state["stitch_num_steps"])
 num_inference_steps = int(st.session_state["stitch_num_inference_steps"])
 goal = str(st.session_state["stitch_goal"])
-inline_pairs_text = str(st.session_state.get("stitch_inline_pairs", ""))
 
-
-def _parse_inline_stitch(raw: str) -> tuple[list[dict[str, str] | str], list[int]]:
-    """Parse 'prompt' or 'a | b' lines. Returns (entries, skipped_line_numbers)."""
-    out: list[dict[str, str] | str] = []
-    skipped: list[int] = []
-    for idx, line in enumerate(raw.splitlines(), start=1):
-        line = line.strip()
-        if not line:
-            continue
-        if "|" in line:
-            a, b = (s.strip() for s in line.split("|", 1))
-            if a and b:
-                out.append({"a": a, "b": b})
-            else:
-                skipped.append(idx)
-        else:
-            out.append(line)
-    return out, skipped
-
-
-inline_pairs, _inline_skipped = _parse_inline_stitch(inline_pairs_text)
-if inline_pairs_text.strip() and not inline_pairs:
+# Re-parse from session_state in case the textarea was edited after the top-of-page parse.
+inline_pairs, _inline_skipped = _parse_inline_stitch(
+    str(st.session_state.get("stitch_inline_pairs", ""))
+)
+if str(st.session_state.get("stitch_inline_pairs", "")).strip() and not inline_pairs:
     st.sidebar.warning(
         "Inline prompts textarea is non-empty but no valid lines were found. "
-        "The HF dataset will be used instead. Each line should be either "
-        "a single prompt or `prompt_a | prompt_b`.",
+        "The HF dataset will be used instead.",
         icon="⚠️",
     )
 elif _inline_skipped:

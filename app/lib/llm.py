@@ -208,3 +208,254 @@ def analyze_goal(goal: str, model: str = "claude-haiku-4-5-20251001") -> RecipeM
         f"Claude didn't call recommend_recipe. Stop reason: {resp.stop_reason}. "
         f"Content: {resp.content}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Inline-pair generation — let the user describe a concept and get back
+# N paired prompts ready to paste into the Steering page's textarea.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PAIR_INTENT_GUIDANCE = {
+    "add_attribute": (
+        "User wants to ADD an attribute (e.g. spectacles, beard, long hair) to "
+        "generated portraits. Each pair: `pos` is `<subject> with <attribute>`, "
+        "`neg` is `<subject>` (the same subject, no attribute). Use diverse "
+        "subjects (different occupations, characters, ages, contexts). Method: "
+        "LoReFT works well; alpha 8–15."
+    ),
+    "suppress_concept": (
+        "User wants to SUPPRESS an unwanted concept (e.g. cigarettes, weapons, "
+        "violence). Each pair: `pos` is `<subject with the unwanted concept>`, "
+        "`neg` is `<the same subject with a benign substitute>`. The trained "
+        "direction will be SUBTRACTED at inference (negative alpha). Method: "
+        "CAA with alpha = −5 to −15."
+    ),
+    "shift_demographic": (
+        "User wants to SHIFT generations toward a specific demographic (e.g. "
+        "Black people, women, older adults). Each pair: `pos` is `<demographic> "
+        "<subject>`, `neg` is `<subject>` (no demographic qualifier). Cover "
+        "diverse occupations/contexts. Method: CAA; alpha 5–10."
+    ),
+    "apply_style": (
+        "User wants to APPLY an art style (painterly, watercolor, vintage, "
+        "anime, etc.). Each pair: `pos` is `<style> <subject>`, `neg` is "
+        "`a photo of <subject>` or similar plain rendering. Diverse subjects. "
+        "Method: LoReFT; alpha 10–20."
+    ),
+}
+
+
+GENERATE_PAIRS_TOOL = {
+    "name": "generate_pairs",
+    "description": (
+        "Generate N paired positive/negative prompts for training a steering "
+        "direction. Each pair shares structure with one varied element."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "pairs": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "pos": {
+                            "type": "string",
+                            "description": "Prompt containing the target concept.",
+                        },
+                        "neg": {
+                            "type": "string",
+                            "description": (
+                                "Matching prompt WITHOUT the target concept — "
+                                "as similar as possible to `pos` so the contrast "
+                                "isolates the concept."
+                            ),
+                        },
+                    },
+                    "required": ["pos", "neg"],
+                },
+                "description": "Exactly N (default 8) paired prompts.",
+            },
+            "method_hint": {
+                "type": "string",
+                "enum": ["loreft", "caa"],
+                "description": (
+                    "Which steering method fits this intent best — drives the "
+                    "method dropdown on the Steering page."
+                ),
+            },
+            "alpha_hint": {
+                "type": "number",
+                "description": (
+                    "Suggested alpha. Positive for add/shift/style; negative "
+                    "(e.g. −10) for suppress."
+                ),
+            },
+            "notes": {
+                "type": "string",
+                "description": "1–2 sentence note on what was generated and why.",
+            },
+        },
+        "required": ["pairs", "method_hint", "alpha_hint", "notes"],
+    },
+}
+
+
+@dataclass(frozen=True)
+class PairGenerationResult:
+    pairs: list[dict[str, str]]  # [{'pos': ..., 'neg': ...}, ...]
+    method_hint: str  # "loreft" | "caa"
+    alpha_hint: float
+    notes: str
+
+    def as_textarea(self) -> str:
+        """Render as `pos | neg` lines for the Steering page's textarea."""
+        return "\n".join(f"{p['pos']} | {p['neg']}" for p in self.pairs)
+
+
+def generate_inline_pairs(
+    intent: str,
+    concept: str,
+    n: int = 8,
+    model: str = "claude-haiku-4-5-20251001",
+) -> PairGenerationResult:
+    """Ask Claude for N paired prompts for the given intent + concept.
+
+    `intent` must be one of `_PAIR_INTENT_GUIDANCE`'s keys
+    (`add_attribute`, `suppress_concept`, `shift_demographic`, `apply_style`).
+
+    Raises RuntimeError if ANTHROPIC_API_KEY is not set.
+    """
+    if not is_available():
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY not set in environment. "
+            "Use the manual templates instead, or `export ANTHROPIC_API_KEY=sk-ant-…`."
+        )
+    if intent not in _PAIR_INTENT_GUIDANCE:
+        raise ValueError(f"intent must be one of {list(_PAIR_INTENT_GUIDANCE)}, got {intent!r}")
+
+    import anthropic
+
+    system = (
+        "You generate paired positive/negative training prompts for "
+        "interpretability steering in text-to-image diffusion models. "
+        "Each pair should isolate ONE varied element so the steering direction "
+        "captures that concept and nothing else. Keep prompts short (≤12 words), "
+        "structurally similar, and use diverse subjects across the N pairs.\n\n"
+        f"Intent for this request: {_PAIR_INTENT_GUIDANCE[intent]}"
+    )
+
+    client = anthropic.Anthropic()
+    resp = client.messages.create(
+        model=model,
+        max_tokens=1024,
+        system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+        tools=[GENERATE_PAIRS_TOOL],
+        tool_choice={"type": "tool", "name": "generate_pairs"},
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"Generate {n} paired prompts. Concept the user wants to target: {concept!r}."
+                ),
+            }
+        ],
+    )
+
+    for block in resp.content:
+        if block.type == "tool_use" and block.name == "generate_pairs":
+            args = block.input
+            return PairGenerationResult(
+                pairs=[{"pos": p["pos"], "neg": p["neg"]} for p in args["pairs"]],
+                method_hint=args["method_hint"],
+                alpha_hint=float(args["alpha_hint"]),
+                notes=args.get("notes", ""),
+            )
+
+    raise RuntimeError(
+        f"Claude didn't call generate_pairs. Stop reason: {resp.stop_reason}. "
+        f"Content: {resp.content}"
+    )
+
+
+# Pure-Python intent → template fallback, used when ANTHROPIC_API_KEY is unset.
+# Keep templates simple + obviously editable; users adapt them to their concept.
+INTENT_TEMPLATES: dict[str, dict[str, object]] = {
+    "add_attribute": {
+        "title": "Add an attribute (e.g. spectacles, beard, long hair)",
+        "format_hint": "`<subject> with <attribute> | <subject>`",
+        "method_hint": "loreft",
+        "alpha_hint": 10.0,
+        "starter_pairs": [
+            "a man with <ATTRIBUTE> | a man",
+            "a woman with <ATTRIBUTE> | a woman",
+            "a child with <ATTRIBUTE> | a child",
+            "a businessman with <ATTRIBUTE> | a businessman",
+            "a scientist with <ATTRIBUTE> | a scientist",
+            "a doctor with <ATTRIBUTE> | a doctor",
+            "a teacher with <ATTRIBUTE> | a teacher",
+            "a student with <ATTRIBUTE> | a student",
+        ],
+        "tip": (
+            "Replace `<ATTRIBUTE>` with what you want to add (e.g. `spectacles`, "
+            "`a beard`). Use LoReFT + alpha ≈ 10."
+        ),
+    },
+    "suppress_concept": {
+        "title": "Suppress an unwanted concept (e.g. cigarettes, weapons)",
+        "format_hint": "`<subject with concept> | <subject with benign substitute>`",
+        "method_hint": "caa",
+        "alpha_hint": -10.0,
+        "starter_pairs": [
+            "a man holding a <CONCEPT> | a man holding a pen",
+            "a person using <CONCEPT> | a person reading",
+            "a woman with <CONCEPT> | a woman with a coffee",
+            "close-up of <CONCEPT> | close-up of a flower",
+            "a hand holding <CONCEPT> | a hand holding a phone",
+            "a character with <CONCEPT> | a character with a book",
+            "<CONCEPT> on a table | a vase on a table",
+            "scene with <CONCEPT> | scene with a chair",
+        ],
+        "tip": (
+            "Replace `<CONCEPT>` with what you want to remove. Use CAA + "
+            "**negative** alpha (≈ −10) so the direction is subtracted."
+        ),
+    },
+    "shift_demographic": {
+        "title": "Shift toward a demographic (e.g. Black people, women)",
+        "format_hint": "`<demographic> <subject> | <subject>`",
+        "method_hint": "caa",
+        "alpha_hint": 8.0,
+        "starter_pairs": [
+            "photo of a <DEMO> man | photo of a man",
+            "portrait of a <DEMO> man | portrait of a man",
+            "photo of a <DEMO> woman | photo of a woman",
+            "photo of a <DEMO> businessman | photo of a businessman",
+            "photo of a <DEMO> doctor | photo of a doctor",
+            "photo of a <DEMO> teacher | photo of a teacher",
+            "headshot of a <DEMO> person | headshot of a person",
+            "portrait of a <DEMO> athlete | portrait of an athlete",
+        ],
+        "tip": "Replace `<DEMO>` with the demographic qualifier. Use CAA + alpha ≈ 8.",
+    },
+    "apply_style": {
+        "title": "Apply an art style (e.g. painterly, watercolor)",
+        "format_hint": "`<style> <subject> | a photo of <subject>`",
+        "method_hint": "loreft",
+        "alpha_hint": 12.0,
+        "starter_pairs": [
+            "a <STYLE> portrait of a man | a photo of a man",
+            "a <STYLE> portrait of a woman | a photo of a woman",
+            "a <STYLE> landscape | a photo of a landscape",
+            "a <STYLE> still life | a photo of a still life",
+            "a <STYLE> seascape | a photo of a seascape",
+            "a <STYLE> garden scene | a photo of a garden",
+            "a <STYLE> street market | a photo of a street market",
+            "a <STYLE> portrait of a child | a photo of a child",
+        ],
+        "tip": (
+            "Replace `<STYLE>` with the style adjective (e.g. `painterly`, "
+            "`watercolor`, `anime`). Use LoReFT + alpha ≈ 12."
+        ),
+    },
+}
