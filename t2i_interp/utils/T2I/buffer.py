@@ -128,20 +128,27 @@ class ActivationsDataloader:
         if not to_merge:
             raise StopIteration
 
-        # No new samples were loaded (dataset exhausted) and carry-over rows
-        # alone are fewer than one batch → signal end-of-stream so iterate()
-        # can yield the tail and return rather than looping forever.
-        carry_rows = to_merge[0].shape[0] if to_merge else 0
-        if new_loaded == 0 and to_retrieve > 0 and carry_rows < self.batch_size:
-            raise StopIteration
-
+        # Materialise whatever rows we still have into self.buffer BEFORE
+        # signalling end-of-stream. The fallback in `iterate()` (the
+        # `except StopIteration` branch) yields `self.buffer[self.pointer:]`
+        # only when `self.buffer is not None`. The previous order — raise
+        # before catting — silently dropped the under-sized tail and
+        # `next(loader.iterate())` raised StopIteration whenever the dataset
+        # had fewer rows than batch_size (e.g. a 13-row CAA train split
+        # against batch_size=16).
         self.buffer = torch.cat(to_merge, dim=0)
+        self.pointer = 0
+
+        # No new samples were loaded (dataset exhausted) and the buffered
+        # rows alone are fewer than one batch → signal end-of-stream so
+        # iterate() can yield the tail and return rather than looping forever.
+        if new_loaded == 0 and to_retrieve > 0 and self.buffer.shape[0] < self.batch_size:
+            raise StopIteration
 
         if self.shuffle:
             N = self.buffer.shape[0]
             shuffled_indices = torch.randperm(N, generator=self.generator)
             self.buffer = self.buffer[shuffled_indices]
-        self.pointer = 0
 
     def reset(self):
         """Reset the iterator to the beginning of the dataset."""

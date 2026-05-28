@@ -407,6 +407,17 @@ def main(cfg: DictConfig) -> None:
                     label = label.cpu().tolist()
                 if not isinstance(label, list) and label is not None:
                     label = [label] * batch_size
+                # Defensive cap. The act loader (flatten=True) treats each tar
+                # entry's (seq, dim) activation as `seq` rows, while the label
+                # loader (flatten=False) treats one entry as one row. PairedLoader
+                # zips them per-batch, so an act batch of size 16 can pair with a
+                # label batch of size <16 when the underlying entry count is
+                # small (typical for inline-pair runs). Iterating beyond the
+                # shorter side raises IndexError. We honour the labels we have
+                # and drop the rest of the act batch — same semantics as the
+                # pre-existing zip-truncation behaviour for full-batch runs.
+                if isinstance(label, list) and len(label) < batch_size:
+                    batch_size = len(label)
                 for i in range(batch_size):
                     l = label[i] if label else None
                     if torch.is_tensor(l):
