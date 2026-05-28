@@ -66,15 +66,82 @@ if not ckpt_dir.exists():
 
 
 # ── Step 1: What you want ────────────────────────────────────────────────────
+# Hardcoded scenarios that pick prompt + strengths + n_features for the
+# three common use cases.
+
+_SAE_PRESETS: dict[str, dict[str, object]] = {
+    "Discover what features fire for my prompt": {
+        "label": "Discover features for a prompt",
+        "prompt": "a red apple on a wooden table",
+        "n_top_features": 10,
+        "n_features_to_plot": 4,
+        "strength_lo": -5.0,
+        "strength_hi": 5.0,
+        "hint": (
+            "Captures the top 10 most-active features for the prompt and "
+            "modulates the top 4 across a -5 to +5 strength sweep. The "
+            "easiest entry point. Look across each row to see what changes "
+            "consistently."
+        ),
+    },
+    "Hunt for a feature that controls a property": {
+        "label": "Hunt for a feature controlling a property",
+        "prompt": "a glossy red apple",
+        "n_top_features": 15,
+        "n_features_to_plot": 6,
+        "strength_lo": -8.0,
+        "strength_hi": 8.0,
+        "hint": (
+            "Wider strength sweep (-8 to +8) and more features (6 rows). "
+            "Use a prompt where your target property is prominent (e.g. "
+            "'glossy' for shininess). The wider sweep makes per-feature "
+            "behaviour easier to read."
+        ),
+    },
+    "Amplify a known feature (single, fixed)": {
+        "label": "Amplify a known feature index",
+        "prompt": "a red apple on a wooden table",
+        "n_top_features": 5,
+        "n_features_to_plot": 1,
+        "strength_lo": 0.0,
+        "strength_hi": 5.0,
+        "hint": (
+            "Once you've identified a feature you like, this preset "
+            "narrows to a single row (one feature) at a positive-only "
+            "strength range. Useful for confirming the feature behaves "
+            "the way you think it does."
+        ),
+    },
+}
 
 with st.container(border=True):
-    st.markdown("### Step 1 · What you want")
-    st.text_input(
-        "Your goal (optional)",
-        placeholder='e.g. "Find a feature that controls shininess in fruit images"',
-        help="A label for your run. Saved in the fingerprint and shown in the results panel.",
-        key="sae_goal",
+    st.markdown("### Step 1 · What you want to do")
+    st.caption("Pick a scenario. Prompt, feature counts, and strength range get pre-filled.")
+
+    chosen = st.radio(
+        "Scenario",
+        list(_SAE_PRESETS),
+        index=0,
+        key="sae_scenario_label",
+        label_visibility="collapsed",
     )
+    preset_meta = _SAE_PRESETS[chosen]
+    st.markdown(f"**{preset_meta['label']}**")
+    st.caption(str(preset_meta["hint"]))
+
+    if st.button(
+        "Apply scenario",
+        help="Drops the scenario's values into Steps 2 and 3 below.",
+        use_container_width=True,
+    ):
+        st.session_state["sae_prompt"] = preset_meta["prompt"]
+        st.session_state["sae_n_top_features"] = preset_meta["n_top_features"]
+        st.session_state["sae_n_features_to_plot"] = preset_meta["n_features_to_plot"]
+        st.session_state["sae_strength_lo"] = preset_meta["strength_lo"]
+        st.session_state["sae_strength_hi"] = preset_meta["strength_hi"]
+        st.session_state["sae_goal"] = preset_meta["label"]
+        st.rerun()
+
     st.text_input(
         "Prompt to probe",
         help=(
@@ -137,6 +204,15 @@ device, dtype = device_dtype_picker(default_device="mps")
 preset = model_preset_picker(
     default=str(st.session_state.get("sae_model_preset", "sdxl_turbo")),
     key="sae_model_preset",
+)
+st.sidebar.text_input(
+    "Run label (optional)",
+    help=(
+        "Free-text label saved in the fingerprint and shown in the "
+        "results panel. Set automatically when you Apply a scenario. "
+        "Does not drive the run."
+    ),
+    key="sae_goal",
 )
 
 prompt = str(st.session_state["sae_prompt"])

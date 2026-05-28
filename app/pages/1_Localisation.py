@@ -78,18 +78,91 @@ st.caption(
 
 
 # ── Step 1: What you want ────────────────────────────────────────────────────
+# Hardcoded scenarios that actually pre-fill the form. Each one points
+# at a different region of the UNet so the user can see the layered
+# specialisation by trying all three.
+
+_LOC_PRESETS: dict[str, dict[str, object]] = {
+    "Probe early UNet (composition)": {
+        "label": "Probe early UNet (composition layer)",
+        "prompt": "a unicorn in a forest",
+        "target_layer": "down_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
+        "target_head": 0,
+        "factor": 0.0,
+        "hint": (
+            "Early down-blocks tend to carry rough composition (where "
+            "objects sit, overall layout). Ablate head 0 here, then re-run "
+            "with heads 1 to 7 to find which head matters."
+        ),
+    },
+    "Probe mid UNet (object identity)": {
+        "label": "Probe mid UNet (object identity)",
+        "prompt": "a red apple on a wooden table",
+        "target_layer": "mid_block_attentions_0_transformer_blocks_0_attn2_out",
+        "target_head": 3,
+        "factor": 0.0,
+        "hint": (
+            "The mid_block tends to carry object identity and colour "
+            "binding. Head 3 is a common colour-binding suspect for SD 1.5. "
+            "Ablate it and see whether 'red' stops appearing."
+        ),
+    },
+    "Probe late UNet (texture and fine detail)": {
+        "label": "Probe late UNet (texture and fine detail)",
+        "prompt": "a busy city street at dusk",
+        "target_layer": "up_blocks_2_attentions_0_transformer_blocks_0_attn2_out",
+        "target_head": 0,
+        "factor": 0.0,
+        "hint": (
+            "Late up-blocks tend to carry texture, lighting, and fine "
+            "detail. Ablate heads here and watch what gets blurred or "
+            "stripped from the image."
+        ),
+    },
+    "Amplify a head (boost its effect)": {
+        "label": "Amplify a head (boost its effect)",
+        "prompt": "a red apple on a wooden table",
+        "target_layer": "mid_block_attentions_0_transformer_blocks_0_attn2_out",
+        "target_head": 3,
+        "factor": 2.0,
+        "hint": (
+            "Instead of ablating, multiply the head's contribution by 2. "
+            "Useful for confirming a head you suspect carries a concept. "
+            "If the concept gets stronger, you've confirmed it."
+        ),
+    },
+}
 
 with st.container(border=True):
-    st.markdown("### Step 1 · What you want")
-    st.text_input(
-        "Your goal (optional)",
-        placeholder='e.g. "Test whether head 3 of mid_block carries the unicorn-ness"',
-        help="A label for your run. Saved in the fingerprint and shown in the results panel.",
-        key="loc_goal",
+    st.markdown("### Step 1 · What you want to find out")
+    st.caption("Pick a scenario. The settings below get pre-filled.")
+
+    chosen = st.radio(
+        "Scenario",
+        list(_LOC_PRESETS),
+        index=0,
+        key="loc_scenario_label",
+        label_visibility="collapsed",
     )
+    preset_meta = _LOC_PRESETS[chosen]
+    st.markdown(f"**{preset_meta['label']}**")
+    st.caption(str(preset_meta["hint"]))
+
+    if st.button(
+        "Apply scenario",
+        help="Drops the scenario's values into Steps 2 and 3 below.",
+        use_container_width=True,
+    ):
+        st.session_state["loc_prompt"] = preset_meta["prompt"]
+        st.session_state["loc_target_layer"] = preset_meta["target_layer"]
+        st.session_state["loc_target_head"] = preset_meta["target_head"]
+        st.session_state["loc_factor"] = preset_meta["factor"]
+        st.session_state["loc_goal"] = preset_meta["label"]
+        st.rerun()
+
     st.text_input(
         "Prompt to test",
-        help=("Pick something where you have a hypothesis about which head carries which concept."),
+        help="Pick a prompt where the scenario's effect should be visible.",
         key="loc_prompt",
     )
 
@@ -161,6 +234,15 @@ preset = model_preset_picker(
     default=str(st.session_state.get("loc_model_preset", "(use config default)")),
     options=("sd15", "sdxl_turbo"),
     key="loc_model_preset",
+)
+st.sidebar.text_input(
+    "Run label (optional)",
+    help=(
+        "Free-text label saved in the fingerprint and shown in the "
+        "results panel. Set automatically when you Apply a scenario. "
+        "Does not drive the run."
+    ),
+    key="loc_goal",
 )
 
 # Pull session-state values for the override list

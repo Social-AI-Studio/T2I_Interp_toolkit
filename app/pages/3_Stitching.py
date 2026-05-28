@@ -78,15 +78,74 @@ st.caption(
 
 
 # ── Step 1: What you want ────────────────────────────────────────────────────
+# Hardcoded scenarios that pre-fill mapper size and training scale.
+
+_STITCH_GENERIC_PROMPTS = (
+    "a photo of a person\n"
+    "a photo of a cat\n"
+    "a photo of a landscape\n"
+    "a portrait of a woman\n"
+    "a portrait of a man\n"
+    "a photo of a still life\n"
+    "a photo of a city street\n"
+    "a photo of a sunset"
+)
+
+_STITCH_PRESETS: dict[str, dict[str, object]] = {
+    "Test if two layers carry similar info (small mapper)": {
+        "label": "Test if two layers carry similar information",
+        "hidden_dim": 256,
+        "max_samples": 50,
+        "num_steps": 100,
+        "inline_pairs": _STITCH_GENERIC_PROMPTS,
+        "hint": (
+            "A small mapper that converges is real evidence the two "
+            "layers carry comparable information. If you bump hidden_dim "
+            "to 1024 you can paper over real incompatibility, so keep "
+            "it small for an honest test."
+        ),
+    },
+    "Transfer behaviour between two models (large mapper)": {
+        "label": "Transfer behaviour between two models",
+        "hidden_dim": 512,
+        "max_samples": 100,
+        "num_steps": 200,
+        "inline_pairs": _STITCH_GENERIC_PROMPTS,
+        "hint": (
+            "Larger mapper, more samples, more steps. Used for cross-"
+            "model behaviour transfer in the paper's §4 case study. The "
+            "mapper has to be expressive enough to translate between two "
+            "different models."
+        ),
+    },
+}
 
 with st.container(border=True):
-    st.markdown("### Step 1 · What you want")
-    st.text_input(
-        "Your goal (optional)",
-        placeholder='e.g. "Can SD1.5 text-encoder output stand in for unet.conv_out?"',
-        help="A label for your run. Saved in the fingerprint and shown in the results panel.",
-        key="stitch_goal",
+    st.markdown("### Step 1 · What you want to do")
+    st.caption("Pick a scenario. The mapper size and training settings get pre-filled.")
+
+    chosen = st.radio(
+        "Scenario",
+        list(_STITCH_PRESETS),
+        index=0,
+        key="stitch_scenario_label",
+        label_visibility="collapsed",
     )
+    preset_meta = _STITCH_PRESETS[chosen]
+    st.markdown(f"**{preset_meta['label']}**")
+    st.caption(str(preset_meta["hint"]))
+
+    if st.button(
+        "Apply scenario",
+        help="Drops the scenario's values into Steps 2 and 3 below.",
+        use_container_width=True,
+    ):
+        st.session_state["stitch_hidden_dim"] = preset_meta["hidden_dim"]
+        st.session_state["stitch_max_samples"] = preset_meta["max_samples"]
+        st.session_state["stitch_num_steps"] = preset_meta["num_steps"]
+        st.session_state["stitch_inline_pairs"] = preset_meta["inline_pairs"]
+        st.session_state["stitch_goal"] = preset_meta["label"]
+        st.rerun()
 
 
 # ── Step 2: Training data ────────────────────────────────────────────────────
@@ -162,6 +221,15 @@ st.sidebar.slider("Inference steps", 4, 50, key="stitch_num_inference_steps")
 preset = model_preset_picker(
     default=str(st.session_state.get("stitch_model_preset", "sd15")),
     key="stitch_model_preset",
+)
+st.sidebar.text_input(
+    "Run label (optional)",
+    help=(
+        "Free-text label saved in the fingerprint and shown in the "
+        "results panel. Set automatically when you Apply a scenario. "
+        "Does not drive the run."
+    ),
+    key="stitch_goal",
 )
 
 with st.container(border=True):
