@@ -14,7 +14,7 @@ import pytest
 
 from app.lib.outputs import pair_baseline_modified
 from app.lib.pages import apply_payload
-from app.lib.parsing import has_unresolved_placeholders, parse_pipe_lines
+from app.lib.parsing import detect_concept, has_unresolved_placeholders, parse_pipe_lines
 
 # ── parse_pipe_lines ─────────────────────────────────────────────────────────
 
@@ -68,6 +68,84 @@ class TestParsePipeLines:
         out, skipped = parse_pipe_lines("   \n\t\n  ", require_separator=True)
         assert out == []
         assert skipped == []
+
+
+# ── detect_concept ───────────────────────────────────────────────────────────
+
+
+class TestDetectConcept:
+    def test_add_attribute_spectacles(self):
+        pairs = [
+            {"pos": "a man with spectacles", "neg": "a man"},
+            {"pos": "a woman with spectacles", "neg": "a woman"},
+            {"pos": "a child with spectacles", "neg": "a child"},
+        ]
+        assert detect_concept(pairs) == "spectacles"
+
+    def test_shift_demographic_black(self):
+        pairs = [
+            {"pos": "photo of a Black man", "neg": "photo of a man"},
+            {"pos": "portrait of a Black man", "neg": "portrait of a man"},
+            {"pos": "photo of a Black woman", "neg": "photo of a woman"},
+        ]
+        # Tokens are lowercased before set ops.
+        assert detect_concept(pairs) == "black"
+
+    def test_suppress_concept_cigarette(self):
+        # The concept lives on the pos side; the neg has a benign substitute.
+        # detect_concept reports the pos-only token (cigarette), not the
+        # neg-only one (pen/coffee/...), which is the right thing for a
+        # "what is the direction encoding" answer.
+        pairs = [
+            {"pos": "a man holding a cigarette", "neg": "a man holding a pen"},
+            {"pos": "close-up of a cigarette", "neg": "close-up of a flower"},
+            {"pos": "a hand holding a cigarette", "neg": "a hand holding a phone"},
+        ]
+        assert detect_concept(pairs) == "cigarette"
+
+    def test_apply_style_painterly(self):
+        pairs = [
+            {"pos": "a painterly portrait of a man", "neg": "a photo of a man"},
+            {"pos": "a painterly landscape", "neg": "a photo of a landscape"},
+            {"pos": "a painterly still life", "neg": "a photo of a still life"},
+        ]
+        # Across all three, only "painterly" is uniformly in pos but not in neg.
+        # (Pair 1 also adds "portrait" but pair 2 doesn't.)
+        assert detect_concept(pairs) == "painterly"
+
+    def test_returns_none_on_empty(self):
+        assert detect_concept([]) is None
+
+    def test_returns_none_when_no_common_diff(self):
+        # Each pair adds a different word — no shared concept across all pairs.
+        pairs = [
+            {"pos": "a red apple", "neg": "an apple"},
+            {"pos": "a green pear", "neg": "a pear"},
+        ]
+        # "red" only in pair 1, "green" only in pair 2; intersection empty.
+        assert detect_concept(pairs) is None
+
+    def test_returns_none_when_pos_equals_neg(self):
+        pairs = [{"pos": "a photo of a person", "neg": "a photo of a person"}]
+        assert detect_concept(pairs) is None
+
+    def test_strips_punctuation_and_lowercases(self):
+        pairs = [
+            {"pos": "a man with Spectacles!", "neg": "a man."},
+            {"pos": "a woman with spectacles,", "neg": "a woman."},
+        ]
+        assert detect_concept(pairs) == "spectacles"
+
+    def test_filters_stopwords(self):
+        # The word "with" is in every pos but never in neg — it would
+        # show up if we didn't filter stopwords. We do, so it doesn't.
+        pairs = [
+            {"pos": "a man with spectacles", "neg": "a man"},
+            {"pos": "a woman with spectacles", "neg": "a woman"},
+        ]
+        out = detect_concept(pairs)
+        assert "with" not in (out or "")
+        assert out == "spectacles"
 
 
 # ── has_unresolved_placeholders ──────────────────────────────────────────────

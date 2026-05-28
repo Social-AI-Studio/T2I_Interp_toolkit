@@ -20,6 +20,7 @@ from app.lib import (
     INTENT_TEMPLATES,
     apply_payload,
     collect_images,
+    detect_concept,
     device_dtype_picker,
     generate_inline_pairs,
     has_unresolved_placeholders,
@@ -63,6 +64,23 @@ _METHOD_DEFAULT_DATASETS = {
     "ksteer": "nirmalendu01/spectacles-bias-prompts-headshot-captioned",
 }
 
+# Verb per intent — used to render "add spectacles", "suppress cigarettes",
+# etc. in goal banners and the Run button label.
+_INTENT_VERBS = {
+    "add_attribute": "add",
+    "suppress_concept": "suppress",
+    "shift_demographic": "shift toward",
+    "apply_style": "apply",
+}
+
+
+def _goal_phrase(intent_key: str, concept: str | None) -> str:
+    """Build a short phrase like 'add spectacles' or 'suppress cigarettes'."""
+    verb = _INTENT_VERBS.get(intent_key, "steer toward")
+    if concept:
+        return f"{verb} {concept}"
+    return f"{verb} the concept in your pairs"
+
 
 # ── Page header ──────────────────────────────────────────────────────────────
 
@@ -80,9 +98,10 @@ st.caption(
 with st.container(border=True):
     st.markdown("### Step 1 · What you want")
     st.caption(
-        "Pick what kind of concept you want to inject (or suppress). Either "
-        "use the template starter (placeholders to replace), or have Claude "
-        "write real prompt pairs for your concept."
+        "Pick the kind of change you want. Click **Use example pairs** to "
+        "load 8 ready-to-run pairs for the default concept (spectacles, "
+        "cigarettes, Black, or painterly), or describe a different concept "
+        "and let Claude write the pairs."
     )
 
     intent_label_to_key = {
@@ -164,18 +183,27 @@ with st.container(border=True):
 # ── Step 2: Training data ────────────────────────────────────────────────────
 
 inline_pairs_text = str(st.session_state.get("steer_inline_pairs", ""))
-inline_pairs, _inline_skipped = parse_pipe_lines(inline_pairs_text, require_separator=True)
-inline_pairs = [p for p in inline_pairs if isinstance(p, dict)]  # mypy-friendly narrow
+_parsed_pairs, _inline_skipped = parse_pipe_lines(inline_pairs_text, require_separator=True)
+inline_pairs: list[dict[str, str]] = [p for p in _parsed_pairs if isinstance(p, dict)]
 unresolved_placeholders = has_unresolved_placeholders(inline_pairs_text)
 _current_method = str(st.session_state.get("steer_method", "loreft"))
+
+# What concept is the user actually steering toward? Detected from the diff
+# between pos and neg prompts across all pairs. Together with the intent verb
+# this gives us a single phrase ("add spectacles", "suppress cigarettes") that
+# the rest of the page can reuse.
+_detected_concept = detect_concept(inline_pairs) if inline_pairs else None
+_goal = _goal_phrase(intent_key, _detected_concept)
 
 with st.container(border=True):
     st.markdown("### Step 2 · Training data")
     if inline_pairs:
         st.success(
-            f"**Training on {len(inline_pairs)} inline prompt pairs.** "
-            "No network call for data. Edit the textarea below to change them.",
-            icon="✅",
+            f"**Goal: {_goal}.** Training on {len(inline_pairs)} inline prompt "
+            "pairs. The model will learn a direction from `pos minus neg` "
+            "across these pairs, then add it (scaled by alpha) when "
+            "generating your inference prompts.",
+            icon="🎯",
         )
     else:
         _hf_default = _METHOD_DEFAULT_DATASETS.get(_current_method, "(none)")
@@ -353,15 +381,24 @@ _preview_overrides, _ = _build_overrides("/tmp/streamlit_steer_<auto>")
 
 with st.container(border=True):
     st.markdown("### Step 4 · Run")
-    st.markdown(
-        f"Will train **{steer_type.upper()}** at `alpha={alpha:g}` on "
-        f"{'inline pairs' if inline_pairs else 'the configured HF dataset'}, "
-        f"then generate **{len(prompts)} prompt(s)** baseline and steered."
-    )
+    _data_source = "inline pairs" if inline_pairs else "the configured HF dataset"
+    if inline_pairs:
+        st.markdown(
+            f"Will train **{steer_type.upper()}** on {_data_source} to "
+            f"**{_goal}** at `alpha={alpha:g}`, then generate "
+            f"**{len(prompts)} prompt(s)** baseline and steered."
+        )
+    else:
+        st.markdown(
+            f"Will train **{steer_type.upper()}** on {_data_source} at "
+            f"`alpha={alpha:g}`, then generate "
+            f"**{len(prompts)} prompt(s)** baseline and steered."
+        )
     with st.expander("CLI equivalent", expanded=False):
         st.code("t2i-steer " + " \\\n  ".join(_preview_overrides), language="bash")
+    _btn_label = f"▶ Train and {_goal}" if inline_pairs else "▶ Train and generate"
     run_clicked = st.button(
-        "▶ Train and generate",
+        _btn_label,
         type="primary",
         use_container_width=True,
         disabled=bool(unresolved_placeholders),

@@ -411,13 +411,13 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
         "alpha_hint": -10.0,
         "starter_pairs": [
             "a man holding a cigarette | a man holding a pen",
-            "a person smoking | a person reading",
+            "a person with a cigarette | a person with a book",
             "a woman with a cigarette | a woman with a coffee",
             "close-up of a cigarette | close-up of a flower",
             "a hand holding a cigarette | a hand holding a phone",
             "a character with a cigarette | a character with a book",
             "a cigarette on a table | a vase on a table",
-            "scene with a cigarette | scene with a chair",
+            "a scene with a cigarette | a scene with a chair",
         ],
         "tip": (
             "Pre-filled to suppress **cigarettes**. Edit the concept "

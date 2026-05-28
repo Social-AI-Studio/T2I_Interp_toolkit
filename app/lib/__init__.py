@@ -19,7 +19,7 @@ from app.lib.pages import (
     render_run_label_sidebar,
     scenario_radio,
 )
-from app.lib.parsing import has_unresolved_placeholders, parse_pipe_lines
+from app.lib.parsing import detect_concept, has_unresolved_placeholders, parse_pipe_lines
 from app.lib.recipes import FIG2_SPECTACLES_PAYLOAD
 from app.lib.runner import run_workflow
 from app.lib.widgets import device_dtype_picker, model_preset_picker
@@ -34,6 +34,7 @@ __all__ = [
     "analyze_goal",
     "apply_payload",
     "collect_images",
+    "detect_concept",
     "device_dtype_picker",
     "generate_inline_pairs",
     "has_unresolved_placeholders",
