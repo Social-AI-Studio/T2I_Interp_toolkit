@@ -8,12 +8,28 @@ from pathlib import Path
 from typing import Any
 
 
-def collect_images(dir_: str | Path) -> list[Path]:
-    """Recursively list image files under `dir_` (best-effort, ignores missing)."""
+def collect_images(dir_: str | Path, *, include_prefix_siblings: bool = False) -> list[Path]:
+    """Recursively list image files under `dir_` (best-effort, ignores missing).
+
+    With `include_prefix_siblings=True`, also walks sibling directories whose
+    name starts with `dir_.name`. The Steering workflow uses this because
+    `run_steer.py` appends `_<block>_alpha=<alpha>` to the configured
+    output_dir, so the real outputs land next to (not under) the directory
+    the Streamlit page created. Workflows that don't rewrite their output
+    path (Localisation, Stitching, SAE) don't need to opt in.
+    """
     d = Path(dir_)
-    if not d.exists():
-        return []
-    return sorted(p for p in d.rglob("*.png") if p.is_file())
+    images: list[Path] = []
+    if d.exists():
+        images.extend(p for p in d.rglob("*.png") if p.is_file())
+    if include_prefix_siblings and d.parent.exists():
+        prefix = d.name
+        for sibling in d.parent.iterdir():
+            if sibling == d:
+                continue  # already walked above
+            if sibling.is_dir() and sibling.name.startswith(prefix):
+                images.extend(p for p in sibling.rglob("*.png") if p.is_file())
+    return sorted(images)
 
 
 def pair_baseline_modified(
@@ -68,12 +84,26 @@ def pair_baseline_modified(
     return out
 
 
-def load_fingerprint(dir_: str | Path) -> dict[str, Any] | None:
-    """Find and parse the closest fingerprint.json under `dir_`, or None."""
+def load_fingerprint(
+    dir_: str | Path, *, include_prefix_siblings: bool = False
+) -> dict[str, Any] | None:
+    """Find and parse the closest fingerprint.json under `dir_`, or None.
+
+    With `include_prefix_siblings=True`, also searches sibling directories
+    whose name starts with `dir_.name`. Same rationale as `collect_images`.
+    """
     d = Path(dir_)
-    if not d.exists():
-        return None
-    candidates = sorted(d.rglob("fingerprint.json"))
+    candidates: list[Path] = []
+    if d.exists():
+        candidates.extend(d.rglob("fingerprint.json"))
+    if include_prefix_siblings and d.parent.exists():
+        prefix = d.name
+        for sibling in d.parent.iterdir():
+            if sibling == d:
+                continue
+            if sibling.is_dir() and sibling.name.startswith(prefix):
+                candidates.extend(sibling.rglob("fingerprint.json"))
+    candidates.sort()
     if not candidates:
         return None
     try:

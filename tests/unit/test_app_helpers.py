@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from app.lib.outputs import pair_baseline_modified
+from app.lib.outputs import collect_images, load_fingerprint, pair_baseline_modified
 from app.lib.pages import apply_payload
 from app.lib.parsing import detect_concept, has_unresolved_placeholders, parse_pipe_lines
 
@@ -323,6 +323,68 @@ class TestPairBaselineModified:
         assert len(out) == 1
         assert out[0][1] is not None
         assert out[0][2] is not None
+
+
+# ── collect_images + load_fingerprint with prefix-sibling search ─────────────
+
+
+class TestCollectImagesSiblings:
+    """Regression tests for the Steering output-dir suffix bug.
+
+    `run_steer.py` rewrites cfg.output_dir to `<orig>_<block>_alpha=<a>`,
+    so images and fingerprint.json end up in a sibling of the directory
+    the Streamlit page created. The helpers need to find them.
+    """
+
+    def test_collect_walks_sibling_with_prefix(self, tmp_path):
+        # The directory the Streamlit page created (empty after the script ran).
+        out_dir = tmp_path / "streamlit_steer_xxx"
+        out_dir.mkdir()
+        # The directory the script actually wrote to (sibling with suffix).
+        actual = tmp_path / "streamlit_steer_xxx_up_blocks_alpha=12"
+        actual.mkdir()
+        (actual / "baseline_0.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        (actual / "steered_0.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        # Default behaviour: only walks out_dir, misses the images.
+        assert collect_images(out_dir) == []
+        # With the flag, finds them in the sibling.
+        images = collect_images(out_dir, include_prefix_siblings=True)
+        assert sorted(p.name for p in images) == ["baseline_0.png", "steered_0.png"]
+
+    def test_collect_does_not_grab_unrelated_siblings(self, tmp_path):
+        out_dir = tmp_path / "streamlit_steer_xxx"
+        out_dir.mkdir()
+        # A sibling that doesn't share the prefix should be ignored.
+        unrelated = tmp_path / "streamlit_steer_OTHER"
+        unrelated.mkdir()
+        (unrelated / "wrong.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        assert collect_images(out_dir, include_prefix_siblings=True) == []
+
+    def test_load_fingerprint_walks_sibling(self, tmp_path):
+        out_dir = tmp_path / "streamlit_steer_yyy"
+        out_dir.mkdir()
+        actual = tmp_path / "streamlit_steer_yyy_mid_block_alpha=8"
+        actual.mkdir()
+        (actual / "fingerprint.json").write_text(
+            '{"fingerprint_hash": "abc123", "workflow": "steer"}'
+        )
+
+        # Default: doesn't find it.
+        assert load_fingerprint(out_dir) is None
+        # With the flag: finds it.
+        fp = load_fingerprint(out_dir, include_prefix_siblings=True)
+        assert fp is not None
+        assert fp["fingerprint_hash"] == "abc123"
+
+    def test_collect_with_flag_off_does_not_break_existing(self, tmp_path):
+        # Sanity: the default-flag-off behaviour still walks the dir itself
+        # (this is what the Fingerprints page relies on).
+        d = tmp_path / "X"
+        d.mkdir()
+        (d / "baseline_0.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+        assert [p.name for p in collect_images(d)] == ["baseline_0.png"]
 
 
 if __name__ == "__main__":

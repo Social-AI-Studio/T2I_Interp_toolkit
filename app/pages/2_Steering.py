@@ -440,7 +440,9 @@ if run_clicked:
     if goal:
         st.markdown(f"**Goal:** _{goal}_")
 
-    images = collect_images(out_dir)
+    # `run_steer.py` appends `_<block>_alpha=<alpha>` to cfg.output_dir, so
+    # the outputs land in a sibling of `out_dir`, not under it. Walk siblings.
+    images = collect_images(out_dir, include_prefix_siblings=True)
     if images:
         triples = pair_baseline_modified(images, modified_kinds=("steered",), label_prefix="prompt")
         st.markdown(f"**{len(triples)} prompt(s)** generated.")
@@ -479,7 +481,7 @@ if run_clicked:
     else:
         st.warning("No images produced. Check logs above.")
 
-    fp = load_fingerprint(out_dir)
+    fp = load_fingerprint(out_dir, include_prefix_siblings=True)
     if fp:
         with st.container(border=True):
             st.markdown("##### Run fingerprint")
