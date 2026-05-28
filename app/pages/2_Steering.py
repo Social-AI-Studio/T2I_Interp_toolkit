@@ -28,6 +28,7 @@ from app.lib import (
     model_preset_picker,
     pair_baseline_modified,
     parse_pipe_lines,
+    render_app_footer,
     render_run_label_sidebar,
     run_workflow,
 )
@@ -491,3 +492,5 @@ if run_clicked:
             c3.metric("Alpha", str(fp["intervention"].get("alpha", "-")))
             with st.expander("Full fingerprint JSON", expanded=False):
                 st.json(fp)
+
+render_app_footer()

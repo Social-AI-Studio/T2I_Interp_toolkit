@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from app.lib import scan_fingerprints
+from app.lib import render_app_footer, scan_fingerprints
 
 st.set_page_config(page_title="Fingerprints • T2I-Interp", layout="wide")
 
@@ -106,3 +106,5 @@ if filtered:
                     st.image(str(img), caption=img.name, use_container_width=True)
                 if len(imgs) > 6:
                     st.caption(f"...and {len(imgs) - 6} more in `{chosen['path']}`")
+
+render_app_footer()

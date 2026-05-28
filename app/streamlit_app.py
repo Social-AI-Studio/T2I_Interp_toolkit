@@ -9,7 +9,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from app.lib import FIG2_SPECTACLES_PAYLOAD
+from app.lib import FIG2_SPECTACLES_PAYLOAD, render_app_footer
 
 st.set_page_config(
     page_title="DreamReader Demo",
@@ -265,3 +265,5 @@ st.caption(
     "approximate. Read the paper's Ethics Statement before using outputs "
     "to make claims about individuals or groups."
 )
+
+render_app_footer()

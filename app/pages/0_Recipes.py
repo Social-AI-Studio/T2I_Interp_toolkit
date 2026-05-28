@@ -17,7 +17,13 @@ from typing import Any
 
 import streamlit as st
 
-from app.lib import FIG2_SPECTACLES_PAYLOAD, WORKFLOW_TO_PAGE, RecipeMatch, analyze_goal
+from app.lib import (
+    FIG2_SPECTACLES_PAYLOAD,
+    WORKFLOW_TO_PAGE,
+    RecipeMatch,
+    analyze_goal,
+    render_app_footer,
+)
 from app.lib import is_available as llm_is_available
 from app.lib.prompts import (
     CIGARETTE_PAIRS,
@@ -655,3 +661,5 @@ st.caption(
     "`ANTHROPIC_API_KEY` to enable it. Recipe page paths and presets stay "
     "in sync with the workflow pages via st.session_state."
 )
+
+render_app_footer()

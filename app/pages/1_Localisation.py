@@ -14,6 +14,7 @@ from app.lib import (
     load_fingerprint,
     model_preset_picker,
     pair_baseline_modified,
+    render_app_footer,
     render_run_label_sidebar,
     run_workflow,
     scenario_radio,
@@ -317,3 +318,5 @@ if run_clicked:
                 st.metric("Workflow", fp["workflow"])
             with c2:
                 st.json(fp, expanded=False)
+
+render_app_footer()

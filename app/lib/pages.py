@@ -112,3 +112,27 @@ def render_run_label_sidebar(*, key: str) -> None:
         ),
         key=key,
     )
+
+
+def render_app_footer() -> None:
+    """Sidebar footer shared by every page. Right now: a Clear cache button.
+
+    The bare `C` keyboard shortcut for clearing caches was popping up a
+    confirmation dialog any time a user pressed C (e.g. trying to copy
+    text). We disable that shortcut in `.streamlit/config.toml` by setting
+    `client.toolbarMode = "viewer"`, and surface the action here so users
+    still have an explicit way to invoke it.
+    """
+    st.sidebar.divider()
+    if st.sidebar.button(
+        "Clear cache",
+        help=(
+            "Drops every @st.cache_data and @st.cache_resource entry. "
+            "Useful if the app shows stale content after a code change."
+        ),
+        key="__app_clear_cache_btn",
+        use_container_width=True,
+    ):
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.sidebar.success("Cleared.")

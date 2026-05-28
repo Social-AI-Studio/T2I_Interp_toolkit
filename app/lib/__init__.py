@@ -16,6 +16,7 @@ from app.lib.outputs import (
 )
 from app.lib.pages import (
     apply_payload,
+    render_app_footer,
     render_run_label_sidebar,
     scenario_radio,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "model_preset_picker",
     "pair_baseline_modified",
     "parse_pipe_lines",
+    "render_app_footer",
     "render_run_label_sidebar",
     "run_workflow",
     "scan_fingerprints",

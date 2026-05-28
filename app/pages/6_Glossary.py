@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from app.lib import render_app_footer
+
 st.set_page_config(page_title="Glossary • T2I-Interp", layout="wide")
 
 st.title("Glossary")
@@ -137,3 +139,5 @@ st.markdown(
   `guidance_scale`, `num_inference_steps`, and so on, all at once.
 """
 )
+
+render_app_footer()
