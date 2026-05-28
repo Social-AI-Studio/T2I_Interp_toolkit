@@ -17,8 +17,15 @@ from typing import Any
 
 import streamlit as st
 
-from app.lib import WORKFLOW_TO_PAGE, RecipeMatch, analyze_goal
+from app.lib import FIG2_SPECTACLES_PAYLOAD, WORKFLOW_TO_PAGE, RecipeMatch, analyze_goal
 from app.lib import is_available as llm_is_available
+from app.lib.prompts import (
+    CIGARETTE_PAIRS,
+    DEMOGRAPHIC_PAIRS,
+    OCCUPATION_PAIRS,
+    PAINTERLY_PAIRS,
+    STITCH_GENERIC_PROMPTS,
+)
 from app.lib.workflows import WORKFLOW_ORDER
 
 st.set_page_config(page_title="Recipes • T2I-Interp", layout="wide")
@@ -60,85 +67,8 @@ class Recipe:
         return WORKFLOW_TO_PAGE[self.workflow]
 
 
-# Standard prompt blocks reused across recipes.
-_SPECTACLES_PROMPTS = "A photo of Jack Sparrow\nA photo of Simba\nA photo of Mickey Mouse"
-
-# Inline pairs that lets the spectacles recipe run fully offline (no HF download).
-# Each line is `<teacher with-spectacles> | <base without-spectacles>`.
-# run_steer.py maps pos to teacher_prompt and neg to base_prompt for LoReFT.
-_SPECTACLES_INLINE_PAIRS = (
-    "A photo of Jack Sparrow with spectacles | A photo of Jack Sparrow\n"
-    "A photo of Simba with spectacles | A photo of Simba\n"
-    "A photo of Mickey Mouse with spectacles | A photo of Mickey Mouse\n"
-    "A photo of Spider-Man with spectacles | A photo of Spider-Man\n"
-    "A photo of a businessman with spectacles | A photo of a businessman\n"
-    "A photo of a scientist with spectacles | A photo of a scientist\n"
-    "A photo of a doctor with spectacles | A photo of a doctor\n"
-    "A photo of a librarian with spectacles | A photo of a librarian\n"
-    "A photo of a professor with spectacles | A photo of a professor\n"
-    "A photo of a teacher with spectacles | A photo of a teacher\n"
-    "A photo of a student with spectacles | A photo of a student\n"
-    "A photo of a man with spectacles | A photo of a man"
-)
-
-# Generic prompts the Stitching mapper trains on. One per line, fed to both
-# models since cross-model behaviour transfer typically uses the same prompt.
-_STITCH_GENERIC_PROMPTS = (
-    "a photo of a person\n"
-    "a photo of a cat\n"
-    "a photo of a landscape\n"
-    "a photo of a still life\n"
-    "a photo of a city street\n"
-    "a photo of a forest\n"
-    "a photo of a beach\n"
-    "a portrait of a woman\n"
-    "a portrait of a man\n"
-    "a photo of a sunset"
-)
-
-# Inline pair catalogues (pos | neg, one per line). Used by recipes whose target
-# concept doesn't have a published HuggingFace dataset in the CAA or LoReFT
-# schema. run_steer.py builds an in-memory Dataset from these pairs.
-_DEMOGRAPHIC_PAIRS = (
-    "photo of a Black man | photo of a man\n"
-    "portrait of a Black man | portrait of a man\n"
-    "photograph of a Black father | photograph of a father\n"
-    "headshot of a Black man | headshot of a man\n"
-    "photo of a Black businessman | photo of a businessman\n"
-    "portrait of a Black athlete | portrait of an athlete\n"
-    "photo of a Black doctor | photo of a doctor\n"
-    "photo of a Black teacher | photo of a teacher"
-)
-_CIGARETTE_PAIRS = (
-    "a man holding a cigarette | a man holding a pen\n"
-    "a person smoking | a person resting\n"
-    "a man smoking outside | a man standing outside\n"
-    "a woman with a cigarette | a woman with a coffee cup\n"
-    "a person lighting a cigarette | a person lighting a candle\n"
-    "close-up of someone smoking | close-up of someone yawning\n"
-    "a hand holding a cigarette | a hand holding a phone\n"
-    "a character with a cigarette | a character with a coffee"
-)
-_PAINTERLY_PAIRS = (
-    "a painterly portrait of a man | a photo of a man\n"
-    "an impressionist painting of a woman | a photo of a woman\n"
-    "a painterly landscape with mountains | a photo of a landscape with mountains\n"
-    "an oil painting of a still life with apples | a photo of a still life with apples\n"
-    "a painterly portrait of a child | a photo of a child\n"
-    "an impressionist garden scene | a photo of a garden scene\n"
-    "a painterly seascape at sunset | a photo of a seascape at sunset\n"
-    "a painterly street market | a photo of a street market"
-)
-_OCCUPATION_PAIRS = (
-    "a woman doctor | a doctor\n"
-    "a woman CEO | a CEO\n"
-    "a woman engineer | an engineer\n"
-    "a woman scientist | a scientist\n"
-    "a woman pilot | a pilot\n"
-    "a woman programmer | a programmer\n"
-    "a woman surgeon | a surgeon\n"
-    "a woman professor | a professor"
-)
+# All prompt-pair literals live in app/lib/prompts.py so the home page and
+# workflow pages share the same source.
 
 
 RECIPES: list[Recipe] = [
@@ -159,16 +89,10 @@ RECIPES: list[Recipe] = [
             ("Alpha", "10.0"),
             ("Inline pairs", "12 spectacles pairs (pre-filled)"),
         ],
-        fields={
-            "method": "loreft",
-            "model_preset": "sdxl_turbo",
-            "prompts": _SPECTACLES_PROMPTS,
-            "alpha": 10.0,
-            "max_samples": 100,
-            "train_steps": 100,
-            "inline_pairs": _SPECTACLES_INLINE_PAIRS,
-        },
-        goal_text="Add spectacles to character portraits (paper Fig 2 reproduction, inline pairs).",
+        # Pull from the shared payload so the home page CTA and this card
+        # always agree on the spectacles config.
+        fields=dict(FIG2_SPECTACLES_PAYLOAD["fields"]),
+        goal_text=FIG2_SPECTACLES_PAYLOAD["goal"],
     ),
     Recipe(
         title="Shift generations toward a specific demographic (paper Fig 3)",
@@ -194,7 +118,7 @@ RECIPES: list[Recipe] = [
             "alpha": 8.0,
             "max_samples": 100,
             "train_steps": 50,
-            "inline_pairs": _DEMOGRAPHIC_PAIRS,
+            "inline_pairs": DEMOGRAPHIC_PAIRS,
         },
         goal_text="Shift 'photo of a man' generations toward Black men (paper Fig 3, inline pairs).",
     ),
@@ -220,7 +144,7 @@ RECIPES: list[Recipe] = [
             "alpha": -10.0,
             "max_samples": 100,
             "train_steps": 50,
-            "inline_pairs": _CIGARETTE_PAIRS,
+            "inline_pairs": CIGARETTE_PAIRS,
         },
         goal_text="Suppress cigarettes via negative-alpha CAA (inline pairs).",
     ),
@@ -247,7 +171,7 @@ RECIPES: list[Recipe] = [
             "alpha": 12.0,
             "max_samples": 100,
             "train_steps": 100,
-            "inline_pairs": _PAINTERLY_PAIRS,
+            "inline_pairs": PAINTERLY_PAIRS,
         },
         goal_text="Make generations look painterly / impressionist (LoReFT, inline pairs).",
     ),
@@ -275,7 +199,7 @@ RECIPES: list[Recipe] = [
             "alpha": 5.0,
             "max_samples": 100,
             "train_steps": 50,
-            "inline_pairs": _OCCUPATION_PAIRS,
+            "inline_pairs": OCCUPATION_PAIRS,
         },
         goal_text="Reduce gender stereotyping for occupation prompts (CAA, inline pairs).",
     ),
@@ -454,7 +378,7 @@ RECIPES: list[Recipe] = [
             "num_steps": 200,
             "num_inference_steps": 15,
             "model_preset": "sd15",
-            "inline_pairs": _STITCH_GENERIC_PROMPTS,
+            "inline_pairs": STITCH_GENERIC_PROMPTS,
         },
         goal_text="Transfer a fine-tuned model's behaviour via a mapper (inline prompts).",
     ),
@@ -482,7 +406,7 @@ RECIPES: list[Recipe] = [
             "num_steps": 100,
             "num_inference_steps": 15,
             "model_preset": "sd15",
-            "inline_pairs": _STITCH_GENERIC_PROMPTS,
+            "inline_pairs": STITCH_GENERIC_PROMPTS,
         },
         goal_text="Diagnose layer comparability with a small mapper (inline prompts).",
     ),

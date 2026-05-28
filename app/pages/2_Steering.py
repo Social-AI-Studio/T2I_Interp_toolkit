@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import tempfile
 import time
 
@@ -19,22 +18,25 @@ import streamlit as st
 
 from app.lib import (
     INTENT_TEMPLATES,
+    apply_payload,
     collect_images,
     device_dtype_picker,
     generate_inline_pairs,
+    has_unresolved_placeholders,
     load_fingerprint,
     model_preset_picker,
+    pair_baseline_modified,
+    parse_pipe_lines,
+    render_run_label_sidebar,
     run_workflow,
 )
-from app.lib import is_available as llm_is_available
+from app.lib import (
+    is_available as llm_is_available,
+)
 
 st.set_page_config(page_title="Steering • T2I-Interp", layout="wide")
 
 # ── Defaults + recipe-payload intake ─────────────────────────────────────────
-# Every recipe-controllable widget on this page is keyed into session_state
-# so the Recipes page can pre-fill it via st.session_state["recipe_payload"].
-# Order matters: set defaults first (idempotent), then overwrite with payload
-# before any widgets render.
 
 _STEER_DEFAULTS: dict[str, object] = {
     "steer_goal": "",
@@ -46,65 +48,12 @@ _STEER_DEFAULTS: dict[str, object] = {
     "steer_train_steps": 50,
     "steer_inline_pairs": "",
 }
-for _k, _v in _STEER_DEFAULTS.items():
-    st.session_state.setdefault(_k, _v)
-
-_payload = st.session_state.get("recipe_payload")
-if _payload and _payload.get("workflow") == "Steering":
-    del st.session_state["recipe_payload"]
-    if _payload.get("goal"):
-        st.session_state["steer_goal"] = _payload["goal"]
-    for _fk, _fv in _payload.get("fields", {}).items():
-        _sk = f"steer_{_fk}"
-        if _sk in _STEER_DEFAULTS:
-            st.session_state[_sk] = _fv
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _parse_inline_pairs(raw: str) -> tuple[list[dict[str, str]], list[int]]:
-    """Parse `pos | neg` lines. Returns (pairs, skipped_line_numbers)."""
-    out: list[dict[str, str]] = []
-    skipped: list[int] = []
-    for idx, line in enumerate(raw.splitlines(), start=1):
-        line = line.strip()
-        if not line:
-            continue
-        if "|" not in line:
-            skipped.append(idx)
-            continue
-        left, right = line.split("|", 1)
-        pos, neg = left.strip(), right.strip()
-        if pos and neg:
-            out.append({"pos": pos, "neg": neg})
-        else:
-            skipped.append(idx)
-    return out, skipped
-
-
-def _pair_baseline_steered(images: list) -> list[tuple[str, object | None, object | None]]:
-    """Group output images into (label, baseline, steered) triples.
-
-    Image names look like `baseline_0.png`, `baseline_1.png`, `steered_0.png`,
-    `steered_1.png`, etc. Returns one triple per prompt index. Any unmatched
-    images become triples with one side set to None.
-    """
-    pairs: dict[str, dict[str, object]] = {}
-    leftovers: list = []
-    for img in images:
-        m = re.match(r"(baseline|steered)_(\d+)\.(png|jpg|jpeg)$", img.name, re.IGNORECASE)
-        if not m:
-            leftovers.append(img)
-            continue
-        kind, idx = m.group(1).lower(), m.group(2)
-        pairs.setdefault(idx, {})[kind] = img
-    out: list[tuple[str, object | None, object | None]] = []
-    for idx, both in sorted(pairs.items(), key=lambda kv: int(kv[0])):
-        out.append((f"prompt {idx}", both.get("baseline"), both.get("steered")))
-    for img in leftovers:
-        out.append((img.name, None, img))
-    return out
+apply_payload(
+    st.session_state,
+    prefix="steer",
+    defaults=_STEER_DEFAULTS,
+    workflow_name="Steering",
+)
 
 
 # Per-method default HF dataset (matches the YAML configs).
@@ -125,44 +74,15 @@ st.caption(
     "Figure 2 spectacles result uses LoReFT on SDXL-Turbo."
 )
 
-# Quick presets row right under the header.
-c_preset1, c_preset2, _ = st.columns([1, 1, 4])
-with c_preset1:
-    if st.button(
-        "▶ Reproduce Fig 2",
-        type="primary",
-        use_container_width=True,
-        help="LoReFT + SDXL-Turbo + spectacles prompts. The paper's headline result.",
-    ):
-        st.session_state["steer_method"] = "loreft"
-        st.session_state["steer_model_preset"] = "sdxl_turbo"
-        st.session_state["steer_prompts"] = "A photo of Jack Sparrow\nA photo of Simba"
-        st.session_state["steer_alpha"] = 10.0
-        st.session_state["steer_max_samples"] = 200
-        st.session_state["steer_train_steps"] = 50
-        st.rerun()
-with c_preset2:
-    if st.button(
-        "Quick smoke run",
-        use_container_width=True,
-        help="Tiny scale, just to confirm the wiring works (a few seconds).",
-    ):
-        st.session_state["steer_method"] = "loreft"
-        st.session_state["steer_model_preset"] = "sdxl_turbo"
-        st.session_state["steer_prompts"] = "A photo of a cat"
-        st.session_state["steer_alpha"] = 5.0
-        st.session_state["steer_max_samples"] = 10
-        st.session_state["steer_train_steps"] = 2
-        st.rerun()
-
 
 # ── Step 1: What you want ────────────────────────────────────────────────────
 
 with st.container(border=True):
     st.markdown("### Step 1 · What you want")
     st.caption(
-        "Pick what kind of concept you want to inject (or suppress), then either "
-        "use the template or have Claude generate prompt pairs for it."
+        "Pick what kind of concept you want to inject (or suppress). Either "
+        "use the template starter (placeholders to replace), or have Claude "
+        "write real prompt pairs for your concept."
     )
 
     intent_label_to_key = {
@@ -193,7 +113,8 @@ with st.container(border=True):
             "Use template starter",
             help=(
                 "Drops the template into Step 2 below. Replace the placeholder "
-                "(<ATTRIBUTE>, <CONCEPT>, <DEMO>, or <STYLE>) with your concept."
+                "(<ATTRIBUTE>, <CONCEPT>, <DEMO>, or <STYLE>) with your concept "
+                "before running."
             ),
             key="steer_use_template_btn",
             use_container_width=True,
@@ -242,7 +163,9 @@ with st.container(border=True):
 # ── Step 2: Training data ────────────────────────────────────────────────────
 
 inline_pairs_text = str(st.session_state.get("steer_inline_pairs", ""))
-inline_pairs, _inline_skipped = _parse_inline_pairs(inline_pairs_text)
+inline_pairs, _inline_skipped = parse_pipe_lines(inline_pairs_text, require_separator=True)
+inline_pairs = [p for p in inline_pairs if isinstance(p, dict)]  # mypy-friendly narrow
+unresolved_placeholders = has_unresolved_placeholders(inline_pairs_text)
 _current_method = str(st.session_state.get("steer_method", "loreft"))
 
 with st.container(border=True):
@@ -260,6 +183,16 @@ with st.container(border=True):
             f"(default for `{_current_method}`). Paste pairs below to train "
             "on your own concept instead.",
             icon="🌐",
+        )
+
+    if unresolved_placeholders:
+        st.error(
+            "**Unresolved placeholders in your pairs**: "
+            f"{', '.join(f'`{p}`' for p in unresolved_placeholders)}. "
+            "These come from the template starter and need to be replaced "
+            "with a real concept (e.g. `spectacles`, `a beard`) before Run. "
+            "Training on literal `<ATTRIBUTE>` text produces garbage.",
+            icon="⚠️",
         )
 
     st.text_area(
@@ -280,8 +213,8 @@ with st.container(border=True):
         label_visibility="visible",
     )
     # Live counter.
-    _live_pairs, _live_skipped = _parse_inline_pairs(
-        str(st.session_state.get("steer_inline_pairs", ""))
+    _live_pairs, _live_skipped = parse_pipe_lines(
+        str(st.session_state.get("steer_inline_pairs", "")), require_separator=True
     )
     if _live_pairs:
         st.caption(
@@ -310,14 +243,7 @@ preset = model_preset_picker(
     default=str(st.session_state.get("steer_model_preset", "sdxl_turbo")),
     key="steer_model_preset",
 )
-st.sidebar.text_input(
-    "Run label (optional)",
-    help=(
-        "Free-text label saved in the fingerprint and shown in the "
-        "results panel. Does not drive the run."
-    ),
-    key="steer_goal",
-)
+render_run_label_sidebar(key="steer_goal")
 
 with st.container(border=True):
     st.markdown("### Step 3 · Run config")
@@ -390,35 +316,40 @@ train_steps = int(st.session_state["steer_train_steps"])
 goal = str(st.session_state["steer_goal"])
 
 
+def _build_overrides(out_dir: str) -> tuple[list[str], str | None]:
+    """Build Hydra overrides + write inline pairs JSON if needed.
+
+    Returns `(overrides, inline_pairs_file_path)` so the caller can preview
+    one and only materialise the JSON when actually running.
+    """
+    pairs_file: str | None = None
+    if inline_pairs:
+        pairs_file = os.path.join(out_dir, "inline_pairs.json")
+    ovs = [
+        f"--config-name=steer/{steer_type}",
+        f"device={device}",
+        f"dtype={dtype}",
+        f"alpha={alpha}",
+        f"max_samples={max_samples}",
+        f"train_steps={train_steps}",
+        f"prompts=[{','.join(prompts)}]",
+        f"save_dir={out_dir}/cache",
+        f"output_dir={out_dir}",
+        f"hydra.run.dir={out_dir}/.hydra",
+        "wandb.project=null",
+    ]
+    if preset:
+        ovs.append(f"model={preset}")
+    if pairs_file:
+        ovs.append(f"inline_pairs_file={pairs_file}")
+    return ovs, pairs_file
+
+
 # ── Step 4: Run ──────────────────────────────────────────────────────────────
 
-out_dir = tempfile.mkdtemp(prefix="streamlit_steer_")
-
-# Inline pairs go via a JSON sidecar file. Hydra's list-of-dict override syntax
-# is awkward for prompts containing spaces and commas.
-inline_pairs_file: str | None = None
-if inline_pairs:
-    inline_pairs_file = os.path.join(out_dir, "inline_pairs.json")
-    with open(inline_pairs_file, "w") as f:
-        json.dump(inline_pairs, f)
-
-overrides = [
-    f"--config-name=steer/{steer_type}",
-    f"device={device}",
-    f"dtype={dtype}",
-    f"alpha={alpha}",
-    f"max_samples={max_samples}",
-    f"train_steps={train_steps}",
-    f"prompts=[{','.join(prompts)}]",
-    f"save_dir={out_dir}/cache",
-    f"output_dir={out_dir}",
-    f"hydra.run.dir={out_dir}/.hydra",
-    "wandb.project=null",
-]
-if preset:
-    overrides.append(f"model={preset}")
-if inline_pairs_file:
-    overrides.append(f"inline_pairs_file={inline_pairs_file}")
+# Show the CLI preview with a placeholder out_dir so we don't create a new
+# tempdir on every script rerun (only when Run is actually clicked).
+_preview_overrides, _ = _build_overrides("/tmp/streamlit_steer_<auto>")
 
 with st.container(border=True):
     st.markdown("### Step 4 · Run")
@@ -428,17 +359,27 @@ with st.container(border=True):
         f"then generate **{len(prompts)} prompt(s)** baseline and steered."
     )
     with st.expander("CLI equivalent", expanded=False):
-        st.code("t2i-steer " + " \\\n  ".join(overrides), language="bash")
+        st.code("t2i-steer " + " \\\n  ".join(_preview_overrides), language="bash")
     run_clicked = st.button(
         "▶ Train and generate",
         type="primary",
         use_container_width=True,
+        disabled=bool(unresolved_placeholders),
+        help=(
+            "Replace the placeholder tokens in Step 2 first." if unresolved_placeholders else None
+        ),
     )
 
 
 # ── Results ──────────────────────────────────────────────────────────────────
 
 if run_clicked:
+    out_dir = tempfile.mkdtemp(prefix="streamlit_steer_")
+    overrides, pairs_file = _build_overrides(out_dir)
+    if pairs_file:
+        with open(pairs_file, "w") as f:
+            json.dump(inline_pairs, f)
+
     with st.status(f"Training {steer_type.upper()} and generating...", expanded=True) as status:
         line_box = st.empty()
         recent: list[str] = []
@@ -464,7 +405,7 @@ if run_clicked:
 
     images = collect_images(out_dir)
     if images:
-        triples = _pair_baseline_steered(images)
+        triples = pair_baseline_modified(images, modified_kinds=("steered",), label_prefix="prompt")
         st.markdown(f"**{len(triples)} prompt(s)** generated.")
         for label, baseline, steered in triples:
             with st.container(border=True):

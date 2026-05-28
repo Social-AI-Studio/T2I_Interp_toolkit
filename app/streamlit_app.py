@@ -9,6 +9,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from app.lib import FIG2_SPECTACLES_PAYLOAD
+
 st.set_page_config(
     page_title="DreamReader Demo",
     page_icon=None,
@@ -40,8 +42,12 @@ with c1:
         "▶ Reproduce paper Fig 2",
         type="primary",
         use_container_width=True,
-        help="LoReFT adds spectacles to SDXL-Turbo character prompts. About 60 seconds.",
+        help="LoReFT adds spectacles to SDXL-Turbo character prompts. Drops you on Steering with everything pre-filled.",
     ):
+        # Pre-fill Steering with the spectacles payload so the user lands on
+        # a form already configured for the headline result. One more click
+        # (Run) and they have Fig 2.
+        st.session_state["recipe_payload"] = FIG2_SPECTACLES_PAYLOAD
         st.switch_page("pages/2_Steering.py")
 with c2:
     if st.button("Browse recipes", use_container_width=True):

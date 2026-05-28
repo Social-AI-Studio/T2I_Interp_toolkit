@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,58 @@ def collect_images(dir_: str | Path) -> list[Path]:
     if not d.exists():
         return []
     return sorted(p for p in d.rglob("*.png") if p.is_file())
+
+
+def pair_baseline_modified(
+    images: list[Path],
+    *,
+    modified_kinds: tuple[str, ...] = ("steered", "modified", "head", "ablated"),
+    label_prefix: str = "prompt",
+) -> list[tuple[str, Path | None, Path | None]]:
+    """Group output images into (label, baseline, modified) triples.
+
+    Recognises filenames like `baseline_0.png`, `baseline.png`, `steered_0.png`,
+    `modified_5.png`, etc. The `baseline_<idx>` form pairs with the matching
+    `<kind>_<idx>` modified image. A single unindexed `baseline.png` is
+    treated as the shared baseline for every modified index (the
+    Localisation case, where one baseline is shared across head ablations).
+
+    Anything that doesn't match either pattern is returned as a leftover
+    triple `(name, None, image)` so it still gets displayed.
+    """
+    indexed_baselines: dict[str, Path] = {}
+    shared_baseline: Path | None = None
+    modified: dict[str, Path] = {}
+    leftovers: list[Path] = []
+
+    modified_alt = "|".join(re.escape(k) for k in modified_kinds)
+    modified_re = re.compile(rf"(?:{modified_alt})_(\d+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
+    indexed_baseline_re = re.compile(r"baseline_(\d+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
+    bare_baseline_re = re.compile(r"baseline\.(?:png|jpg|jpeg)$", re.IGNORECASE)
+
+    for img in images:
+        name = img.name
+        if m := indexed_baseline_re.search(name):
+            indexed_baselines[m.group(1)] = img
+        elif bare_baseline_re.search(name):
+            shared_baseline = img
+        elif m := modified_re.search(name):
+            modified[m.group(1)] = img
+        else:
+            leftovers.append(img)
+
+    indices = sorted(set(indexed_baselines) | set(modified), key=int)
+    out: list[tuple[str, Path | None, Path | None]] = []
+    for idx in indices:
+        baseline = indexed_baselines.get(idx, shared_baseline)
+        out.append((f"{label_prefix} {idx}", baseline, modified.get(idx)))
+    # If there are no modified-with-index images but we have a shared baseline
+    # alone, still show it once so the user sees what they got.
+    if not indices and shared_baseline is not None:
+        out.append((f"{label_prefix} (baseline only)", shared_baseline, None))
+    for img in leftovers:
+        out.append((img.name, None, img))
+    return out
 
 
 def load_fingerprint(dir_: str | Path) -> dict[str, Any] | None:

@@ -10,12 +10,17 @@ import time
 import streamlit as st
 
 from app.lib import (
+    apply_payload,
     collect_images,
     device_dtype_picker,
     load_fingerprint,
     model_preset_picker,
+    parse_pipe_lines,
+    render_run_label_sidebar,
     run_workflow,
+    scenario_radio,
 )
+from app.lib.prompts import STITCH_GENERIC_PROMPTS
 
 st.set_page_config(page_title="Stitching • T2I-Interp", layout="wide")
 
@@ -30,40 +35,42 @@ _STITCH_DEFAULTS: dict[str, object] = {
     "stitch_model_preset": "sd15",
     "stitch_inline_pairs": "",
 }
-for _k, _v in _STITCH_DEFAULTS.items():
-    st.session_state.setdefault(_k, _v)
-
-_payload = st.session_state.get("recipe_payload")
-if _payload and _payload.get("workflow") == "Stitching":
-    del st.session_state["recipe_payload"]
-    if _payload.get("goal"):
-        st.session_state["stitch_goal"] = _payload["goal"]
-    for _fk, _fv in _payload.get("fields", {}).items():
-        _sk = f"stitch_{_fk}"
-        if _sk in _STITCH_DEFAULTS:
-            st.session_state[_sk] = _fv
+apply_payload(
+    st.session_state,
+    prefix="stitch",
+    defaults=_STITCH_DEFAULTS,
+    workflow_name="Stitching",
+)
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _parse_inline_stitch(raw: str) -> tuple[list[dict[str, str] | str], list[int]]:
-    """Parse 'prompt' or 'a | b' lines. Returns (entries, skipped_line_numbers)."""
-    out: list[dict[str, str] | str] = []
-    skipped: list[int] = []
-    for idx, line in enumerate(raw.splitlines(), start=1):
-        line = line.strip()
-        if not line:
-            continue
-        if "|" in line:
-            a, b = (s.strip() for s in line.split("|", 1))
-            if a and b:
-                out.append({"a": a, "b": b})
-            else:
-                skipped.append(idx)
-        else:
-            out.append(line)
-    return out, skipped
+_STITCH_PRESETS: dict[str, dict[str, object]] = {
+    "Test if two layers carry similar info (small mapper)": {
+        "label": "Test if two layers carry similar information",
+        "hidden_dim": 256,
+        "max_samples": 50,
+        "num_steps": 100,
+        "inline_pairs": STITCH_GENERIC_PROMPTS,
+        "hint": (
+            "A small mapper that converges is real evidence the two "
+            "layers carry comparable information. If you bump hidden_dim "
+            "to 1024 you can paper over real incompatibility, so keep "
+            "it small for an honest test."
+        ),
+    },
+    "Transfer behaviour between two models (large mapper)": {
+        "label": "Transfer behaviour between two models",
+        "hidden_dim": 512,
+        "max_samples": 100,
+        "num_steps": 200,
+        "inline_pairs": STITCH_GENERIC_PROMPTS,
+        "hint": (
+            "Larger mapper, more samples, more steps. Used for cross-"
+            "model behaviour transfer in the paper's §4 case study. The "
+            "mapper has to be expressive enough to translate between two "
+            "different models."
+        ),
+    },
+}
 
 
 # ── Page header ──────────────────────────────────────────────────────────────
@@ -78,80 +85,21 @@ st.caption(
 
 
 # ── Step 1: What you want ────────────────────────────────────────────────────
-# Hardcoded scenarios that pre-fill mapper size and training scale.
-
-_STITCH_GENERIC_PROMPTS = (
-    "a photo of a person\n"
-    "a photo of a cat\n"
-    "a photo of a landscape\n"
-    "a portrait of a woman\n"
-    "a portrait of a man\n"
-    "a photo of a still life\n"
-    "a photo of a city street\n"
-    "a photo of a sunset"
-)
-
-_STITCH_PRESETS: dict[str, dict[str, object]] = {
-    "Test if two layers carry similar info (small mapper)": {
-        "label": "Test if two layers carry similar information",
-        "hidden_dim": 256,
-        "max_samples": 50,
-        "num_steps": 100,
-        "inline_pairs": _STITCH_GENERIC_PROMPTS,
-        "hint": (
-            "A small mapper that converges is real evidence the two "
-            "layers carry comparable information. If you bump hidden_dim "
-            "to 1024 you can paper over real incompatibility, so keep "
-            "it small for an honest test."
-        ),
-    },
-    "Transfer behaviour between two models (large mapper)": {
-        "label": "Transfer behaviour between two models",
-        "hidden_dim": 512,
-        "max_samples": 100,
-        "num_steps": 200,
-        "inline_pairs": _STITCH_GENERIC_PROMPTS,
-        "hint": (
-            "Larger mapper, more samples, more steps. Used for cross-"
-            "model behaviour transfer in the paper's §4 case study. The "
-            "mapper has to be expressive enough to translate between two "
-            "different models."
-        ),
-    },
-}
 
 with st.container(border=True):
     st.markdown("### Step 1 · What you want to do")
-    st.caption("Pick a scenario. The mapper size and training settings get pre-filled.")
-
-    chosen = st.radio(
-        "Scenario",
-        list(_STITCH_PRESETS),
-        index=0,
-        key="stitch_scenario_label",
-        label_visibility="collapsed",
+    scenario_radio(
+        presets=_STITCH_PRESETS,
+        prefix="stitch",
+        apply_keys=["hidden_dim", "max_samples", "num_steps", "inline_pairs"],
     )
-    preset_meta = _STITCH_PRESETS[chosen]
-    st.markdown(f"**{preset_meta['label']}**")
-    st.caption(str(preset_meta["hint"]))
-
-    if st.button(
-        "Apply scenario",
-        help="Drops the scenario's values into Steps 2 and 3 below.",
-        use_container_width=True,
-    ):
-        st.session_state["stitch_hidden_dim"] = preset_meta["hidden_dim"]
-        st.session_state["stitch_max_samples"] = preset_meta["max_samples"]
-        st.session_state["stitch_num_steps"] = preset_meta["num_steps"]
-        st.session_state["stitch_inline_pairs"] = preset_meta["inline_pairs"]
-        st.session_state["stitch_goal"] = preset_meta["label"]
-        st.rerun()
 
 
 # ── Step 2: Training data ────────────────────────────────────────────────────
 
-_pre_inline, _pre_skipped = _parse_inline_stitch(
-    str(st.session_state.get("stitch_inline_pairs", ""))
+_pre_inline, _pre_skipped = parse_pipe_lines(
+    str(st.session_state.get("stitch_inline_pairs", "")),
+    require_separator=False,
 )
 
 with st.container(border=True):
@@ -178,12 +126,13 @@ with st.container(border=True):
             "different prompts (concept transfer), use `prompt_a | prompt_b` "
             "syntax. Leave empty to use the HF dataset."
         ),
-        placeholder=("a photo of a person\na photo of a cat\na photo of a landscape"),
+        placeholder="a photo of a person\na photo of a cat\na photo of a landscape",
         height=180,
         key="stitch_inline_pairs",
     )
-    _live_parsed, _live_skipped = _parse_inline_stitch(
-        str(st.session_state.get("stitch_inline_pairs", ""))
+    _live_parsed, _live_skipped = parse_pipe_lines(
+        str(st.session_state.get("stitch_inline_pairs", "")),
+        require_separator=False,
     )
     if _live_parsed:
         st.caption(
@@ -222,15 +171,7 @@ preset = model_preset_picker(
     default=str(st.session_state.get("stitch_model_preset", "sd15")),
     key="stitch_model_preset",
 )
-st.sidebar.text_input(
-    "Run label (optional)",
-    help=(
-        "Free-text label saved in the fingerprint and shown in the "
-        "results panel. Set automatically when you Apply a scenario. "
-        "Does not drive the run."
-    ),
-    key="stitch_goal",
-)
+render_run_label_sidebar(key="stitch_goal")
 
 with st.container(border=True):
     st.markdown("### Step 3 · Run config")
@@ -250,8 +191,9 @@ num_inference_steps = int(st.session_state["stitch_num_inference_steps"])
 goal = str(st.session_state["stitch_goal"])
 
 # Re-parse from session_state in case the textarea was edited after the top-of-page parse.
-inline_pairs, _inline_skipped = _parse_inline_stitch(
-    str(st.session_state.get("stitch_inline_pairs", ""))
+inline_pairs, _inline_skipped = parse_pipe_lines(
+    str(st.session_state.get("stitch_inline_pairs", "")),
+    require_separator=False,
 )
 if str(st.session_state.get("stitch_inline_pairs", "")).strip() and not inline_pairs:
     st.sidebar.warning(
@@ -267,33 +209,33 @@ elif _inline_skipped:
     )
 
 
+def _build_overrides(out_dir: str) -> tuple[list[str], str | None]:
+    pairs_file: str | None = None
+    if inline_pairs:
+        pairs_file = os.path.join(out_dir, "inline_pairs.json")
+    ovs = [
+        f"device={device}",
+        f"dtype={dtype}",
+        f"hidden_dim={hidden_dim}",
+        f"max_samples={max_samples}",
+        f"num_steps={num_steps}",
+        f"num_inference_steps={num_inference_steps}",
+        f"prompts=[{','.join(prompts)}]",
+        f"save_dir={out_dir}/cache",
+        f"output_dir={out_dir}",
+        f"hydra.run.dir={out_dir}/.hydra",
+        "wandb.project=null",
+    ]
+    if preset:
+        ovs.append(f"model={preset}")
+    if pairs_file:
+        ovs.append(f"inline_pairs_file={pairs_file}")
+    return ovs, pairs_file
+
+
 # ── Step 4: Run ──────────────────────────────────────────────────────────────
 
-out_dir = tempfile.mkdtemp(prefix="streamlit_stitch_")
-
-inline_pairs_file: str | None = None
-if inline_pairs:
-    inline_pairs_file = os.path.join(out_dir, "inline_pairs.json")
-    with open(inline_pairs_file, "w") as f:
-        json.dump(inline_pairs, f)
-
-overrides = [
-    f"device={device}",
-    f"dtype={dtype}",
-    f"hidden_dim={hidden_dim}",
-    f"max_samples={max_samples}",
-    f"num_steps={num_steps}",
-    f"num_inference_steps={num_inference_steps}",
-    f"prompts=[{','.join(prompts)}]",
-    f"save_dir={out_dir}/cache",
-    f"output_dir={out_dir}",
-    f"hydra.run.dir={out_dir}/.hydra",
-    "wandb.project=null",
-]
-if preset:
-    overrides.append(f"model={preset}")
-if inline_pairs_file:
-    overrides.append(f"inline_pairs_file={inline_pairs_file}")
+_preview_overrides, _ = _build_overrides("/tmp/streamlit_stitch_<auto>")
 
 with st.container(border=True):
     st.markdown("### Step 4 · Run")
@@ -304,7 +246,7 @@ with st.container(border=True):
         "with the mapper rewiring activations."
     )
     with st.expander("CLI equivalent", expanded=False):
-        st.code("t2i-stitch " + " \\\n  ".join(overrides), language="bash")
+        st.code("t2i-stitch " + " \\\n  ".join(_preview_overrides), language="bash")
     run_clicked = st.button(
         "▶ Train mapper and generate",
         type="primary",
@@ -315,6 +257,12 @@ with st.container(border=True):
 # ── Results ──────────────────────────────────────────────────────────────────
 
 if run_clicked:
+    out_dir = tempfile.mkdtemp(prefix="streamlit_stitch_")
+    overrides, pairs_file = _build_overrides(out_dir)
+    if pairs_file:
+        with open(pairs_file, "w") as f:
+            json.dump(inline_pairs, f)
+
     with st.status("Training mapper and generating...", expanded=True) as status:
         line_box = st.empty()
         recent: list[str] = []

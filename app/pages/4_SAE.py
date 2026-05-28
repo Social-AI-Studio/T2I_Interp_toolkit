@@ -9,11 +9,14 @@ from pathlib import Path
 import streamlit as st
 
 from app.lib import (
+    apply_payload,
     collect_images,
     device_dtype_picker,
     load_fingerprint,
     model_preset_picker,
+    render_run_label_sidebar,
     run_workflow,
+    scenario_radio,
 )
 
 st.set_page_config(page_title="SAE • T2I-Interp", layout="wide")
@@ -28,46 +31,13 @@ _SAE_DEFAULTS: dict[str, object] = {
     "sae_n_top_features": 10,
     "sae_model_preset": "sdxl_turbo",
 }
-for _k, _v in _SAE_DEFAULTS.items():
-    st.session_state.setdefault(_k, _v)
-
-_payload = st.session_state.get("recipe_payload")
-if _payload and _payload.get("workflow") == "SAE":
-    del st.session_state["recipe_payload"]
-    if _payload.get("goal"):
-        st.session_state["sae_goal"] = _payload["goal"]
-    for _fk, _fv in _payload.get("fields", {}).items():
-        _sk = f"sae_{_fk}"
-        if _sk in _SAE_DEFAULTS:
-            st.session_state[_sk] = _fv
-
-
-# ── Page header ──────────────────────────────────────────────────────────────
-
-st.title("Sparse Autoencoders")
-st.markdown("##### Decompose activations into interpretable features. Push them up or down.")
-st.caption(
-    "Paper §3.4. Loads pretrained SAEs trained on SDXL-Turbo UNet "
-    "activations. Captures the latents for your prompt, picks the top "
-    "active features, and re-generates with each scaled by a range of "
-    "strengths."
+apply_payload(
+    st.session_state,
+    prefix="sae",
+    defaults=_SAE_DEFAULTS,
+    workflow_name="SAE",
 )
 
-# Surface missing checkpoints early.
-ckpt_dir = Path("./sdxl-unbox/checkpoints")
-if not ckpt_dir.exists():
-    st.error(
-        "Missing SAE checkpoints at `./sdxl-unbox/checkpoints/`. Run "
-        "`t2i-migrate-sae --checkpoint-dir ./sdxl-unbox/checkpoints` after "
-        "downloading from `anonymous-author-129/sdxl-unbox-saes` on "
-        "HuggingFace. Or follow `notebooks/sae.ipynb` for the full setup."
-    )
-    st.stop()
-
-
-# ── Step 1: What you want ────────────────────────────────────────────────────
-# Hardcoded scenarios that pick prompt + strengths + n_features for the
-# three common use cases.
 
 _SAE_PRESETS: dict[str, dict[str, object]] = {
     "Discover what features fire for my prompt": {
@@ -114,34 +84,45 @@ _SAE_PRESETS: dict[str, dict[str, object]] = {
     },
 }
 
+
+# ── Page header ──────────────────────────────────────────────────────────────
+
+st.title("Sparse Autoencoders")
+st.markdown("##### Decompose activations into interpretable features. Push them up or down.")
+st.caption(
+    "Paper §3.4. Loads pretrained SAEs trained on SDXL-Turbo UNet "
+    "activations. Captures the latents for your prompt, picks the top "
+    "active features, and re-generates with each scaled by a range of "
+    "strengths."
+)
+
+# Surface missing checkpoints early.
+ckpt_dir = Path("./sdxl-unbox/checkpoints")
+if not ckpt_dir.exists():
+    st.error(
+        "Missing SAE checkpoints at `./sdxl-unbox/checkpoints/`. Run "
+        "`t2i-migrate-sae --checkpoint-dir ./sdxl-unbox/checkpoints` after "
+        "downloading from `anonymous-author-129/sdxl-unbox-saes` on "
+        "HuggingFace. Or follow `notebooks/sae.ipynb` for the full setup."
+    )
+    st.stop()
+
+
+# ── Step 1: What you want ────────────────────────────────────────────────────
+
 with st.container(border=True):
     st.markdown("### Step 1 · What you want to do")
-    st.caption("Pick a scenario. Prompt, feature counts, and strength range get pre-filled.")
-
-    chosen = st.radio(
-        "Scenario",
-        list(_SAE_PRESETS),
-        index=0,
-        key="sae_scenario_label",
-        label_visibility="collapsed",
+    scenario_radio(
+        presets=_SAE_PRESETS,
+        prefix="sae",
+        apply_keys=[
+            "prompt",
+            "n_top_features",
+            "n_features_to_plot",
+            "strength_lo",
+            "strength_hi",
+        ],
     )
-    preset_meta = _SAE_PRESETS[chosen]
-    st.markdown(f"**{preset_meta['label']}**")
-    st.caption(str(preset_meta["hint"]))
-
-    if st.button(
-        "Apply scenario",
-        help="Drops the scenario's values into Steps 2 and 3 below.",
-        use_container_width=True,
-    ):
-        st.session_state["sae_prompt"] = preset_meta["prompt"]
-        st.session_state["sae_n_top_features"] = preset_meta["n_top_features"]
-        st.session_state["sae_n_features_to_plot"] = preset_meta["n_features_to_plot"]
-        st.session_state["sae_strength_lo"] = preset_meta["strength_lo"]
-        st.session_state["sae_strength_hi"] = preset_meta["strength_hi"]
-        st.session_state["sae_goal"] = preset_meta["label"]
-        st.rerun()
-
     st.text_input(
         "Prompt to probe",
         help=(
@@ -197,7 +178,7 @@ with st.container(border=True):
         )
 
 
-# ── Step 3: Run config (mostly sidebar) ──────────────────────────────────────
+# ── Sidebar ──────────────────────────────────────────────────────────────────
 
 st.sidebar.header("Hardware")
 device, dtype = device_dtype_picker(default_device="mps")
@@ -205,15 +186,7 @@ preset = model_preset_picker(
     default=str(st.session_state.get("sae_model_preset", "sdxl_turbo")),
     key="sae_model_preset",
 )
-st.sidebar.text_input(
-    "Run label (optional)",
-    help=(
-        "Free-text label saved in the fingerprint and shown in the "
-        "results panel. Set automatically when you Apply a scenario. "
-        "Does not drive the run."
-    ),
-    key="sae_goal",
-)
+render_run_label_sidebar(key="sae_goal")
 
 prompt = str(st.session_state["sae_prompt"])
 strength_lo = float(st.session_state["sae_strength_lo"])
@@ -223,23 +196,31 @@ n_features_to_plot = int(st.session_state["sae_n_features_to_plot"])
 n_top_features = int(st.session_state["sae_n_top_features"])
 goal = str(st.session_state["sae_goal"])
 
+# Strength sanity: degenerate range (both 0) would yield strengths=[0.0] and
+# the run would only render the baseline column. Block Run in that case.
+strengths_ok = strength_hi > 0.0 or strength_lo < 0.0
 
-# ── Step 4: Run ──────────────────────────────────────────────────────────────
 
-out_dir = tempfile.mkdtemp(prefix="streamlit_sae_")
-overrides = [
-    f"device={device}",
-    f"dtype={dtype}",
-    f"prompt={prompt}",
-    f"strengths=[{','.join(str(s) for s in strengths)}]",
-    f"n_features_to_plot={n_features_to_plot}",
-    f"n_top_features={n_top_features}",
-    f"output_dir={out_dir}",
-    f"hydra.run.dir={out_dir}/.hydra",
-    "wandb.project=null",
-]
-if preset:
-    overrides.append(f"model={preset}")
+def _build_overrides(out_dir: str) -> list[str]:
+    ovs = [
+        f"device={device}",
+        f"dtype={dtype}",
+        f"prompt={prompt}",
+        f"strengths=[{','.join(str(s) for s in strengths)}]",
+        f"n_features_to_plot={n_features_to_plot}",
+        f"n_top_features={n_top_features}",
+        f"output_dir={out_dir}",
+        f"hydra.run.dir={out_dir}/.hydra",
+        "wandb.project=null",
+    ]
+    if preset:
+        ovs.append(f"model={preset}")
+    return ovs
+
+
+# ── Step 3: Run ──────────────────────────────────────────────────────────────
+
+_preview_overrides = _build_overrides("/tmp/streamlit_sae_<auto>")
 
 with st.container(border=True):
     st.markdown("### Step 3 · Run")
@@ -248,18 +229,28 @@ with st.container(border=True):
         f"**{n_features_to_plot}** features, and re-generate at "
         f"strengths {strengths}."
     )
+    if not strengths_ok:
+        st.warning(
+            "Min and max strength are both 0. The sweep would only render "
+            "the baseline. Push the min slider negative or the max slider "
+            "positive before Run.",
+            icon="⚠️",
+        )
     with st.expander("CLI equivalent", expanded=False):
-        st.code("t2i-sae " + " \\\n  ".join(overrides), language="bash")
+        st.code("t2i-sae " + " \\\n  ".join(_preview_overrides), language="bash")
     run_clicked = st.button(
         "▶ Capture and modulate",
         type="primary",
         use_container_width=True,
+        disabled=not strengths_ok,
     )
 
 
 # ── Results ──────────────────────────────────────────────────────────────────
 
 if run_clicked:
+    out_dir = tempfile.mkdtemp(prefix="streamlit_sae_")
+    overrides = _build_overrides(out_dir)
     with st.status("Capturing activations and modulating features...", expanded=True) as status:
         line_box = st.empty()
         recent: list[str] = []

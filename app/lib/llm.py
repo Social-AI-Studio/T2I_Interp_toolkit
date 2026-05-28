@@ -100,7 +100,7 @@ RECOMMEND_RECIPE_TOOL = {
             "reasoning": {
                 "type": "string",
                 "description": (
-                    "Short explanation (2–4 sentences) of why this workflow "
+                    "Short explanation (2 to 4 sentences) of why this workflow "
                     "is the right fit for the user's goal. Reference their "
                     "specific goal wording where natural."
                 ),
@@ -116,7 +116,7 @@ RECOMMEND_RECIPE_TOOL = {
                     "required": ["label", "value"],
                 },
                 "description": (
-                    "3–6 key/value pairs giving a concrete starting "
+                    "3 to 6 key/value pairs giving a concrete starting "
                     "config (e.g. Method=loreft, Alpha=10, etc.)."
                 ),
             },
@@ -221,26 +221,26 @@ _PAIR_INTENT_GUIDANCE = {
         "generated portraits. Each pair: `pos` is `<subject> with <attribute>`, "
         "`neg` is `<subject>` (the same subject, no attribute). Use diverse "
         "subjects (different occupations, characters, ages, contexts). Method: "
-        "LoReFT works well; alpha 8–15."
+        "LoReFT works well; alpha 8 to 15."
     ),
     "suppress_concept": (
         "User wants to SUPPRESS an unwanted concept (e.g. cigarettes, weapons, "
         "violence). Each pair: `pos` is `<subject with the unwanted concept>`, "
         "`neg` is `<the same subject with a benign substitute>`. The trained "
         "direction will be SUBTRACTED at inference (negative alpha). Method: "
-        "CAA with alpha = −5 to −15."
+        "CAA with alpha = -5 to -15."
     ),
     "shift_demographic": (
         "User wants to SHIFT generations toward a specific demographic (e.g. "
         "Black people, women, older adults). Each pair: `pos` is `<demographic> "
         "<subject>`, `neg` is `<subject>` (no demographic qualifier). Cover "
-        "diverse occupations/contexts. Method: CAA; alpha 5–10."
+        "diverse occupations/contexts. Method: CAA; alpha 5 to 10."
     ),
     "apply_style": (
         "User wants to APPLY an art style (painterly, watercolor, vintage, "
         "anime, etc.). Each pair: `pos` is `<style> <subject>`, `neg` is "
         "`a photo of <subject>` or similar plain rendering. Diverse subjects. "
-        "Method: LoReFT; alpha 10–20."
+        "Method: LoReFT; alpha 10 to 20."
     ),
 }
 
@@ -288,12 +288,12 @@ GENERATE_PAIRS_TOOL = {
                 "type": "number",
                 "description": (
                     "Suggested alpha. Positive for add/shift/style; negative "
-                    "(e.g. −10) for suppress."
+                    "(e.g. -10) for suppress."
                 ),
             },
             "notes": {
                 "type": "string",
-                "description": "1–2 sentence note on what was generated and why.",
+                "description": "1 to 2 sentence note on what was generated and why.",
             },
         },
         "required": ["pairs", "method_hint", "alpha_hint", "notes"],
@@ -383,7 +383,6 @@ def generate_inline_pairs(
 # Keep templates simple and obviously editable. Users adapt them to their concept.
 INTENT_TEMPLATES: dict[str, dict[str, object]] = {
     "add_attribute": {
-        "title": "Add an attribute (e.g. spectacles, beard, long hair)",
         "format_hint": "`<subject> with <attribute> | <subject>`",
         "method_hint": "loreft",
         "alpha_hint": 10.0,
@@ -403,7 +402,6 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
         ),
     },
     "suppress_concept": {
-        "title": "Suppress an unwanted concept (e.g. cigarettes, weapons)",
         "format_hint": "`<subject with concept> | <subject with benign substitute>`",
         "method_hint": "caa",
         "alpha_hint": -10.0,
@@ -423,7 +421,6 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
         ),
     },
     "shift_demographic": {
-        "title": "Shift toward a demographic (e.g. Black people, women)",
         "format_hint": "`<demographic> <subject> | <subject>`",
         "method_hint": "caa",
         "alpha_hint": 8.0,
@@ -440,7 +437,6 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
         "tip": "Replace `<DEMO>` with the demographic qualifier. Use CAA with alpha around 8.",
     },
     "apply_style": {
-        "title": "Apply an art style (e.g. painterly, watercolor)",
         "format_hint": "`<style> <subject> | a photo of <subject>`",
         "method_hint": "loreft",
         "alpha_hint": 12.0,

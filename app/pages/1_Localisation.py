@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
-import re
 import tempfile
 import time
 
 import streamlit as st
 
 from app.lib import (
+    apply_payload,
     collect_images,
     device_dtype_picker,
     load_fingerprint,
     model_preset_picker,
+    pair_baseline_modified,
+    render_run_label_sidebar,
     run_workflow,
+    scenario_radio,
 )
 
 st.set_page_config(page_title="Localisation • T2I-Interp", layout="wide")
@@ -29,58 +32,12 @@ _LOC_DEFAULTS: dict[str, object] = {
     "loc_seed": 42,
     "loc_model_preset": "(use config default)",
 }
-for _k, _v in _LOC_DEFAULTS.items():
-    st.session_state.setdefault(_k, _v)
-
-_payload = st.session_state.get("recipe_payload")
-if _payload and _payload.get("workflow") == "Localisation":
-    del st.session_state["recipe_payload"]
-    if _payload.get("goal"):
-        st.session_state["loc_goal"] = _payload["goal"]
-    for _fk, _fv in _payload.get("fields", {}).items():
-        _sk = f"loc_{_fk}"
-        if _sk in _LOC_DEFAULTS:
-            st.session_state[_sk] = _fv
-
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-
-def _pair_baseline_modified(images: list) -> list[tuple[str, object | None, object | None]]:
-    """Group output images into (label, baseline, modified) triples."""
-    pairs: dict[str, dict[str, object]] = {}
-    leftovers: list = []
-    for img in images:
-        name = img.name.lower()
-        if name.startswith("baseline"):
-            pairs.setdefault("0", {})["baseline"] = img
-        elif m := re.match(r"(?:modified|head|layer|ablated)_(\d+)\.", name):
-            pairs.setdefault(m.group(1), {})["modified"] = img
-        else:
-            leftovers.append(img)
-    out: list[tuple[str, object | None, object | None]] = []
-    for idx, both in sorted(pairs.items(), key=lambda kv: int(kv[0])):
-        out.append((f"head {idx}", both.get("baseline"), both.get("modified")))
-    for img in leftovers:
-        out.append((img.name, None, img))
-    return out
-
-
-# ── Page header ──────────────────────────────────────────────────────────────
-
-st.title("Localisation")
-st.markdown("##### Scale one attention head and watch what changes in the image.")
-st.caption(
-    "Paper §3.1. Tells you where in the UNet a concept is bound. "
-    "Sweep all heads with `factor=0.0` to find which ones carry the concept, "
-    "or test a hypothesis by ablating one specific head."
+apply_payload(
+    st.session_state,
+    prefix="loc",
+    defaults=_LOC_DEFAULTS,
+    workflow_name="Localisation",
 )
-
-
-# ── Step 1: What you want ────────────────────────────────────────────────────
-# Hardcoded scenarios that actually pre-fill the form. Each one points
-# at a different region of the UNet so the user can see the layered
-# specialisation by trying all three.
 
 _LOC_PRESETS: dict[str, dict[str, object]] = {
     "Probe early UNet (composition)": {
@@ -133,33 +90,27 @@ _LOC_PRESETS: dict[str, dict[str, object]] = {
     },
 }
 
+
+# ── Page header ──────────────────────────────────────────────────────────────
+
+st.title("Localisation")
+st.markdown("##### Scale one attention head and watch what changes in the image.")
+st.caption(
+    "Paper §3.1. Tells you where in the UNet a concept is bound. "
+    "Sweep all heads with `factor=0.0` to find which ones carry the concept, "
+    "or test a hypothesis by ablating one specific head."
+)
+
+
+# ── Step 1: What you want ────────────────────────────────────────────────────
+
 with st.container(border=True):
     st.markdown("### Step 1 · What you want to find out")
-    st.caption("Pick a scenario. The settings below get pre-filled.")
-
-    chosen = st.radio(
-        "Scenario",
-        list(_LOC_PRESETS),
-        index=0,
-        key="loc_scenario_label",
-        label_visibility="collapsed",
+    scenario_radio(
+        presets=_LOC_PRESETS,
+        prefix="loc",
+        apply_keys=["prompt", "target_layer", "target_head", "factor"],
     )
-    preset_meta = _LOC_PRESETS[chosen]
-    st.markdown(f"**{preset_meta['label']}**")
-    st.caption(str(preset_meta["hint"]))
-
-    if st.button(
-        "Apply scenario",
-        help="Drops the scenario's values into Steps 2 and 3 below.",
-        use_container_width=True,
-    ):
-        st.session_state["loc_prompt"] = preset_meta["prompt"]
-        st.session_state["loc_target_layer"] = preset_meta["target_layer"]
-        st.session_state["loc_target_head"] = preset_meta["target_head"]
-        st.session_state["loc_factor"] = preset_meta["factor"]
-        st.session_state["loc_goal"] = preset_meta["label"]
-        st.rerun()
-
     st.text_input(
         "Prompt to test",
         help="Pick a prompt where the scenario's effect should be visible.",
@@ -209,7 +160,7 @@ with st.container(border=True):
     )
 
 
-# ── Step 3: Run config (sidebar + small main controls) ───────────────────────
+# ── Sidebar config ───────────────────────────────────────────────────────────
 
 st.sidebar.header("Hardware")
 device, dtype = device_dtype_picker(default_device="mps")
@@ -227,7 +178,7 @@ st.sidebar.slider(
 st.sidebar.number_input(
     "Seed",
     step=1,
-    help=("Same seed means same initial noise, so comparisons isolate the head's effect."),
+    help="Same seed means same initial noise, so comparisons isolate the head's effect.",
     key="loc_seed",
 )
 preset = model_preset_picker(
@@ -235,15 +186,7 @@ preset = model_preset_picker(
     options=("sd15", "sdxl_turbo"),
     key="loc_model_preset",
 )
-st.sidebar.text_input(
-    "Run label (optional)",
-    help=(
-        "Free-text label saved in the fingerprint and shown in the "
-        "results panel. Set automatically when you Apply a scenario. "
-        "Does not drive the run."
-    ),
-    key="loc_goal",
-)
+render_run_label_sidebar(key="loc_goal")
 
 # Pull session-state values for the override list
 prompt = str(st.session_state["loc_prompt"])
@@ -254,24 +197,30 @@ n_steps = int(st.session_state["loc_n_steps"])
 seed = int(st.session_state["loc_seed"])
 goal = str(st.session_state["loc_goal"])
 
-# ── Step 4: Run ──────────────────────────────────────────────────────────────
 
-out_dir = tempfile.mkdtemp(prefix="streamlit_loc_")
-overrides = [
-    f"device={device}",
-    f"dtype={dtype}",
-    f"prompt={prompt}",
-    f"target_layer={target_layer}",
-    f"target_heads=[{target_head}]",
-    f"factor={factor}",
-    f"num_inference_steps={n_steps}",
-    f"seed={seed}",
-    f"output_dir={out_dir}",
-    f"hydra.run.dir={out_dir}/.hydra",
-    "wandb.project=null",
-]
-if preset:
-    overrides.append(f"model={preset}")
+def _build_overrides(out_dir: str) -> list[str]:
+    """Build Hydra overrides for the run."""
+    ovs = [
+        f"device={device}",
+        f"dtype={dtype}",
+        f"prompt={prompt}",
+        f"target_layer={target_layer}",
+        f"target_heads=[{target_head}]",
+        f"factor={factor}",
+        f"num_inference_steps={n_steps}",
+        f"seed={seed}",
+        f"output_dir={out_dir}",
+        f"hydra.run.dir={out_dir}/.hydra",
+        "wandb.project=null",
+    ]
+    if preset:
+        ovs.append(f"model={preset}")
+    return ovs
+
+
+# ── Step 3: Run ──────────────────────────────────────────────────────────────
+
+_preview_overrides = _build_overrides("/tmp/streamlit_loc_<auto>")
 
 with st.container(border=True):
     st.markdown("### Step 3 · Run")
@@ -281,7 +230,7 @@ with st.container(border=True):
         f"**{factor:g}**."
     )
     with st.expander("CLI equivalent", expanded=False):
-        st.code("t2i-localise " + " \\\n  ".join(overrides), language="bash")
+        st.code("t2i-localise " + " \\\n  ".join(_preview_overrides), language="bash")
     run_clicked = st.button(
         "▶ Run head ablation",
         type="primary",
@@ -292,6 +241,8 @@ with st.container(border=True):
 # ── Results ──────────────────────────────────────────────────────────────────
 
 if run_clicked:
+    out_dir = tempfile.mkdtemp(prefix="streamlit_loc_")
+    overrides = _build_overrides(out_dir)
     with st.status("Running localisation...", expanded=True) as status:
         line_box = st.empty()
         recent: list[str] = []
@@ -316,7 +267,11 @@ if run_clicked:
 
     images = collect_images(out_dir)
     if images:
-        triples = _pair_baseline_modified(images)
+        triples = pair_baseline_modified(
+            images,
+            modified_kinds=("modified", "head", "layer", "ablated"),
+            label_prefix="head",
+        )
         for label, baseline, modified in triples:
             with st.container(border=True):
                 st.markdown(f"##### {label}")
