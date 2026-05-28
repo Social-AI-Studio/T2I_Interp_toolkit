@@ -28,9 +28,6 @@ _STITCH_DEFAULTS: dict[str, object] = {
     "stitch_num_steps": 50,
     "stitch_num_inference_steps": 15,
     "stitch_model_preset": "sd15",
-    # Inline mapper training prompts. One per line. Lines containing `|`
-    # become paired prompts (prompt_a | prompt_b). Lines without become
-    # same-prompt-both-models (typical cross-model transfer).
     "stitch_inline_pairs": "",
 }
 for _k, _v in _STITCH_DEFAULTS.items():
@@ -46,46 +43,8 @@ if _payload and _payload.get("workflow") == "Stitching":
         if _sk in _STITCH_DEFAULTS:
             st.session_state[_sk] = _fv
 
-# ── Page body ────────────────────────────────────────────────────────────────
 
-st.title("Stitching")
-st.caption("Train an MLP that translates activations between two layers or two models.")
-
-st.markdown(
-    "Trains a small MLP that maps activations from `layer_a` (typically a "
-    "text-encoder output) into `layer_b`'s space (typically a UNet block). "
-    "At generation time, captured activations from `layer_a` are passed "
-    "through the mapper and injected at `layer_b`. Fig 4 in the paper."
-)
-
-with st.expander("**Common goals this page serves**", expanded=False):
-    st.markdown(
-        """
-- **Transfer a behaviour between two models** (e.g. base SD 1.5 vs a
-  fine-tuned variant) without retraining. Paper §4 case study.
-- **Check whether two layers encode comparable information.** If a small
-  mapper can stitch them, the two activations carry the same kind of
-  content. If not, they don't.
-- **Move a steering direction across models.** Train a mapper, then apply
-  a steering vector learned in model A inside model B's activation space.
-
-The **Recipes** page has one-click presets that pre-fill the form below.
-"""
-    )
-
-st.text_input(
-    "What are you trying to achieve? (optional)",
-    placeholder='e.g. "Can SD1.5 text-encoder output stand in for unet.conv_out?"',
-    help=(
-        "A label for your run. Saved in the fingerprint and shown in the "
-        "results panel. Does not drive training. See the Training data "
-        "section below for the prompts the mapper actually learns from."
-    ),
-    key="stitch_goal",
-)
-
-
-# ── Training data source banner ──────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────────────
 
 
 def _parse_inline_stitch(raw: str) -> tuple[list[dict[str, str] | str], list[int]]:
@@ -107,100 +66,61 @@ def _parse_inline_stitch(raw: str) -> tuple[list[dict[str, str] | str], list[int
     return out, skipped
 
 
+# ── Page header ──────────────────────────────────────────────────────────────
+
+st.title("Stitching")
+st.markdown("##### Train an MLP that translates activations between two layers or two models.")
+st.caption(
+    "Paper §3.3. Tests whether two activation spaces carry comparable "
+    "information. If a small mapper can stitch them, they do. If not, "
+    "they don't. Used in the paper's §4 cross-model case study."
+)
+
+
+# ── Step 1: What you want ────────────────────────────────────────────────────
+
+with st.container(border=True):
+    st.markdown("### Step 1 · What you want")
+    st.text_input(
+        "Your goal (optional)",
+        placeholder='e.g. "Can SD1.5 text-encoder output stand in for unet.conv_out?"',
+        help="A label for your run. Saved in the fingerprint and shown in the results panel.",
+        key="stitch_goal",
+    )
+
+
+# ── Step 2: Training data ────────────────────────────────────────────────────
+
 _pre_inline, _pre_skipped = _parse_inline_stitch(
     str(st.session_state.get("stitch_inline_pairs", ""))
 )
 
-st.subheader("Training data")
-if _pre_inline:
-    st.success(
-        f"**Training mapper on {len(_pre_inline)} inline prompts.** No "
-        "network call for data. Edit the prompts in the sidebar's Training "
-        "data section.",
-        icon="✅",
-    )
-else:
-    st.info(
-        "**Training mapper on HuggingFace dataset "
-        "`nirmalendu01/spectacles-bias-prompts`** (default). Paste prompts "
-        "into the sidebar textarea to train on your own content instead.",
-        icon="🌐",
-    )
+with st.container(border=True):
+    st.markdown("### Step 2 · Training data")
+    if _pre_inline:
+        st.success(
+            f"**Training mapper on {len(_pre_inline)} inline prompts.** "
+            "No network call for data. Edit the textarea below to change them.",
+            icon="✅",
+        )
+    else:
+        st.info(
+            "**Training mapper on HuggingFace dataset "
+            "`nirmalendu01/spectacles-bias-prompts`** (default). Paste "
+            "prompts below to train on your own content instead.",
+            icon="🌐",
+        )
 
-
-with st.expander(
-    "**Tips for picking mapper training prompts**",
-    expanded=False,
-):
-    st.markdown(
-        """
-- **What kind of prompts?** Generic, diverse content (people, objects,
-  scenes, styles). The mapper learns a translation between the two layers'
-  activation spaces. Varied prompts cover more of that space.
-- **Same prompt for both models?** Yes, by default. One prompt per line.
-  Both models see the same prompt. The mapper learns to translate
-  activation_a to activation_b for that prompt.
-- **Different prompts per model (concept transfer)?** Use
-  `prompt_a | prompt_b` syntax on a line. Useful when you want the mapper
-  to encode a concept difference (e.g. `a photo of X | a painterly X`).
-- **How many?** 10 to 30 prompts is plenty for a small `hidden_dim` mapper.
-  Push to 100 or more if you bump `hidden_dim` to 1024 or train for many steps.
-- **`hidden_dim` choice.** Small (128 to 256) keeps the test honest. A tiny
-  mapper that converges is real evidence the two layers carry comparable
-  information. Big (512 and up) can paper over real incompatibility.
-- **Failure modes.** *Stitched image is noise*: mapper didn't converge.
-  Try more steps or more prompts. *Stitched looks identical to baseline*:
-  `inject_steps` didn't fire (rare).
-"""
-    )
-
-st.info(
-    """
-**How this affects the picture.** Two parts of the model (or two different
-models) live in different activation spaces. Their internal tensors have
-different shapes, semantics, and meanings. The mapper learns a translation
-between them. Given an activation at layer A that means something, what
-would the equivalent activation at layer B look like?
-
-At inference, the model's normal forward pass gets re-routed through the
-mapper at layer B. The generated image is what the model produces when
-its information flow has been rewired this way. A way to test whether two
-layers or two models encode comparable information, and to transfer
-behaviour between them without retraining.
-""",
-    icon="ℹ️",
-)
-
-# ── Sidebar config ───────────────────────────────────────────────────────────
-st.sidebar.header("Configuration")
-device, dtype = device_dtype_picker(default_device="mps")
-preset = model_preset_picker(
-    default=str(st.session_state.get("stitch_model_preset", "sd15")),
-    key="stitch_model_preset",
-)
-
-st.sidebar.text_area("Inference prompts", key="stitch_prompts")
-st.sidebar.markdown("**Quick-mode params** (drop hidden_dim and samples for speed)")
-st.sidebar.slider("Mapper hidden_dim", 64, 1024, step=64, key="stitch_hidden_dim")
-st.sidebar.slider("Train samples", 10, 500, key="stitch_max_samples")
-st.sidebar.slider("Mapper training steps", 5, 1000, key="stitch_num_steps")
-st.sidebar.slider("Inference steps", 4, 50, key="stitch_num_inference_steps")
-
-with st.sidebar.expander(
-    "Training data (inline prompts)",
-    expanded=bool(st.session_state.get("stitch_inline_pairs", "").strip()),
-):
     st.text_area(
         "Mapper training prompts, one per line",
         help=(
-            "Each line is fed to BOTH models and the mapper learns the "
+            "Each line is fed to BOTH models. The mapper learns the "
             "translation between their activations on that prompt. To pair "
-            "different prompts across the two models (concept transfer), "
-            "use `prompt_a | prompt_b` syntax on the line.\n\nLeave empty "
-            "to use the workflow's default HuggingFace dataset."
+            "different prompts (concept transfer), use `prompt_a | prompt_b` "
+            "syntax. Leave empty to use the HF dataset."
         ),
         placeholder=("a photo of a person\na photo of a cat\na photo of a landscape"),
-        height=200,
+        height=180,
         key="stitch_inline_pairs",
     )
     _live_parsed, _live_skipped = _parse_inline_stitch(
@@ -208,9 +128,50 @@ with st.sidebar.expander(
     )
     if _live_parsed:
         st.caption(
-            f"✅ **{len(_live_parsed)} valid prompt(s)** parsed"
+            f"**{len(_live_parsed)} valid prompt(s)** parsed"
             + (f" · {len(_live_skipped)} skipped" if _live_skipped else "")
         )
+
+    with st.expander("Tips for picking training prompts", expanded=False):
+        st.markdown(
+            """
+- **What kind of prompts?** Generic, diverse content (people, objects,
+  scenes, styles). The mapper learns a translation between the two
+  layers' activation spaces. Varied prompts cover more of that space.
+- **Same prompt for both models?** Yes, by default. One prompt per line.
+- **Different prompts per model (concept transfer)?** Use
+  `prompt_a | prompt_b` syntax on a line.
+- **How many?** 10 to 30 prompts is plenty for a small `hidden_dim` mapper.
+- **`hidden_dim` choice.** Small (128 to 256) keeps the test honest.
+  Big (512 and up) can paper over real incompatibility.
+- **Failure modes.** Noise: mapper didn't converge. Stitched looks
+  identical to baseline: `inject_steps` didn't fire (rare).
+"""
+        )
+
+
+# ── Step 3: Run config ───────────────────────────────────────────────────────
+
+st.sidebar.header("Hardware")
+device, dtype = device_dtype_picker(default_device="mps")
+st.sidebar.header("Less-used knobs")
+st.sidebar.slider("Mapper hidden_dim", 64, 1024, step=64, key="stitch_hidden_dim")
+st.sidebar.slider("Train samples", 10, 500, key="stitch_max_samples")
+st.sidebar.slider("Mapper training steps", 5, 1000, key="stitch_num_steps")
+st.sidebar.slider("Inference steps", 4, 50, key="stitch_num_inference_steps")
+preset = model_preset_picker(
+    default=str(st.session_state.get("stitch_model_preset", "sd15")),
+    key="stitch_model_preset",
+)
+
+with st.container(border=True):
+    st.markdown("### Step 3 · Run config")
+    st.text_area(
+        "Inference prompts (one per line)",
+        key="stitch_prompts",
+        height=110,
+        help="What gets generated with the mapper rewiring activations.",
+    )
 
 prompts_raw = str(st.session_state["stitch_prompts"])
 prompts = [p.strip() for p in prompts_raw.split("\n") if p.strip()]
@@ -237,7 +198,9 @@ elif _inline_skipped:
         icon="⚠️",
     )
 
-# ── Build overrides ──────────────────────────────────────────────────────────
+
+# ── Step 4: Run ──────────────────────────────────────────────────────────────
+
 out_dir = tempfile.mkdtemp(prefix="streamlit_stitch_")
 
 inline_pairs_file: str | None = None
@@ -264,15 +227,26 @@ if preset:
 if inline_pairs_file:
     overrides.append(f"inline_pairs_file={inline_pairs_file}")
 
-st.subheader("CLI equivalent")
-st.code("t2i-stitch " + " ".join(overrides[:7]) + " ...", language="bash")
-if inline_pairs:
-    st.caption(
-        f"Mapper training on **{len(inline_pairs)} inline prompts**. The HF dataset is skipped."
+with st.container(border=True):
+    st.markdown("### Step 4 · Run")
+    st.markdown(
+        f"Will train an MLP mapper (`hidden_dim={hidden_dim}`) on "
+        f"{'inline prompts' if inline_pairs else 'the HF dataset'} for "
+        f"`{num_steps}` steps, then generate **{len(prompts)} prompt(s)** "
+        "with the mapper rewiring activations."
+    )
+    with st.expander("CLI equivalent", expanded=False):
+        st.code("t2i-stitch " + " \\\n  ".join(overrides), language="bash")
+    run_clicked = st.button(
+        "▶ Train mapper and generate",
+        type="primary",
+        use_container_width=True,
     )
 
-# ── Run ──────────────────────────────────────────────────────────────────────
-if st.button("Run", type="primary"):
+
+# ── Results ──────────────────────────────────────────────────────────────────
+
+if run_clicked:
     with st.status("Training mapper and generating...", expanded=True) as status:
         line_box = st.empty()
         recent: list[str] = []
@@ -291,43 +265,43 @@ if st.button("Run", type="primary"):
             status.update(label="Run failed. See logs above.", state="error")
 
     st.divider()
-
+    st.subheader("Results")
     if goal:
         st.markdown(f"**Goal:** _{goal}_")
 
     images = collect_images(out_dir)
     if images:
-        st.subheader(f"Output images ({len(images)})")
+        st.markdown(f"**{len(images)} image(s)** produced.")
         cols = st.columns(min(4, len(images)))
         for i, img in enumerate(images):
             with cols[i % len(cols)]:
                 st.image(str(img), caption=img.name, use_container_width=True)
 
-        st.markdown("##### How to read these results")
-        st.markdown(
-            """
+        with st.expander("How to read these results", expanded=False):
+            st.markdown(
+                """
 - **`mapper.pt`** is the trained mapper checkpoint. Reusable across runs.
 - **`stitched_*.png`** is the prompt generated with the mapper rewiring
   activations from `layer_a` into `layer_b`.
-- **If you get a coherent image related to the prompt**: the mapper
-  learned a useful translation between the two activation spaces. The two
-  layers do encode comparable information.
-- **If you get noise or unrelated content**: mapper didn't converge. Try
-  more training steps, a bigger `hidden_dim`, or more samples.
-- **If the stitched image looks identical to the baseline**: the mapper
-  is a no-op (rare). Check that `inject_steps` actually fires on the early
-  step you chose.
+- **Coherent image related to the prompt**: the mapper learned a useful
+  translation. The two layers do encode comparable information.
+- **Noise or unrelated content**: mapper didn't converge. Try more
+  training steps, a bigger `hidden_dim`, or more samples.
+- **Stitched image looks identical to baseline**: the mapper is a no-op
+  (rare). Check that `inject_steps` actually fires on the early step
+  you chose.
 """
-        )
+            )
     else:
         st.warning("No images produced. Check logs above.")
 
     fp = load_fingerprint(out_dir)
     if fp:
-        st.subheader("Run fingerprint")
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            st.metric("Hash", fp["fingerprint_hash"])
-            st.metric("Workflow", fp["workflow"])
-        with c2:
-            st.json(fp, expanded=False)
+        with st.container(border=True):
+            st.markdown("##### Run fingerprint")
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.metric("Hash", fp["fingerprint_hash"])
+                st.metric("Workflow", fp["workflow"])
+            with c2:
+                st.json(fp, expanded=False)

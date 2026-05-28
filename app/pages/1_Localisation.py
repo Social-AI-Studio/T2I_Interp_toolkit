@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 import time
 
@@ -41,122 +42,125 @@ if _payload and _payload.get("workflow") == "Localisation":
         if _sk in _LOC_DEFAULTS:
             st.session_state[_sk] = _fv
 
-# ── Page body ────────────────────────────────────────────────────────────────
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _pair_baseline_modified(images: list) -> list[tuple[str, object | None, object | None]]:
+    """Group output images into (label, baseline, modified) triples."""
+    pairs: dict[str, dict[str, object]] = {}
+    leftovers: list = []
+    for img in images:
+        name = img.name.lower()
+        if name.startswith("baseline"):
+            pairs.setdefault("0", {})["baseline"] = img
+        elif m := re.match(r"(?:modified|head|layer|ablated)_(\d+)\.", name):
+            pairs.setdefault(m.group(1), {})["modified"] = img
+        else:
+            leftovers.append(img)
+    out: list[tuple[str, object | None, object | None]] = []
+    for idx, both in sorted(pairs.items(), key=lambda kv: int(kv[0])):
+        out.append((f"head {idx}", both.get("baseline"), both.get("modified")))
+    for img in leftovers:
+        out.append((img.name, None, img))
+    return out
+
+
+# ── Page header ──────────────────────────────────────────────────────────────
 
 st.title("Localisation")
-st.caption("Scale one attention head and watch what changes in the image.")
-
-st.markdown(
-    "Picks a single cross-attention head in the UNet and scales its output "
-    "by `factor` for a chosen step range. Compare the generated image "
-    "against the unaltered baseline to localise which head carries which "
-    "concept."
+st.markdown("##### Scale one attention head and watch what changes in the image.")
+st.caption(
+    "Paper §3.1. Tells you where in the UNet a concept is bound. "
+    "Sweep all heads with `factor=0.0` to find which ones carry the concept, "
+    "or test a hypothesis by ablating one specific head."
 )
 
-with st.expander("**Common goals this page serves**", expanded=False):
-    st.markdown(
-        """
-- **Find where a concept lives in the UNet.** Sweep all heads with
-  `factor=0.0` and watch which ablations break the concept.
-- **Test a hypothesis** that a specific head carries a specific behaviour
-  (e.g. head 3 of `mid_block` binds colour words).
-- **Compare early vs late UNet layers** to map their responsibilities.
 
-The **Recipes** page has one-click presets that pre-fill the form below.
-"""
+# ── Step 1: What you want ────────────────────────────────────────────────────
+
+with st.container(border=True):
+    st.markdown("### Step 1 · What you want")
+    st.text_input(
+        "Your goal (optional)",
+        placeholder='e.g. "Test whether head 3 of mid_block carries the unicorn-ness"',
+        help="A label for your run. Saved in the fingerprint and shown in the results panel.",
+        key="loc_goal",
+    )
+    st.text_input(
+        "Prompt to test",
+        help=("Pick something where you have a hypothesis about which head carries which concept."),
+        key="loc_prompt",
     )
 
-st.text_input(
-    "What are you trying to achieve? (optional)",
-    placeholder='e.g. "Test whether head 3 of mid_block carries the unicorn-ness"',
-    help=(
-        "A label for your run. Saved in the fingerprint and shown in the "
-        "results panel. Pre-filled automatically if you arrived from a Recipe."
-    ),
-    key="loc_goal",
-)
 
-st.info(
-    """
-**How this affects the picture.** A head is a small slice of an attention
-layer that specialises in one type of relationship between the prompt and
-the image. For example, binding colour words to colour regions, or shape
-words to object outlines. Scaling a head by `factor=0` blanks out its
-contribution. `factor=2.0` doubles it. Negative values invert it. The
-baseline image is what the model produces normally. The modified image
-shows what happens when one specific head no longer functions. Comparing
-the two tells you what that head was doing.
-""",
-    icon="ℹ️",
-)
+# ── Step 2: Where to look ────────────────────────────────────────────────────
 
-# ── Sidebar config ────────────────────────────────────────────────────────────
-st.sidebar.header("Configuration")
+with st.container(border=True):
+    st.markdown("### Step 2 · Where to look")
+    st.caption("Which layer and head to scale.")
+
+    c_layer, c_head = st.columns([2, 1])
+    with c_layer:
+        st.text_input(
+            "Target layer (UNet path)",
+            help=(
+                "`down_blocks_1` is early (rough composition). `mid_block` "
+                "is mid (object identity). `up_blocks_X` is late (textures "
+                "and fine detail). Suffix `_attn2_out` is the output of a "
+                "cross-attention layer (image to text)."
+            ),
+            key="loc_target_layer",
+        )
+    with c_head:
+        st.selectbox(
+            "Head index (0-7)",
+            list(range(8)),
+            help=(
+                "SD 1.x cross-attn layers have 8 parallel heads. Iterate "
+                "over them to find the one that carries your concept."
+            ),
+            key="loc_target_head",
+        )
+
+    st.slider(
+        "Scale factor",
+        -5.0,
+        5.0,
+        step=0.5,
+        help=(
+            "0.0 zero-ablates the head. 1.0 is no change. Above 1.0 "
+            "amplifies. Negative values invert the head's contribution."
+        ),
+        key="loc_factor",
+    )
+
+
+# ── Step 3: Run config (sidebar + small main controls) ───────────────────────
+
+st.sidebar.header("Hardware")
 device, dtype = device_dtype_picker(default_device="mps")
-preset = model_preset_picker(
-    default=str(st.session_state.get("loc_model_preset", "(use config default)")),
-    options=("sd15", "sdxl_turbo"),
-    key="loc_model_preset",
-)
-
-st.sidebar.text_input(
-    "Prompt",
-    help=(
-        "The text prompt the model is conditioning on. Pick something where "
-        "you have a hypothesis about which heads carry which concept."
-    ),
-    key="loc_prompt",
-)
-st.sidebar.text_input(
-    "Target layer",
-    help=(
-        "Underscore-sanitised UNet path. `down_blocks_1` is early in the "
-        "UNet (rough composition). `mid_block` is mid (object identity). "
-        "`up_blocks_X` is late (textures and fine detail). Suffix "
-        "`_attn2_out` is the output of a cross-attention layer (image to text)."
-    ),
-    key="loc_target_layer",
-)
-st.sidebar.selectbox(
-    "Target head index",
-    list(range(8)),
-    help=(
-        "SD 1.x cross-attn layers have 8 parallel heads. Each is a specialist "
-        "on some aspect of the image-text binding. Iterate over them to find "
-        "the one that carries your concept."
-    ),
-    key="loc_target_head",
-)
-st.sidebar.slider(
-    "Scale factor",
-    -5.0,
-    5.0,
-    step=0.5,
-    help=(
-        "0.0 zero-ablates the head. 1.0 is no change. Above 1.0 amplifies. "
-        "Negative values invert the head's contribution."
-    ),
-    key="loc_factor",
-)
+st.sidebar.header("Less-used knobs")
 st.sidebar.slider(
     "Inference steps",
     4,
     50,
     help=(
-        "Diffusion denoising steps. More steps means sharper output but "
-        "slower. 15 is plenty to see whether a head matters. Bump to 30 or "
-        "more for paper-quality."
+        "Diffusion denoising steps. 15 is plenty to see whether a head "
+        "matters. Bump to 30 or more for paper-quality."
     ),
     key="loc_n_steps",
 )
 st.sidebar.number_input(
     "Seed",
     step=1,
-    help=(
-        "Same seed means same initial noise, so comparisons isolate the "
-        "head's effect rather than different starting points."
-    ),
+    help=("Same seed means same initial noise, so comparisons isolate the head's effect."),
     key="loc_seed",
+)
+preset = model_preset_picker(
+    default=str(st.session_state.get("loc_model_preset", "(use config default)")),
+    options=("sd15", "sdxl_turbo"),
+    key="loc_model_preset",
 )
 
 # Pull session-state values for the override list
@@ -168,7 +172,8 @@ n_steps = int(st.session_state["loc_n_steps"])
 seed = int(st.session_state["loc_seed"])
 goal = str(st.session_state["loc_goal"])
 
-# ── Build the override list ──────────────────────────────────────────────────
+# ── Step 4: Run ──────────────────────────────────────────────────────────────
+
 out_dir = tempfile.mkdtemp(prefix="streamlit_loc_")
 overrides = [
     f"device={device}",
@@ -186,11 +191,25 @@ overrides = [
 if preset:
     overrides.append(f"model={preset}")
 
-st.subheader("CLI equivalent")
-st.code("t2i-localise " + " ".join(overrides[:7]), language="bash")
+with st.container(border=True):
+    st.markdown("### Step 3 · Run")
+    st.markdown(
+        f"Will generate the prompt twice. Once unmodified (baseline), once "
+        f"with head **{target_head}** of `{target_layer}` scaled by "
+        f"**{factor:g}**."
+    )
+    with st.expander("CLI equivalent", expanded=False):
+        st.code("t2i-localise " + " \\\n  ".join(overrides), language="bash")
+    run_clicked = st.button(
+        "▶ Run head ablation",
+        type="primary",
+        use_container_width=True,
+    )
 
-# ── Run + show output ─────────────────────────────────────────────────────────
-if st.button("Run", type="primary"):
+
+# ── Results ──────────────────────────────────────────────────────────────────
+
+if run_clicked:
     with st.status("Running localisation...", expanded=True) as status:
         line_box = st.empty()
         recent: list[str] = []
@@ -209,44 +228,55 @@ if st.button("Run", type="primary"):
             status.update(label="Run failed. See logs above.", state="error")
 
     st.divider()
-
+    st.subheader("Results")
     if goal:
         st.markdown(f"**Goal:** _{goal}_")
 
     images = collect_images(out_dir)
     if images:
-        st.subheader(f"Output images ({len(images)})")
-        cols = st.columns(min(4, len(images)))
-        for i, img in enumerate(images):
-            with cols[i % len(cols)]:
-                st.image(str(img), caption=img.name, use_container_width=True)
+        triples = _pair_baseline_modified(images)
+        for label, baseline, modified in triples:
+            with st.container(border=True):
+                st.markdown(f"##### {label}")
+                c_b, c_m = st.columns(2)
+                with c_b:
+                    st.markdown("**Baseline** (head at factor = 1)")
+                    if baseline is not None:
+                        st.image(str(baseline), use_container_width=True)
+                    else:
+                        st.caption("(missing)")
+                with c_m:
+                    st.markdown(f"**Modified** (head at factor = {factor:g})")
+                    if modified is not None:
+                        st.image(str(modified), use_container_width=True)
+                    else:
+                        st.caption("(missing)")
 
-        st.markdown("##### How to read these results")
-        st.markdown(
-            """
-- **`baseline.png`** is the unmodified output. The model's default response
-  to your prompt at this seed.
-- **The other image** is the same prompt with one head scaled by your
-  `factor`. Differences between it and the baseline are caused by that head,
-  holding everything else constant.
-- **If they look identical**: the head wasn't carrying your concept in
+        with st.expander("How to read these results", expanded=False):
+            st.markdown(
+                """
+- **Baseline** is the model's default response to your prompt.
+- **Modified** is the same prompt with one head scaled by your `factor`.
+  Any difference is caused by that head.
+- **They look identical**: the head wasn't carrying your concept in
   this context. Try another head or another layer.
-- **If a clear visual property changed** (object disappears, colour shifts,
-  shape distorts, composition breaks): that property was being controlled
-  by that head. You've localised it.
-- **If the image becomes noise**: the head was critical for the whole
+- **A clear visual property changed** (object disappears, colour shifts,
+  shape distorts, composition breaks): you've localised it. That head
+  controls that property.
+- **The image becomes noise**: the head was critical for the whole
   forward pass. Try a less aggressive factor (0.5 instead of 0.0).
 """
-        )
+            )
     else:
         st.warning("No images produced. Check logs above.")
 
     fp = load_fingerprint(out_dir)
     if fp:
-        st.subheader("Run fingerprint")
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            st.metric("Hash", fp["fingerprint_hash"])
-            st.metric("Workflow", fp["workflow"])
-        with c2:
-            st.json(fp, expanded=False)
+        with st.container(border=True):
+            st.markdown("##### Run fingerprint")
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.metric("Hash", fp["fingerprint_hash"])
+                st.metric("Workflow", fp["workflow"])
+            with c2:
+                st.json(fp, expanded=False)
