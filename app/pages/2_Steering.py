@@ -107,14 +107,15 @@ with st.container(border=True):
     c_tmpl, c_claude = st.columns(2)
     starter_text = "\n".join(tmpl["starter_pairs"])  # type: ignore[arg-type]
     with c_tmpl:
-        with st.popover("Show template (8 pairs)", use_container_width=True):
+        with st.popover("Show example pairs", use_container_width=True):
             st.code(starter_text, language="text")
         if st.button(
-            "Use template starter",
+            "Use example pairs",
             help=(
-                "Drops the template into Step 2 below. Replace the placeholder "
-                "(<ATTRIBUTE>, <CONCEPT>, <DEMO>, or <STYLE>) with your concept "
-                "before running."
+                "Drops 8 working example pairs into Step 2. Press Run as-is "
+                "to get the default concept for the chosen intent (spectacles, "
+                "cigarettes, Black, or painterly). Or swap the concept word "
+                "first and Run."
             ),
             key="steer_use_template_btn",
             use_container_width=True,
@@ -189,9 +190,8 @@ with st.container(border=True):
         st.error(
             "**Unresolved placeholders in your pairs**: "
             f"{', '.join(f'`{p}`' for p in unresolved_placeholders)}. "
-            "These come from the template starter and need to be replaced "
-            "with a real concept (e.g. `spectacles`, `a beard`) before Run. "
-            "Training on literal `<ATTRIBUTE>` text produces garbage.",
+            "Replace these with real words (e.g. `spectacles`, `a beard`) "
+            "before Run. Training on literal `<ATTRIBUTE>` text produces garbage.",
             icon="⚠️",
         )
 

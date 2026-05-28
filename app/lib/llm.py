@@ -380,25 +380,29 @@ def generate_inline_pairs(
 
 
 # Pure-Python intent-to-template fallback, used when ANTHROPIC_API_KEY is unset.
-# Keep templates simple and obviously editable. Users adapt them to their concept.
+# Each template ships as a fully working example (no placeholder tokens), so a
+# user can click Use example pairs and press Run with no extra editing. The
+# concept word (spectacles, cigarette, Black, painterly) is the part to swap.
 INTENT_TEMPLATES: dict[str, dict[str, object]] = {
     "add_attribute": {
         "format_hint": "`<subject> with <attribute> | <subject>`",
         "method_hint": "loreft",
         "alpha_hint": 10.0,
         "starter_pairs": [
-            "a man with <ATTRIBUTE> | a man",
-            "a woman with <ATTRIBUTE> | a woman",
-            "a child with <ATTRIBUTE> | a child",
-            "a businessman with <ATTRIBUTE> | a businessman",
-            "a scientist with <ATTRIBUTE> | a scientist",
-            "a doctor with <ATTRIBUTE> | a doctor",
-            "a teacher with <ATTRIBUTE> | a teacher",
-            "a student with <ATTRIBUTE> | a student",
+            "a man with spectacles | a man",
+            "a woman with spectacles | a woman",
+            "a child with spectacles | a child",
+            "a businessman with spectacles | a businessman",
+            "a scientist with spectacles | a scientist",
+            "a doctor with spectacles | a doctor",
+            "a teacher with spectacles | a teacher",
+            "a student with spectacles | a student",
         ],
         "tip": (
-            "Replace `<ATTRIBUTE>` with what you want to add (e.g. `spectacles` "
-            "or `a beard`). Use LoReFT with alpha around 10."
+            "Pre-filled to add **spectacles**. Edit the attribute "
+            "(`spectacles` → `a beard`, `long hair`, `a hat`) to make it "
+            "yours, or just press Run with the default. Use LoReFT with "
+            "alpha around 10."
         ),
     },
     "suppress_concept": {
@@ -406,17 +410,19 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
         "method_hint": "caa",
         "alpha_hint": -10.0,
         "starter_pairs": [
-            "a man holding a <CONCEPT> | a man holding a pen",
-            "a person using <CONCEPT> | a person reading",
-            "a woman with <CONCEPT> | a woman with a coffee",
-            "close-up of <CONCEPT> | close-up of a flower",
-            "a hand holding <CONCEPT> | a hand holding a phone",
-            "a character with <CONCEPT> | a character with a book",
-            "<CONCEPT> on a table | a vase on a table",
-            "scene with <CONCEPT> | scene with a chair",
+            "a man holding a cigarette | a man holding a pen",
+            "a person smoking | a person reading",
+            "a woman with a cigarette | a woman with a coffee",
+            "close-up of a cigarette | close-up of a flower",
+            "a hand holding a cigarette | a hand holding a phone",
+            "a character with a cigarette | a character with a book",
+            "a cigarette on a table | a vase on a table",
+            "scene with a cigarette | scene with a chair",
         ],
         "tip": (
-            "Replace `<CONCEPT>` with what you want to remove. Use CAA with "
+            "Pre-filled to suppress **cigarettes**. Edit the concept "
+            "(`cigarette` → `weapon`, `gun`, etc.) to suppress something "
+            "else, or just press Run with the default. Use CAA with "
             "**negative** alpha (around -10) so the direction gets subtracted."
         ),
     },
@@ -425,34 +431,40 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
         "method_hint": "caa",
         "alpha_hint": 8.0,
         "starter_pairs": [
-            "photo of a <DEMO> man | photo of a man",
-            "portrait of a <DEMO> man | portrait of a man",
-            "photo of a <DEMO> woman | photo of a woman",
-            "photo of a <DEMO> businessman | photo of a businessman",
-            "photo of a <DEMO> doctor | photo of a doctor",
-            "photo of a <DEMO> teacher | photo of a teacher",
-            "headshot of a <DEMO> person | headshot of a person",
-            "portrait of a <DEMO> athlete | portrait of an athlete",
+            "photo of a Black man | photo of a man",
+            "portrait of a Black man | portrait of a man",
+            "photo of a Black woman | photo of a woman",
+            "photo of a Black businessman | photo of a businessman",
+            "photo of a Black doctor | photo of a doctor",
+            "photo of a Black teacher | photo of a teacher",
+            "headshot of a Black person | headshot of a person",
+            "portrait of a Black athlete | portrait of an athlete",
         ],
-        "tip": "Replace `<DEMO>` with the demographic qualifier. Use CAA with alpha around 8.",
+        "tip": (
+            "Pre-filled to shift toward **Black**. Edit the demographic "
+            "(`Black` → `Asian`, `Latino`, `elderly`, `young`) to shift "
+            "differently. Mind `a` vs `an` if your word starts with a "
+            "vowel sound. Use CAA with alpha around 8."
+        ),
     },
     "apply_style": {
         "format_hint": "`<style> <subject> | a photo of <subject>`",
         "method_hint": "loreft",
         "alpha_hint": 12.0,
         "starter_pairs": [
-            "a <STYLE> portrait of a man | a photo of a man",
-            "a <STYLE> portrait of a woman | a photo of a woman",
-            "a <STYLE> landscape | a photo of a landscape",
-            "a <STYLE> still life | a photo of a still life",
-            "a <STYLE> seascape | a photo of a seascape",
-            "a <STYLE> garden scene | a photo of a garden",
-            "a <STYLE> street market | a photo of a street market",
-            "a <STYLE> portrait of a child | a photo of a child",
+            "a painterly portrait of a man | a photo of a man",
+            "a painterly portrait of a woman | a photo of a woman",
+            "a painterly landscape | a photo of a landscape",
+            "a painterly still life | a photo of a still life",
+            "a painterly seascape | a photo of a seascape",
+            "a painterly garden scene | a photo of a garden",
+            "a painterly street market | a photo of a street market",
+            "a painterly portrait of a child | a photo of a child",
         ],
         "tip": (
-            "Replace `<STYLE>` with the style adjective (e.g. `painterly`, "
-            "`watercolor`, or `anime`). Use LoReFT with alpha around 12."
+            "Pre-filled to apply a **painterly** style. Edit the style "
+            "(`painterly` → `watercolor`, `anime`, `vintage`, `cyberpunk`) "
+            "to swap. Use LoReFT with alpha around 12."
         ),
     },
 }
