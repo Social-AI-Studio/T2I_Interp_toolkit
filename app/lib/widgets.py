@@ -1,4 +1,4 @@
-"""Reusable Streamlit widgets for picking model preset + device + dtype."""
+"""Reusable Streamlit widgets for picking model preset, device, and dtype."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import streamlit as st
 
 
 def device_dtype_picker(default_device: str | None = None) -> tuple[str, str]:
-    """Sidebar widgets for device + dtype. Auto-detects what the box supports.
+    """Sidebar widgets for device and dtype. Auto-detects what the box supports.
 
-    Returns the Hydra-override-friendly strings (e.g. "mps", "bfloat16").
+    Returns Hydra-override-friendly strings (e.g. "mps", "bfloat16").
     """
     import torch
 
@@ -34,7 +34,7 @@ def device_dtype_picker(default_device: str | None = None) -> tuple[str, str]:
         "Dtype",
         ["float16", "bfloat16", "float32"],
         index=["float16", "bfloat16", "float32"].index(default_dtype),
-        help="bfloat16 is the safest choice on Apple Silicon; float32 is slowest but most accurate.",
+        help="bfloat16 is safe on Apple Silicon. float32 is slowest but most accurate.",
     )
     return device, dtype
 
@@ -44,20 +44,21 @@ def model_preset_picker(
     options: tuple[str, ...] = ("sd15", "sdxl", "sdxl_turbo"),
     key: str | None = None,
 ) -> str | None:
-    """Sidebar picker for the `model=...` Hydra preset. None = use the
-    workflow's config-default model_key.
+    """Sidebar picker for the `model=...` Hydra preset.
 
-    If `key` is passed, the widget binds to `st.session_state[key]` — seed
+    Returns None to mean "use the workflow's config-default model_key".
+
+    If `key` is passed, the widget binds to `st.session_state[key]`. Seed
     that key beforehand (e.g. from a Recipes payload) to pre-fill it.
     """
     labels = ["(use config default)"] + list(options)
     help_text = (
         "Set to `(use config default)` to keep whatever the workflow's "
-        "run.yaml already points at; otherwise overrides via Hydra `model=...`."
+        "run.yaml already points at. Otherwise overrides via Hydra `model=...`."
     )
     if key is not None:
-        # When binding to session_state, set the initial value there once —
-        # passing both `index=` and `key=` triggers a warning if the key is
+        # When binding to session_state, set the initial value there once.
+        # Passing both `index=` and `key=` triggers a warning if the key is
         # already set. Subsequent renders read directly from session_state.
         if key not in st.session_state:
             st.session_state[key] = default if default in labels else labels[0]

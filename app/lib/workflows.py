@@ -1,4 +1,4 @@
-"""Single source of truth for the four workflow → Streamlit-page paths.
+"""Single source of truth for the four workflow-to-page-path mappings.
 
 Both `app/pages/0_Recipes.py` and `app/lib/llm.py` import from here so the
 mapping doesn't drift if a page is renamed or a workflow is added/removed.

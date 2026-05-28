@@ -1,4 +1,4 @@
-"""LLM-based goal → recipe matcher for the Streamlit playground.
+"""LLM-based goal-to-recipe matcher for the Streamlit playground.
 
 Uses the Anthropic SDK with structured tool-use to translate a free-form
 user goal ("I want my generations to look more colorful and painterly")
@@ -9,7 +9,7 @@ Requires `ANTHROPIC_API_KEY` in the environment. Without it,
 structured wizard.
 
 The system prompt is kept stable so Anthropic's prompt cache hits across
-calls — only the user goal changes.
+calls. Only the user goal changes.
 """
 
 from __future__ import annotations
@@ -73,8 +73,8 @@ matches their intent, and propose a concrete starting config.
 
 When responding, call the `recommend_recipe` tool exactly once. Be concrete
 in `reasoning` (mention the specific knob settings and *why* you chose them
-for this goal). Keep the `suggested_config` list to 3–6 key/value pairs —
-just the most important knobs for this goal, not every possible parameter.
+for this goal). Keep the `suggested_config` list to 3 to 6 key/value pairs.
+Just the most important knobs for this goal, not every possible parameter.
 
 If the goal is ambiguous, pick the most useful workflow + add a clarifying
 question in `reasoning`. If the goal is clearly outside the toolkit's scope
@@ -135,10 +135,10 @@ RECOMMEND_RECIPE_TOOL = {
 
 
 # NOTE: WORKFLOW_DESCRIPTIONS above is intentionally separate from each
-# recipe's UI `description` in 0_Recipes.py — this prose is the LLM's
-# routing context (full sentences, all four workflows in one block) while
-# recipe `description`s are short card blurbs. WORKFLOW_TO_PAGE is the only
-# value that must stay in sync, hence the shared import from
+# recipe's UI `description` in 0_Recipes.py. This prose is the LLM's
+# routing context (full sentences, all four workflows in one block).
+# Recipe `description`s are short card blurbs. WORKFLOW_TO_PAGE is the
+# only value that must stay in sync, hence the shared import from
 # `app/lib/workflows.py`.
 
 
@@ -161,15 +161,15 @@ def analyze_goal(goal: str, model: str = "claude-haiku-4-5-20251001") -> RecipeM
 
     The system prompt is cached on Anthropic's side (cache_control breakpoint
     on the workflow-descriptions block), so repeated analyses are fast and
-    cheap. `claude-haiku-4-5` is the right speed/cost tradeoff for routing —
-    bump to `claude-sonnet-4-6` if you want richer reasoning.
+    cheap. `claude-haiku-4-5` is the right speed/cost tradeoff for routing.
+    Bump to `claude-sonnet-4-6` if you want richer reasoning.
 
     Raises RuntimeError if ANTHROPIC_API_KEY is not set.
     """
     if not is_available():
         raise RuntimeError(
             "ANTHROPIC_API_KEY not set in environment. "
-            "`export ANTHROPIC_API_KEY=sk-ant-…` and restart Streamlit, "
+            "`export ANTHROPIC_API_KEY=sk-ant-...` and restart Streamlit, "
             "or use the structured Goal Wizard instead."
         )
 
@@ -183,7 +183,7 @@ def analyze_goal(goal: str, model: str = "claude-haiku-4-5-20251001") -> RecipeM
             {
                 "type": "text",
                 "text": SYSTEM_PROMPT,
-                # Cache the long, stable system prompt — ~5min TTL.
+                # Cache the long, stable system prompt. Roughly 5 minute TTL.
                 "cache_control": {"type": "ephemeral"},
             }
         ],
@@ -211,7 +211,7 @@ def analyze_goal(goal: str, model: str = "claude-haiku-4-5-20251001") -> RecipeM
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Inline-pair generation — let the user describe a concept and get back
+# Inline-pair generation. Let the user describe a concept and get back
 # N paired prompts ready to paste into the Steering page's textarea.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -266,8 +266,8 @@ GENERATE_PAIRS_TOOL = {
                         "neg": {
                             "type": "string",
                             "description": (
-                                "Matching prompt WITHOUT the target concept — "
-                                "as similar as possible to `pos` so the contrast "
+                                "Matching prompt WITHOUT the target concept. "
+                                "As similar as possible to `pos` so the contrast "
                                 "isolates the concept."
                             ),
                         },
@@ -280,7 +280,7 @@ GENERATE_PAIRS_TOOL = {
                 "type": "string",
                 "enum": ["loreft", "caa"],
                 "description": (
-                    "Which steering method fits this intent best — drives the "
+                    "Which steering method fits this intent best. Drives the "
                     "method dropdown on the Steering page."
                 ),
             },
@@ -329,7 +329,8 @@ def generate_inline_pairs(
     if not is_available():
         raise RuntimeError(
             "ANTHROPIC_API_KEY not set in environment. "
-            "Use the manual templates instead, or `export ANTHROPIC_API_KEY=sk-ant-…`."
+            "Use the manual templates instead, or "
+            "`export ANTHROPIC_API_KEY=sk-ant-...`."
         )
     if intent not in _PAIR_INTENT_GUIDANCE:
         raise ValueError(f"intent must be one of {list(_PAIR_INTENT_GUIDANCE)}, got {intent!r}")
@@ -378,8 +379,8 @@ def generate_inline_pairs(
     )
 
 
-# Pure-Python intent → template fallback, used when ANTHROPIC_API_KEY is unset.
-# Keep templates simple + obviously editable; users adapt them to their concept.
+# Pure-Python intent-to-template fallback, used when ANTHROPIC_API_KEY is unset.
+# Keep templates simple and obviously editable. Users adapt them to their concept.
 INTENT_TEMPLATES: dict[str, dict[str, object]] = {
     "add_attribute": {
         "title": "Add an attribute (e.g. spectacles, beard, long hair)",
@@ -397,8 +398,8 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
             "a student with <ATTRIBUTE> | a student",
         ],
         "tip": (
-            "Replace `<ATTRIBUTE>` with what you want to add (e.g. `spectacles`, "
-            "`a beard`). Use LoReFT + alpha ≈ 10."
+            "Replace `<ATTRIBUTE>` with what you want to add (e.g. `spectacles` "
+            "or `a beard`). Use LoReFT with alpha around 10."
         ),
     },
     "suppress_concept": {
@@ -417,8 +418,8 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
             "scene with <CONCEPT> | scene with a chair",
         ],
         "tip": (
-            "Replace `<CONCEPT>` with what you want to remove. Use CAA + "
-            "**negative** alpha (≈ −10) so the direction is subtracted."
+            "Replace `<CONCEPT>` with what you want to remove. Use CAA with "
+            "**negative** alpha (around -10) so the direction gets subtracted."
         ),
     },
     "shift_demographic": {
@@ -436,7 +437,7 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
             "headshot of a <DEMO> person | headshot of a person",
             "portrait of a <DEMO> athlete | portrait of an athlete",
         ],
-        "tip": "Replace `<DEMO>` with the demographic qualifier. Use CAA + alpha ≈ 8.",
+        "tip": "Replace `<DEMO>` with the demographic qualifier. Use CAA with alpha around 8.",
     },
     "apply_style": {
         "title": "Apply an art style (e.g. painterly, watercolor)",
@@ -455,7 +456,7 @@ INTENT_TEMPLATES: dict[str, dict[str, object]] = {
         ],
         "tip": (
             "Replace `<STYLE>` with the style adjective (e.g. `painterly`, "
-            "`watercolor`, `anime`). Use LoReFT + alpha ≈ 12."
+            "`watercolor`, or `anime`). Use LoReFT with alpha around 12."
         ),
     },
 }

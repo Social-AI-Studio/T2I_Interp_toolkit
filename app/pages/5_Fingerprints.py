@@ -1,4 +1,4 @@
-"""Fingerprint browser — list every past run's reproducibility hash."""
+"""Fingerprint browser. Lists every past run's reproducibility hash."""
 
 from __future__ import annotations
 
@@ -12,12 +12,14 @@ from app.lib import scan_fingerprints
 st.set_page_config(page_title="Fingerprints • T2I-Interp", layout="wide")
 
 st.title("Run fingerprints")
+st.caption("Browse past runs by their reproducibility hash.")
 
 st.markdown(
     "Every workflow writes a `fingerprint.json` next to its output images. "
-    "This page walks the default output dirs and lists them. The 16-char "
-    "**hash** is the canonical identifier for a logical experiment — "
-    "same model + dataset + seed + intervention = same hash on any machine."
+    "This page walks the default output directories and lists them. The "
+    "16-character **hash** is the canonical identifier for a logical "
+    "experiment. Same model, dataset, seed, and intervention produce the "
+    "same hash on any machine."
 )
 
 # ── Scan roots ────────────────────────────────────────────────────────────────
@@ -26,7 +28,7 @@ default_roots = [
     "./notebook_runs",
     "./test_run",
     "./cli_verify",
-    "/tmp",  # picks up streamlit_loc_/streamlit_steer_/… ephemeral dirs
+    "/tmp",  # picks up streamlit_loc_, streamlit_steer_, etc. ephemeral dirs
 ]
 extra_roots_input = st.text_input(
     "Additional directories (comma-separated)",
@@ -71,7 +73,7 @@ filtered = [
     and (not hide_dirty or not r["git_dirty"])
 ]
 
-st.markdown(f"**{len(filtered)} run(s)** — sorted newest first.")
+st.markdown(f"**{len(filtered)} run(s)**, sorted newest first.")
 df = pd.DataFrame(filtered)
 st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -85,16 +87,16 @@ if filtered:
         chosen = filtered[
             [f"{r['hash']} · {r['workflow']} · {r['timestamp']}" for r in filtered].index(pick)
         ]
-        st.markdown(f"### `{chosen['hash']}` — {chosen['workflow']}")
+        st.markdown(f"### `{chosen['hash']}` ({chosen['workflow']})")
         c1, c2 = st.columns([1, 1])
         with c1:
             st.metric("Model", chosen["model"])
-            st.metric("Dataset", chosen["dataset"] or "—")
+            st.metric("Dataset", chosen["dataset"] or "-")
             st.metric("Seed", str(chosen["seed"]))
             st.metric("Git SHA", chosen["git_sha"] + (" (dirty)" if chosen["git_dirty"] else ""))
             st.code(f"cat '{chosen['path']}/fingerprint.json'", language="bash")
         with c2:
-            # Inline thumbnails of the run's output images
+            # Inline thumbnails of the run's output images.
             from app.lib import collect_images
 
             imgs = collect_images(chosen["path"])
@@ -103,4 +105,4 @@ if filtered:
                 for img in imgs[:6]:
                     st.image(str(img), caption=img.name, use_container_width=True)
                 if len(imgs) > 6:
-                    st.caption(f"… and {len(imgs) - 6} more in `{chosen['path']}`")
+                    st.caption(f"...and {len(imgs) - 6} more in `{chosen['path']}`")

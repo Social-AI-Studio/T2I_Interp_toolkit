@@ -1,4 +1,4 @@
-"""Steering playground — train a concept direction and inject it during generation."""
+"""Steering playground. Train a concept direction and inject it during generation."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ st.set_page_config(page_title="Steering • T2I-Interp", layout="wide")
 # Every recipe-controllable widget on this page is keyed into session_state
 # so the Recipes page can pre-fill it via st.session_state["recipe_payload"].
 # Order matters: set defaults first (idempotent), then overwrite with payload
-# *before* any widgets render.
+# before any widgets render.
 
 _STEER_DEFAULTS: dict[str, object] = {
     "steer_goal": "",
@@ -60,7 +60,7 @@ if _payload and _payload.get("workflow") == "Steering":
 
 
 def _parse_inline_pairs(raw: str) -> tuple[list[dict[str, str]], list[int]]:
-    """Parse 'pos | neg' lines. Returns (pairs, skipped_line_numbers)."""
+    """Parse `pos | neg` lines. Returns (pairs, skipped_line_numbers)."""
     out: list[dict[str, str]] = []
     skipped: list[int] = []
     for idx, line in enumerate(raw.splitlines(), start=1):
@@ -89,36 +89,36 @@ _METHOD_DEFAULT_DATASETS = {
 
 # ── Page body ────────────────────────────────────────────────────────────────
 
-st.title("Steering — concept direction injection")
+st.title("Steering")
+st.caption("Train a concept direction once, then add or subtract it at generation time.")
 
 st.markdown(
     "Trains a steering vector (CAA), classifier (K-Steer), or low-rank "
-    "adapter (LoReFT) from paired positive/negative prompts in a dataset, "
-    "then injects it during generation. The headline figure of the paper "
-    "uses **LoReFT + SDXL-Turbo** to add spectacles to character prompts."
+    "adapter (LoReFT) from paired positive and negative prompts. The "
+    "headline figure of the paper uses LoReFT on SDXL-Turbo to add "
+    "spectacles to character prompts."
 )
 
 with st.expander("**Common goals this page serves**", expanded=False):
     st.markdown(
         """
-- **Add an attribute** to existing prompts (paper Fig 2 — spectacles).
-- **Shift outputs toward a specific demographic** (paper Fig 3 — "photo of
-  a man" → Black).
-- **Suppress / erase an unwanted concept** (use negative alpha — subtract
-  the direction rather than add it).
+- **Add an attribute** to existing prompts (paper Fig 2 spectacles).
+- **Shift outputs toward a specific demographic** (paper Fig 3, "photo of a man"
+  toward Black men).
+- **Suppress or erase an unwanted concept**. Use a negative alpha so the
+  direction gets subtracted instead of added.
 - **Apply a style** (painterly, impressionist, photorealistic) without a LoRA.
 
-See the **Recipes** page (sidebar) for one-click presets — clicking *Open*
-there will pre-fill the form below.
+The **Recipes** page has one-click presets that pre-fill the form below.
 """
     )
 
 st.text_input(
     "What are you trying to achieve? (optional)",
-    placeholder='e.g. "Add spectacles to portraits" or "Reduce gender bias for \'doctor\'"',
+    placeholder='e.g. "Add spectacles to portraits" or "Reduce gender bias for doctor prompts"',
     help=(
-        "A label for your run — stored in the fingerprint and echoed in the "
-        "results panel. **Does not** drive training; see the 'Training data' "
+        "A label for your run. Saved in the fingerprint and shown in the "
+        "results panel. Does not drive training. See the Training data "
         "section below for the prompts the model actually learns from."
     ),
     key="steer_goal",
@@ -134,9 +134,9 @@ _current_method = str(st.session_state.get("steer_method", "loreft"))
 st.subheader("Training data")
 if inline_pairs:
     st.success(
-        f"**Training on {len(inline_pairs)} inline prompt pair(s)** — no "
-        "network call for data. Edit the pairs in the sidebar's *Training "
-        "data (inline pairs)* section.",
+        f"**Training on {len(inline_pairs)} inline prompt pairs.** "
+        "No network call for data. Edit the pairs in the sidebar's "
+        "Training data section.",
         icon="✅",
     )
 else:
@@ -144,7 +144,7 @@ else:
     st.info(
         f"**Training on HuggingFace dataset `{_hf_default}`** "
         f"(the default for `{_current_method}`). Paste pairs into the sidebar "
-        "textarea below to train on your own concept instead.",
+        "textarea to train on your own concept instead.",
         icon="🌐",
     )
 
@@ -153,23 +153,23 @@ else:
 
 
 with st.expander(
-    "**Build a custom scenario** — generate training pairs for your own concept",
+    "**Build a custom scenario.** Generate training pairs for your own concept.",
     expanded=not inline_pairs,
 ):
     st.markdown(
-        "Pick what kind of change you want, then either edit the template or "
-        "let Claude generate pairs for your concept. The pairs land in the "
+        "Pick what kind of change you want. Then either use the template, or "
+        "have Claude generate pairs for your concept. The pairs land in the "
         "sidebar textarea, ready to Run."
     )
 
     intent_label_to_key = {
-        "Add an attribute (spectacles, beard, long hair…)": "add_attribute",
-        "Suppress a concept (cigarettes, weapons, NSFW…)": "suppress_concept",
-        "Shift toward a demographic (Black, women, older adults…)": "shift_demographic",
-        "Apply an art style (painterly, watercolor, anime…)": "apply_style",
+        "Add an attribute (spectacles, beard, long hair)": "add_attribute",
+        "Suppress a concept (cigarettes, weapons, NSFW)": "suppress_concept",
+        "Shift toward a demographic (Black, women, older adults)": "shift_demographic",
+        "Apply an art style (painterly, watercolor, anime)": "apply_style",
     }
     chosen_label = st.radio(
-        "I'm trying to…",
+        "I'm trying to:",
         list(intent_label_to_key),
         index=0,
         horizontal=False,
@@ -189,8 +189,8 @@ with st.expander(
         "Use template as starter pairs",
         help=(
             "Pastes the 8 template pairs into the sidebar textarea. Replace "
-            "the placeholder (<ATTRIBUTE> / <CONCEPT> / <DEMO> / <STYLE>) with "
-            "your concept, then Run."
+            "the placeholder (<ATTRIBUTE>, <CONCEPT>, <DEMO>, or <STYLE>) "
+            "with your concept, then Run."
         ),
         key="steer_use_template_btn",
     ):
@@ -219,13 +219,14 @@ with st.expander(
             )
         with c_btn:
             ask = st.button(
-                "Generate pairs with Claude →",
+                "Generate pairs with Claude",
                 type="primary",
                 disabled=not concept.strip(),
                 key="steer_claude_btn",
+                use_container_width=True,
             )
         if ask:
-            with st.spinner("Asking Claude…"):
+            with st.spinner("Asking Claude..."):
                 try:
                     result = generate_inline_pairs(
                         intent=intent_key, concept=concept.strip(), n=int(n_pairs)
@@ -241,49 +242,48 @@ with st.expander(
             st.caption(f"_{st.session_state['steer_claude_notes']}_")
     else:
         st.caption(
-            "_Set `ANTHROPIC_API_KEY` in your shell to also get a "
-            "'Generate pairs with Claude' button here._"
+            "Set `ANTHROPIC_API_KEY` in your shell to also get a "
+            "'Generate pairs with Claude' button here."
         )
 
 
 # ── Quality tips ─────────────────────────────────────────────────────────────
 
 
-with st.expander("**Quality tips** — what makes a good steering run", expanded=False):
+with st.expander("**Quality tips.** What makes a good steering run.", expanded=False):
     st.markdown(
         """
-- **How many pairs?** 8–12 is the sweet spot. 5 minimum (mean estimates get
-  noisy below that). Beyond ~20 you hit diminishing returns; spend the budget
-  on diverse subjects instead.
-- **What makes good pairs?** Each pair should differ in **one** thing — the
-  target concept. Keep `pos` and `neg` structurally similar (same length, same
-  subject, same grammar). Across pairs, use diverse subjects (different
-  occupations, ages, contexts) so the direction generalises beyond one face.
-- **LoReFT vs CAA?** **LoReFT** (low-rank adapter) trains a tiny network and
-  injects layer-aware edits — best for *attributes* and *styles*. **CAA**
-  computes mean(pos activations) − mean(neg activations) — best for *crisp
-  directional shifts* (demographic, suppression with negative α).
-- **Alpha tuning.** Start at the suggested value. If steered ≈ baseline → push
-  alpha up. If outputs become noise or your prompt content gets overwhelmed →
-  lower alpha or train on more samples. For *suppression*, alpha should be
-  **negative** (e.g. −10) to subtract the direction.
-- **Failure modes.** *Steered shows concept but loses prompt content* →
-  alpha overpowered the prompt. *Steered looks identical to baseline* → alpha
-  too low, or trained layer doesn't carry the concept (try a different
-  `target_layer`). *Garbage / noise* → alpha too high or too few pairs.
+- **How many pairs?** 8 to 12 is the sweet spot. 5 is the minimum (mean
+  estimates get noisy below that). Past about 20, diminishing returns. Spend
+  the budget on diverse subjects instead.
+- **What makes good pairs?** Each pair should differ in one thing: the target
+  concept. Keep `pos` and `neg` structurally similar (same length, same
+  subject, same grammar). Across pairs, vary the subject (occupations, ages,
+  contexts) so the direction generalises.
+- **LoReFT vs CAA?** LoReFT (low-rank adapter) trains a tiny network and
+  injects layer-aware edits. Best for attributes and styles. CAA computes
+  mean(pos activations) minus mean(neg activations). Best for crisp directional
+  shifts (demographic, suppression with negative alpha).
+- **Alpha tuning.** Start at the suggested value. If steered looks like
+  baseline, push alpha up. If outputs become noise or your prompt gets
+  drowned out, lower alpha or train on more samples. For suppression, alpha
+  should be **negative** (around -10) to subtract the direction.
+- **Failure modes.** Steered shows the concept but loses prompt content:
+  alpha is overpowering the prompt. Steered looks identical to baseline:
+  alpha is too low, or the trained layer doesn't carry the concept (try a
+  different `target_layer`). Garbage or noise: alpha too high or too few pairs.
 """
     )
 
 st.info(
     """
 **How this affects the picture.** From a dataset of paired prompts (the
-'positive' has the target concept, the 'negative' doesn't), the toolkit
-learns a *direction in activation space* that, when added to a layer's
-output, biases generation toward the positive concept. At inference time,
-this direction is multiplied by `alpha` and added at the chosen layer.
-Higher `alpha` = stronger push toward the concept. Same prompt + same
-seed will now produce an image leaning toward the trained attribute,
-without retraining the model itself.
+positive has the target concept, the negative doesn't), the toolkit learns
+a direction in activation space. Adding that direction to a layer's output
+biases generation toward the positive concept. At inference, the direction
+gets multiplied by `alpha` and added at the chosen layer. Higher alpha
+means stronger push toward the concept. Same prompt and same seed will now
+lean toward the trained attribute, without retraining the model itself.
 """,
     icon="ℹ️",
 )
@@ -328,7 +328,7 @@ st.sidebar.selectbox(
 )
 st.sidebar.text_area(
     "Inference prompts (one per line)",
-    help="Prompts to generate — once as baseline, once steered. Separate from training pairs.",
+    help="Prompts to generate, once as baseline and once steered. Separate from training pairs.",
     key="steer_prompts",
 )
 st.sidebar.slider(
@@ -336,27 +336,29 @@ st.sidebar.slider(
     -30.0,
     30.0,
     step=0.5,
-    help="0.0 = no steering. Higher = stronger. Negative = subtract the "
-    "direction (suppression). SDXL-Turbo + LoReFT works well around 10-20.",
+    help=(
+        "0.0 means no steering. Higher means stronger. Negative subtracts the "
+        "direction (suppression). SDXL-Turbo with LoReFT works well around 10 to 20."
+    ),
     key="steer_alpha",
 )
 st.sidebar.slider("Training samples", 10, 1000, key="steer_max_samples")
 st.sidebar.slider("Training steps", 2, 500, key="steer_train_steps")
 
-# Inline training pairs — open by default if pre-filled by a recipe, else collapsed.
+# Inline training pairs. Open by default if pre-filled by a recipe.
 with st.sidebar.expander(
     "Training data (inline pairs)",
     expanded=bool(st.session_state.get("steer_inline_pairs", "").strip()),
 ):
     st.text_area(
-        "Prompt pairs — one per line, `positive | negative`",
+        "Prompt pairs, one per line, `positive | negative`",
         help=(
             "When set, trains on these inline pairs instead of the workflow's "
             "default HuggingFace dataset (currently the spectacles dataset). "
             "For CAA each `positive` becomes a label=1 caption and each "
-            "`negative` becomes a label=0 caption; for LoReFT each pair becomes "
-            "one (base=negative, teacher=positive) row.\n\nLeave empty to use "
-            "the configured HF dataset."
+            "`negative` becomes a label=0 caption. For LoReFT each pair "
+            "becomes one (base=negative, teacher=positive) row.\n\n"
+            "Leave empty to use the configured HF dataset."
         ),
         placeholder=(
             "photo of a Black man | photo of a man\nphoto of a Black woman | photo of a woman"
@@ -375,8 +377,8 @@ with st.sidebar.expander(
         )
     elif str(st.session_state.get("steer_inline_pairs", "")).strip():
         st.warning(
-            "No `positive | negative` lines parsed — falling back to the HF dataset. "
-            "Each line must contain a `|` separator.",
+            "No `positive | negative` lines parsed. Falling back to the HF "
+            "dataset. Each line must contain a `|` separator.",
             icon="⚠️",
         )
 
@@ -392,8 +394,8 @@ goal = str(st.session_state["steer_goal"])
 # ── Build overrides ──────────────────────────────────────────────────────────
 out_dir = tempfile.mkdtemp(prefix="streamlit_steer_")
 
-# Inline pairs go via a JSON sidecar file — Hydra's list-of-dict override
-# syntax is awkward for prompts containing spaces/commas.
+# Inline pairs go via a JSON sidecar file. Hydra's list-of-dict override syntax
+# is awkward for prompts containing spaces and commas.
 inline_pairs_file: str | None = None
 if inline_pairs:
     inline_pairs_file = os.path.join(out_dir, "inline_pairs.json")
@@ -419,11 +421,11 @@ if inline_pairs_file:
     overrides.append(f"inline_pairs_file={inline_pairs_file}")
 
 st.subheader("CLI equivalent")
-st.code("t2i-steer " + " ".join(overrides[:8]) + " …", language="bash")
+st.code("t2i-steer " + " ".join(overrides[:8]) + " ...", language="bash")
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 if st.button("Run", type="primary"):
-    with st.status(f"Training {steer_type.upper()} + generating…", expanded=True) as status:
+    with st.status(f"Training {steer_type.upper()} and generating...", expanded=True) as status:
         line_box = st.empty()
         recent: list[str] = []
         start = time.time()
@@ -438,7 +440,7 @@ if st.button("Run", type="primary"):
         if result is not None and result.returncode == 0:
             status.update(label=f"Done in {elapsed:.1f}s", state="complete")
         else:
-            status.update(label="Run failed — see logs above", state="error")
+            status.update(label="Run failed. See logs above.", state="error")
 
     st.divider()
 
@@ -456,22 +458,21 @@ if st.button("Run", type="primary"):
         st.markdown("##### How to read these results")
         st.markdown(
             """
-- **`baseline_*`** images are generated **without** the steering vector —
-  the same prompt and seed the model would produce normally.
-- **`steered_*`** images apply the trained direction at `alpha`. They
-  should preserve the prompt's content while leaning toward the trained
-  concept.
-- **If steered ≈ baseline** → alpha is too low, or you trained on the
-  wrong layer. Push alpha up to 15-20.
-- **If steered looks like garbage / noise** → alpha is too high or the
-  adapter overfit a tiny dataset. Lower alpha or train on more samples.
-- **If steered shows the target concept but the original prompt is gone**
-  (e.g. you wanted "Jack Sparrow + spectacles" and got just "spectacles")
-  → alpha overpowered the prompt; reduce it.
+- **`baseline_*`** images are generated without the steering vector. They
+  show what the model produces normally for the same prompt and seed.
+- **`steered_*`** images apply the trained direction at `alpha`. They should
+  keep the prompt's content while leaning toward the trained concept.
+- **If steered looks like baseline**: alpha is too low, or you trained on
+  the wrong layer. Push alpha up to 15 or 20.
+- **If steered looks like garbage**: alpha is too high, or the adapter
+  overfit a tiny dataset. Lower alpha or train on more samples.
+- **If steered shows the target concept but loses the prompt content**
+  (e.g. you wanted "Jack Sparrow with spectacles" and got just spectacles):
+  alpha overpowered the prompt. Reduce it.
 """
         )
     else:
-        st.warning("No images produced — check logs above.")
+        st.warning("No images produced. Check logs above.")
 
     fp = load_fingerprint(out_dir)
     if fp:
@@ -480,6 +481,6 @@ if st.button("Run", type="primary"):
         with c1:
             st.metric("Hash", fp["fingerprint_hash"])
             st.metric("Workflow", fp["workflow"])
-            st.metric("Alpha", str(fp["intervention"].get("alpha", "—")))
+            st.metric("Alpha", str(fp["intervention"].get("alpha", "-")))
         with c2:
             st.json(fp, expanded=False)

@@ -1,4 +1,4 @@
-"""SAE playground — discover sparse features and modulate them at generation time."""
+"""SAE playground. Discover sparse features and modulate them at generation time."""
 
 from __future__ import annotations
 
@@ -43,13 +43,15 @@ if _payload and _payload.get("workflow") == "SAE":
 
 # ── Page body ────────────────────────────────────────────────────────────────
 
-st.title("Sparse Autoencoders — feature discovery + modulation")
+st.title("Sparse Autoencoders")
+st.caption("Decompose activations into interpretable features. Push them up or down.")
 
 st.markdown(
-    "Loads pretrained sparse autoencoders trained on SDXL-Turbo UNet activations, "
-    "captures the SAE latents for your prompt, picks the top-activating features, "
-    "and re-generates with each feature scaled by a set of `strengths`. "
-    "Output is a grid: rows = features, columns = strengths."
+    "Loads pretrained sparse autoencoders trained on SDXL-Turbo UNet "
+    "activations. Captures the SAE latents for your prompt, picks the "
+    "top-activating features, and re-generates with each feature scaled "
+    "by a set of strengths. Output is a grid where rows are features and "
+    "columns are strengths."
 )
 
 with st.expander("**Common goals this page serves**", expanded=False):
@@ -60,8 +62,7 @@ with st.expander("**Common goals this page serves**", expanded=False):
   texture, colour, object part).
 - **Amplify or suppress a known feature index** to bias all generations.
 
-See the **Recipes** page for one-click presets — clicking *Open* there
-will pre-fill the form below.
+The **Recipes** page has one-click presets that pre-fill the form below.
 """
     )
 
@@ -69,8 +70,8 @@ st.text_input(
     "What are you trying to achieve? (optional)",
     placeholder='e.g. "Find a feature that controls shininess in fruit images"',
     help=(
-        "Stored in the run fingerprint and shown back in the results panel. "
-        "Pre-filled automatically if you arrived from a Recipe."
+        "A label for your run. Saved in the fingerprint and shown in the "
+        "results panel. Pre-filled automatically if you arrived from a Recipe."
     ),
     key="sae_goal",
 )
@@ -78,25 +79,25 @@ st.text_input(
 st.info(
     """
 **How this affects the picture.** An SAE expresses the model's dense
-activations as a sparse combination of ~5,000 *features* — each one
+activations as a sparse combination of about 5,000 features. Each one
 ideally corresponds to a single interpretable concept (a texture, a
-color, an object part). Negative `strength` values *suppress* that
-feature in the activation; positive values *amplify* it. The grid below
-shows the same prompt regenerated with each top feature scaled to a
-range of strengths, so you can read off what concept each one encodes
-by watching what changes across each row.
+colour, an object part). Negative `strength` values suppress that feature
+in the activation. Positive values amplify it. The grid below shows the
+same prompt regenerated with each top feature scaled to a range of
+strengths, so you can read off what concept each one encodes by watching
+what changes across each row.
 """,
     icon="ℹ️",
 )
 
-# Surface missing checkpoints early — sae.ipynb / t2i-sae need these.
+# Surface missing checkpoints early. sae.ipynb and t2i-sae need these.
 ckpt_dir = Path("./sdxl-unbox/checkpoints")
 if not ckpt_dir.exists():
     st.error(
-        "Missing SAE checkpoints at `./sdxl-unbox/checkpoints/`. "
-        "Run `t2i-migrate-sae --checkpoint-dir ./sdxl-unbox/checkpoints` after "
-        "downloading from `anonymous-author-129/sdxl-unbox-saes` on HuggingFace, "
-        "or follow `notebooks/sae.ipynb` for the full setup flow."
+        "Missing SAE checkpoints at `./sdxl-unbox/checkpoints/`. Run "
+        "`t2i-migrate-sae --checkpoint-dir ./sdxl-unbox/checkpoints` after "
+        "downloading from `anonymous-author-129/sdxl-unbox-saes` on "
+        "HuggingFace. Or follow `notebooks/sae.ipynb` for the full setup."
     )
     st.stop()
 
@@ -142,11 +143,11 @@ if preset:
     overrides.append(f"model={preset}")
 
 st.subheader("CLI equivalent")
-st.code("t2i-sae " + " ".join(overrides[:6]) + " …", language="bash")
+st.code("t2i-sae " + " ".join(overrides[:6]) + " ...", language="bash")
 
 # ── Run ──────────────────────────────────────────────────────────────────────
 if st.button("Run", type="primary"):
-    with st.status("Capturing activations + modulating features…", expanded=True) as status:
+    with st.status("Capturing activations and modulating features...", expanded=True) as status:
         line_box = st.empty()
         recent: list[str] = []
         start = time.time()
@@ -161,7 +162,7 @@ if st.button("Run", type="primary"):
         if result is not None and result.returncode == 0:
             status.update(label=f"Done in {elapsed:.1f}s", state="complete")
         else:
-            status.update(label="Run failed — see logs above", state="error")
+            status.update(label="Run failed. See logs above.", state="error")
 
     st.divider()
 
@@ -177,26 +178,25 @@ if st.button("Run", type="primary"):
         st.markdown("##### How to read these results")
         st.markdown(
             """
-- **Each row = one feature** (e.g. feature `#1338`). The Top-K features
+- **Each row is one feature** (e.g. feature `#1338`). The top-K features
   were the ones most active for your prompt.
-- **Each column = one strength value.** Left columns = the feature
-  suppressed; right columns = amplified.
+- **Each column is one strength value.** Left columns suppress the
+  feature. Right columns amplify it.
 - **Across a row, look for what changes consistently.** If amplifying
   feature 1338 progressively adds shininess to your subject across the
-  row → "1338" encodes a *shininess* concept. If amplifying it makes
-  the image redder → it encodes redness or warm tones.
+  row, then 1338 encodes a shininess concept. If amplifying it makes the
+  image redder, it encodes redness or warm tones.
 - **Compare different rows.** Different features should change different
   visual properties. Two rows changing the same thing means the SAE
   hasn't fully disentangled the concept.
-- **If amplifying breaks the image** → that feature wasn't really
-  meaningful for this prompt (or the strength was over-scaled).
+- **If amplifying breaks the image**: that feature wasn't really
+  meaningful for this prompt, or the strength was over-scaled.
 - **The leftmost (negative-strength) column** often reveals what the
-  feature was *suppressing* — sometimes more informative than the
-  amplification.
+  feature was suppressing. Sometimes more informative than the amplification.
 """
         )
     else:
-        st.warning("No images produced — check logs above.")
+        st.warning("No images produced. Check logs above.")
 
     fp = load_fingerprint(out_dir)
     if fp:

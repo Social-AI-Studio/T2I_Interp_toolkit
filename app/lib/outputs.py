@@ -47,7 +47,7 @@ def scan_fingerprints(roots: list[str | Path]) -> list[dict[str, Any]]:
                     "hash": fp.get("fingerprint_hash", "?"),
                     "workflow": fp.get("workflow", "?"),
                     "model": fp.get("model_id", "?"),
-                    "dataset": fp.get("dataset_id") or "—",
+                    "dataset": fp.get("dataset_id") or "-",
                     "seed": fp.get("seed"),
                     "git_sha": (fp.get("git_sha") or "")[:8],
                     "git_dirty": fp.get("git_dirty", False),
