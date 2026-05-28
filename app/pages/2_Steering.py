@@ -160,17 +160,9 @@ with c_preset2:
 
 with st.container(border=True):
     st.markdown("### Step 1 · What you want")
-    st.caption("Describe your goal, then either edit the pairs by hand or generate them.")
-
-    st.text_input(
-        "Your goal (optional)",
-        placeholder='e.g. "Add spectacles to portraits" or "Reduce gender bias for doctor prompts"',
-        help=(
-            "A label for your run. Saved in the fingerprint and shown in the "
-            "results panel. Does not drive training."
-        ),
-        key="steer_goal",
-        label_visibility="visible",
+    st.caption(
+        "Pick what kind of concept you want to inject (or suppress), then either "
+        "use the template or have Claude generate prompt pairs for it."
     )
 
     intent_label_to_key = {
@@ -317,6 +309,14 @@ st.sidebar.slider("Training steps", 2, 500, key="steer_train_steps")
 preset = model_preset_picker(
     default=str(st.session_state.get("steer_model_preset", "sdxl_turbo")),
     key="steer_model_preset",
+)
+st.sidebar.text_input(
+    "Run label (optional)",
+    help=(
+        "Free-text label saved in the fingerprint and shown in the "
+        "results panel. Does not drive the run."
+    ),
+    key="steer_goal",
 )
 
 with st.container(border=True):
