@@ -26,7 +26,7 @@ LAYERS_UP=$(echo unet.up_blocks.1.attentions.{0..2}.transformer_blocks.0.attn2 u
 # Sweep only layer_names (3 jobs).
 # output_dir is auto-suffixed per job in run_steer.py from the block component.
 t2i-steer --config-name=steer/loreft -m \
-  "model_key=runwayml/stable-diffusion-v1-5" \
+  "model_key=stable-diffusion-v1-5/stable-diffusion-v1-5" \
   "layer_names=[${LAYERS_DOWN}],[${LAYERS_MID}],[${LAYERS_UP}]" \
   "wandb.project=steer-loreft-macro-sweep-sd15" \
   "alpha=${ALPHA}" \

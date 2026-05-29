@@ -683,9 +683,9 @@ class CAA(Steer):
         pass
 
 
-class LoREEFT(Steer):
+class LoReFT(Steer):
     def __init__(self, model: T2IModel = None):
-        """Initialise LoREEFT steering mechanism.
+        """Initialise LoReFT steering mechanism.
 
         Args:
             model: :class:`T2IModel` instance (can also be provided in
@@ -874,7 +874,7 @@ class LoREEFT(Steer):
             loader.reset()
 
         yield Update(
-            info=f"Starting LoREEFT-UNet training: layer={layer_name}, d_model={true_d_model}, "
+            info=f"Starting LoReFT-UNet training: layer={layer_name}, d_model={true_d_model}, "
             f"rank={rank}, steps={num_steps}, val={'yes' if val_loader is not None else 'no'}"
         )
 
@@ -951,9 +951,9 @@ class LoREEFT(Steer):
         # restore best checkpoint
         if val_loader is not None:
             loreft.load_state_dict(best_loreft_sd)
-            yield Update(info=f"LoREEFT-UNet training done. Best val_loss={best_val:.6f}")
+            yield Update(info=f"LoReFT-UNet training done. Best val_loss={best_val:.6f}")
         else:
-            yield Update(info="LoREEFT-UNet training done.")
+            yield Update(info="LoReFT-UNet training done.")
         return loreft
 
     # ------------------------------------------------------------------
@@ -1185,3 +1185,8 @@ class LoREEFT(Steer):
 
     def eval(self, *args, **kwargs):
         pass
+
+
+# Historical typo retained as an alias so external scripts importing `LoREEFT`
+# keep working. New code should use LoReFT (matches the paper, README, configs).
+LoREEFT = LoReFT

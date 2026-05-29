@@ -359,9 +359,9 @@ def main(cfg: DictConfig) -> None:
         steer = CAA(model=model)
         mapper = None
     elif steer_type == "loreft":
-        from t2i_interp.linear_steering import LoREEFT
+        from t2i_interp.linear_steering import LoReFT
 
-        steer = LoREEFT(model=model)
+        steer = LoReFT(model=model)
         mapper = None
     else:
         from t2i_interp.linear_steering import KSteer

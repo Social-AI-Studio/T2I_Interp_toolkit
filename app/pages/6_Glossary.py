@@ -72,8 +72,12 @@ st.markdown(
   as `mean(positive_acts) - mean(negative_acts)` from labelled examples.
   Simple, fast, training-free.
 - **K-Steer**: trains an MLP classifier on activations to predict the
-  concept, then uses its weights as the steering direction. Slightly
-  more expressive than CAA for multi-class steering.
+  concept, then at generation time backpropagates a classifier loss
+  through the activation tensor and subtracts the gradient (scaled by
+  alpha) over a few `steer_steps`. Each step nudges the activation
+  toward the target class. Different from CAA (which uses a fixed
+  pos-minus-neg mean direction); useful when "more like X" needs a
+  per-sample, per-step push rather than a single learned vector.
 - **LoReFT**: Low-rank Representation Fine-tuning. A tiny rank-r adapter
   (thousands of parameters) is trained to add a delta to activations.
   More expressive than a single vector. Works at multiple sites at once.
