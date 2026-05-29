@@ -16,15 +16,27 @@ The fix materialises the buffer *before* signalling end-of-stream so the
 fallback can emit the tail. These tests pin the new behaviour for the
 two paths that exercised the bug (single-loader, paired-loader) plus
 keep the common case (≥ batch_size rows) green.
+
+Also covers `safe_pth_decoder` — the hardened replacement for the
+silent-weights_only=False fallback that historically let any malicious
+shard execute arbitrary pickle on the researcher's machine.
 """
 
 from __future__ import annotations
 
+import io
+import os
+import pickle
+
+import pytest
+import torch
 import webdataset as wds
 
-import torch
-
-from t2i_interp.utils.T2I.buffer import ActivationsDataloader, PairedLoader
+from t2i_interp.utils.T2I.buffer import (
+    ActivationsDataloader,
+    PairedLoader,
+    safe_pth_decoder,
+)
 
 
 def _write_tar(path, n_rows: int, dim: int = 8, with_label: bool = False) -> None:
@@ -137,3 +149,68 @@ def test_loader_exact_batch_size_yields_one_full_batch(tmp_path):
     batches = list(loader.iterate())
     assert len(batches) == 1
     assert batches[0].shape[0] == 16
+
+
+# ── safe_pth_decoder ────────────────────────────────────────────────────────
+
+
+def test_safe_pth_decoder_loads_tensors():
+    """The default path: torch.load with weights_only=True for plain tensors."""
+    buf = io.BytesIO()
+    torch.save(torch.arange(5), buf)
+    out = safe_pth_decoder("x.pth", buf.getvalue())
+    assert torch.equal(out, torch.arange(5))
+
+
+def test_safe_pth_decoder_returns_none_for_non_pth_keys():
+    assert safe_pth_decoder("x.txt", b"hello") is None
+
+
+def test_safe_pth_decoder_handles_raw_utf8_text():
+    """WebDataset writes plain Python `str` for `.pth` keys as raw UTF-8
+    bytes (no torch.save wrapper). collect_latents does this for
+    caption.pth extras. safe_pth_decoder must round-trip these."""
+    raw = "photo of a man".encode()
+    assert safe_pth_decoder("caption.pth", raw) == "photo of a man"
+
+
+def test_safe_pth_decoder_loads_str_pickled_via_torch_save():
+    """torch.save("string", buf) wraps in a zipfile + pickle. Our pickle
+    fallback (restricted unpickler via pickle_module) must accept it."""
+    buf = io.BytesIO()
+    torch.save("hello world", buf)
+    assert safe_pth_decoder("caption.pth", buf.getvalue()) == "hello world"
+
+
+def test_safe_pth_decoder_refuses_malicious_pickle_by_default(monkeypatch):
+    """A pickle that tries to import os.system must NOT execute under the
+    default safe-mode. This is the security guarantee the function's name
+    advertises."""
+    # Make sure the opt-in env var is OFF.
+    monkeypatch.delenv("T2I_ALLOW_UNSAFE_PICKLE", raising=False)
+
+    # Hand-crafted pickle bytes that, if run with weights_only=False AND
+    # an unrestricted unpickler, would attempt os.system("...") via REDUCE.
+    payload = (
+        b"\x80\x04"  # PROTO 4
+        b"\x95\x1a\x00\x00\x00\x00\x00\x00\x00"  # FRAME (size)
+        b"\x8c\x05posix"  # SHORT_BINUNICODE "posix"
+        b"\x94\x8c\x06system\x94\x93\x94"
+        b"\x8c\x05whoami\x94\x85\x94R\x94."
+    )
+    with pytest.raises(RuntimeError, match="refusing to deserialise"):
+        safe_pth_decoder("x.pth", payload)
+
+
+def test_safe_pth_decoder_unsafe_opt_in_allows_full_pickle(monkeypatch):
+    """T2I_ALLOW_UNSAFE_PICKLE=1 is the documented escape hatch for shards
+    that genuinely need full pickle. The test exercises only the path is
+    reached — we use a benign payload (a plain dict via torch.save)."""
+    monkeypatch.setenv("T2I_ALLOW_UNSAFE_PICKLE", "1")
+    buf = io.BytesIO()
+    # An OrderedDict survives the restricted path too, but using a custom
+    # class would actually exercise the unsafe path. Plain dict is the
+    # closest benign test.
+    torch.save({"a": 1, "b": 2}, buf)
+    out = safe_pth_decoder("x.pth", buf.getvalue())
+    assert out == {"a": 1, "b": 2}
