@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+title: "DreamReader: A Unified Workflow for Text-to-Image Diffusion Interpretability"
+message: "If you use this toolkit, please cite the DreamReader paper."
+type: software
+authors:
+  - family-names: "Social AI Studio"
+    affiliation: "Singapore University of Technology and Design"
+repository-code: "https://github.com/Social-AI-Studio/T2I_Interp_toolkit"
+license: MIT
+preferred-citation:
+  type: article
+  title: "DreamReader: A Unified Workflow for Text-to-Image Diffusion Interpretability"
+  authors:
+    - family-names: "Social AI Studio"
+  url: "https://arxiv.org/abs/2603.13299"
+  year: 2024
