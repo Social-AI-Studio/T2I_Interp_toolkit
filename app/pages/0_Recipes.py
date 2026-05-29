@@ -101,13 +101,17 @@ RECIPES: list[Recipe] = [
         goal_text=FIG2_SPECTACLES_PAYLOAD["goal"],
     ),
     Recipe(
-        title="Shift generations toward a specific demographic (paper Fig 3)",
+        title="Shift generations toward a specific demographic (CAA)",
         objective='I want "photo of a man" to lean toward **Black men** without changing the model.',
         description=(
             "Uses CAA on 8 inline pairs (Black-versioned vs neutral). "
             "Computes the mean activation difference between the two groups, "
-            "then adds that direction at generation time. Inspired by Figure 3 "
-            "of the paper."
+            "then adds that direction at generation time. Same family of "
+            "results as paper Figure 3, but Figure 3 itself trains the "
+            "direction on one model and applies it to another via a learned "
+            "cross-model mapper (the Stitching workflow). This recipe does "
+            "the single-model CAA version; for the full cross-model setup "
+            "see the Stitching page with model_b = LCM-LoRA."
         ),
         workflow="Steering",
         settings=[
@@ -126,7 +130,7 @@ RECIPES: list[Recipe] = [
             "train_steps": 50,
             "inline_pairs": DEMOGRAPHIC_PAIRS,
         },
-        goal_text="Shift 'photo of a man' generations toward Black men (paper Fig 3, inline pairs).",
+        goal_text="Shift 'photo of a man' generations toward Black men (single-model CAA on inline pairs).",
     ),
     Recipe(
         title="Suppress an unwanted concept (cigarettes)",

@@ -194,11 +194,28 @@ model load.
 
 ## Reproducing Figure 2 (SDXL-Turbo + LoReFT spectacles)
 
+Figure 2 is a **sweep** over hook-site groups (down / mid / up cross-attention
+blocks), reporting CLIP score, FID and LPIPS per cell. A single-cell run uses
+the loreft config defaults:
+
 ```bash
 t2i-steer --config-name=steer/loreft model=sdxl_turbo
 ```
 
-That's the entire case study from the paper. To sweep over alpha:
+To reproduce the actual sweep, launch a Hydra multirun over the three layer
+groups (the same partitioning the paper plots: `unet.down_blocks` /
+`unet.mid_block` / `unet.up_blocks`):
+
+```bash
+bash bash/run_loreft_macro_sweep.sh
+```
+
+That script sets `model=sdxl_turbo` and sweeps `layer_names` across all
+down / mid / up cross-attn blocks in one `-m` invocation, logging
+CLIP / FID / LPIPS to W&B so the per-cell metrics from the paper are
+directly comparable.
+
+Sweep alpha alone (within one layer group):
 
 ```bash
 t2i-steer --config-name=steer/loreft model=sdxl_turbo -m alpha=5,10,20

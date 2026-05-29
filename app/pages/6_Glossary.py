@@ -124,6 +124,33 @@ st.markdown(
 - **Inject steps**: which denoising steps to apply the mapped
   activation. Usually just `[0]` (the first step) is enough. Mapping at
   every step is more expensive and often unnecessary.
+- **Cross-model mapping**: training a Mapper between activations from
+  *different* models — e.g. base SD 1.5 to a LoRA fine-tune of SD 1.5.
+  Lets you transfer a steering vector trained on one model to another
+  without retraining. Paper §4 case study uses this to apply a CAA
+  direction from base SD 1.5 to a LoRA fine-tune.
+"""
+)
+
+# ── Workflow vocabulary ─────────────────────────────────────────────────────
+
+st.subheader("Workflow vocabulary")
+st.markdown(
+    """
+- **Schedule**: how an intervention varies across denoising steps.
+  `[0]` means inject at the first step only. `[0, 1, 2]` means inject
+  at steps 0-2. Most steering / stitching interventions only need the
+  first few steps; later steps add diminishing returns at higher cost.
+- **Artifact**: a file produced by a run that downstream code can
+  consume. The fingerprint JSON is the canonical artifact; trained
+  mappers (`mapper.pt`), steering vectors (`steering_vec.pt`),
+  CAA/LoReFT checkpoints, and the per-prompt `metrics.json` are the
+  other common ones. W&B Artifact upload is automatic when
+  `wandb.project` is set.
+- **Report**: the summary view of a sweep that combines per-run
+  artifacts into one comparison (Figure 2 in the paper). The W&B
+  `WandbMultirunCallback` assembles reports for `-m` multiruns; CLIP /
+  FID / LPIPS columns come from the workflow's `metrics:` config block.
 """
 )
 

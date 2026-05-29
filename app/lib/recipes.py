@@ -12,12 +12,18 @@ from typing import Any
 
 from app.lib.prompts import SPECTACLES_INFERENCE_PROMPTS, SPECTACLES_INLINE_PAIRS
 
-# The paper Fig 2 reproduction. Imported by both 0_Recipes.py (used as the
-# Recipe.fields for the "Add spectacles to character portraits" card) and
-# streamlit_app.py (used by the "Reproduce paper Fig 2" home-page CTA).
+# Paper-faithful Figure 2 setup: LoReFT spectacles on SDXL-Turbo. The
+# original Fig 2 trained on ~1k paired prompts; this payload uses the
+# bundled 12 inline pairs as a runnable demo. The goal text calls that out
+# so users don't read "reproduces Figure 2" and expect identical numbers.
+# Imported by 0_Recipes.py (the "Add spectacles to character portraits"
+# card) and streamlit_app.py (the home-page "Run the spectacles demo" CTA).
 FIG2_SPECTACLES_PAYLOAD: dict[str, Any] = {
     "workflow": "Steering",
-    "goal": "Add spectacles to character portraits (paper Fig 2 reproduction).",
+    "goal": (
+        "Add spectacles to character portraits (paper Fig 2 setup; "
+        "demo-scale: 12 inline pairs vs ~1k in the paper)."
+    ),
     "fields": {
         "method": "loreft",
         "model_preset": "sdxl_turbo",

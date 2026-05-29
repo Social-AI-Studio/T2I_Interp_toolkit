@@ -25,6 +25,7 @@ from app.lib import (
     generate_inline_pairs,
     has_unresolved_placeholders,
     load_fingerprint,
+    load_metrics,
     model_preset_picker,
     pair_baseline_modified,
     parse_pipe_lines,
@@ -492,6 +493,35 @@ if run_clicked:
             )
     else:
         st.warning("No images produced. Check logs above.")
+
+    metrics = load_metrics(out_dir, include_prefix_siblings=True)
+    if metrics:
+        with st.container(border=True):
+            st.markdown("##### Metrics")
+            st.caption(
+                "Computed automatically per spec. Lower FID/LPIPS = closer "
+                "to baseline distribution. Higher CLIP = better prompt "
+                "alignment. The paper's Figure 2 sweep uses these three."
+            )
+            # Surface the most commonly-watched scalar metrics as st.metric
+            # tiles; fall back to a JSON dump for everything else.
+            _featured = [
+                ("baseline/clip", "CLIP (baseline)"),
+                ("steered/clip", "CLIP (steered)"),
+                ("baseline/fid", "FID (baseline)"),
+                ("steered/fid", "FID (steered)"),
+                ("baseline/lpips", "LPIPS (baseline)"),
+                ("steered/lpips", "LPIPS (steered)"),
+            ]
+            _shown = [(k, label) for k, label in _featured if k in metrics]
+            if _shown:
+                cols = st.columns(min(len(_shown), 3))
+                for i, (k, label) in enumerate(_shown):
+                    v = metrics[k]
+                    formatted = f"{v:.3f}" if isinstance(v, int | float) else str(v)
+                    cols[i % len(cols)].metric(label, formatted)
+            with st.expander("All metrics (full JSON)", expanded=False):
+                st.json(metrics)
 
     fp = load_fingerprint(out_dir, include_prefix_siblings=True)
     if fp:

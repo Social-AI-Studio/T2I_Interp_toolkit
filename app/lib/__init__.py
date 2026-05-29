@@ -11,6 +11,7 @@ from app.lib.llm import (
 from app.lib.outputs import (
     collect_images,
     load_fingerprint,
+    load_metrics,
     pair_baseline_modified,
     scan_fingerprints,
 )
@@ -41,6 +42,7 @@ __all__ = [
     "has_unresolved_placeholders",
     "is_available",
     "load_fingerprint",
+    "load_metrics",
     "model_preset_picker",
     "pair_baseline_modified",
     "parse_pipe_lines",

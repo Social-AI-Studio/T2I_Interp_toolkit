@@ -121,6 +121,36 @@ def load_fingerprint(
         return None
 
 
+def load_metrics(
+    dir_: str | Path, *, include_prefix_siblings: bool = False
+) -> dict[str, Any] | None:
+    """Load `metrics.json` produced by run_steer/run_stitch.
+
+    Looks in `dir_` first, then in sibling directories with the same name
+    prefix when `include_prefix_siblings=True` (Steering rewrites its
+    output_dir; same rationale as `collect_images`). Returns None when no
+    metrics file is present or it doesn't parse.
+    """
+    d = Path(dir_)
+    candidates: list[Path] = []
+    if d.exists():
+        candidates.extend(d.rglob("metrics.json"))
+    if include_prefix_siblings and d.parent.exists():
+        prefix = d.name
+        for sibling in d.parent.iterdir():
+            if sibling == d:
+                continue
+            if sibling.is_dir() and sibling.name.startswith(prefix):
+                candidates.extend(sibling.rglob("metrics.json"))
+    candidates.sort()
+    if not candidates:
+        return None
+    try:
+        return json.loads(candidates[0].read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def scan_fingerprints(roots: list[str | Path]) -> list[dict[str, Any]]:
     """Walk given roots, parse every fingerprint.json found. Returns rows
     suitable for st.dataframe (sorted by timestamp descending)."""
