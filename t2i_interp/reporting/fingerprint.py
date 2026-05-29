@@ -228,6 +228,35 @@ class RunFingerprint:
             run.summary["fingerprint/seed"] = self.seed
 
 
+def mark_run_completed(
+    output_dir: str | Path,
+    *,
+    workflow: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    """Write `_RUN_COMPLETE.json` into `output_dir` at the end of a successful run.
+
+    Lets downstream consumers (Fingerprints page, crash-detection scripts)
+    distinguish a finished run from one that left a fingerprint behind but
+    crashed mid-train. The file's mere existence is the signal; the contents
+    record when and which workflow finished.
+
+    Returns the path written.
+    """
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    if workflow:
+        payload["workflow"] = workflow
+    if extra:
+        payload.update(extra)
+    marker = out / "_RUN_COMPLETE.json"
+    marker.write_text(json.dumps(payload, indent=2))
+    return marker
+
+
 def seed_everything(seed: int | None) -> None:
     """Set deterministic seeds across torch, numpy, and Python's random.
 

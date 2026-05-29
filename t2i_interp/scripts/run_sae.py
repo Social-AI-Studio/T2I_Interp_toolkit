@@ -20,7 +20,11 @@ def main(cfg: DictConfig) -> None:
     import wandb
     from diffusers import AutoPipelineForText2Image
 
-    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
+    from t2i_interp.reporting.fingerprint import (
+        RunFingerprint,
+        mark_run_completed,
+        seed_everything,
+    )
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.policy import scale_indx_policy
@@ -139,6 +143,8 @@ def main(cfg: DictConfig) -> None:
     if run:
         wandb.log({"sae_feature_grid": wandb.Image(grid_path)})
         run.finish()
+
+    mark_run_completed(cfg.output_dir, workflow="sae")
 
 
 if __name__ == "__main__":

@@ -25,7 +25,11 @@ def main(cfg: DictConfig) -> None:
     from diffusers import StableDiffusionPipeline
     from tqdm import tqdm
 
-    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
+    from t2i_interp.reporting.fingerprint import (
+        RunFingerprint,
+        mark_run_completed,
+        seed_everything,
+    )
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.hook import UNetAlterHook
@@ -231,6 +235,8 @@ def main(cfg: DictConfig) -> None:
 
     metrics_path = os.path.join(cfg.output_dir, "metrics.json")
     save_json(all_metric_results, metrics_path)
+
+    mark_run_completed(cfg.output_dir, workflow="localisation")
 
     return {"output_dir": cfg.output_dir, "metrics_file": metrics_path}
 

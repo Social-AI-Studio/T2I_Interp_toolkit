@@ -49,7 +49,11 @@ def main(cfg: DictConfig) -> None:
 
     from t2i_interp.linear_steering import KSteer
     from t2i_interp.mapper import MLPMapper
-    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
+    from t2i_interp.reporting.fingerprint import (
+        RunFingerprint,
+        mark_run_completed as _mark_completed_impl,
+        seed_everything,
+    )
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.buffer import ActivationsDataloader, PairedLoader
@@ -203,6 +207,17 @@ def main(cfg: DictConfig) -> None:
         if len(rows) <= 3:
             train_rows, val_rows = rows, rows
         else:
+            # Shuffle rows BEFORE the tail-slice split. For CAA the rows
+            # alternate [pos, neg, pos, neg, ...] so taking the last 20%
+            # unshuffled gave adjacent pos/neg pairs to val and biased
+            # both halves. Use cfg.seed for reproducibility — same seed
+            # gives same split across machines.
+            import random
+
+            _split_seed = getattr(cfg, "seed", None)
+            _rng = random.Random(_split_seed if _split_seed is not None else 0)
+            rows = list(rows)
+            _rng.shuffle(rows)
             n_val = max(1, len(rows) // 5)
             train_rows, val_rows = rows[:-n_val], rows[-n_val:]
         return DatasetDict(
@@ -655,7 +670,10 @@ def main(cfg: DictConfig) -> None:
     specs.append(InferenceSpec(name="steered", inference_fn=run_steer, kwargs={}))
 
     all_metric_results = {}
-    wandb_imgs = []
+    # wandb image groups, keyed by spec prefix ("baseline" / "steered") so
+    # the UI can compare baseline vs steered side-by-side rather than dumping
+    # everything into one bucket.
+    wandb_imgs_by_prefix: dict[str, list] = {}
 
     baseline_disk_paths = []
 
@@ -674,7 +692,7 @@ def main(cfg: DictConfig) -> None:
             img.save(path)
             local_paths.append(path)
             if run:
-                wandb_imgs.append(
+                wandb_imgs_by_prefix.setdefault(prefix, []).append(
                     wandb.Image(path, caption=f"[{prefix}] {cfg.prompts[j % len(cfg.prompts)]}")
                 )
 
@@ -706,7 +724,7 @@ def main(cfg: DictConfig) -> None:
         print(f"Saved {len(imgs)} {prefix} images → {cfg.output_dir}")
 
     if run:
-        log_dict = {"steered_images": wandb_imgs}
+        log_dict: dict = {f"{prefix}_images": imgs for prefix, imgs in wandb_imgs_by_prefix.items()}
         log_dict.update(all_metric_results)
         alpha_val = float(getattr(cfg, "alpha", 0))
         log_dict["alpha"] = alpha_val
@@ -714,10 +732,14 @@ def main(cfg: DictConfig) -> None:
         run.summary["alpha"] = alpha_val
         run.finish()
 
-    # Write metrics to disk so callbacks can read them without Hydra serialization bugs
-
+    # Write metrics to disk so callbacks can read them without Hydra serialization bugs.
     metrics_path = os.path.join(cfg.output_dir, "metrics.json")
     save_json(all_metric_results, metrics_path)
+
+    # Completion marker: lets downstream consumers (Fingerprints page,
+    # crash-detection scripts) distinguish a finished run from one that
+    # left a fingerprint behind but crashed mid-train. Written last.
+    _mark_completed_impl(cfg.output_dir, workflow="steer")
 
     return {"output_dir": cfg.output_dir, "metrics_file": metrics_path}
 

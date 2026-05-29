@@ -44,7 +44,11 @@ def main(cfg: DictConfig) -> None:
     from datasets import Dataset, DatasetDict, load_dataset
 
     from t2i_interp.mapper import MLPMapper
-    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
+    from t2i_interp.reporting.fingerprint import (
+        RunFingerprint,
+        mark_run_completed,
+        seed_everything,
+    )
     from t2i_interp.stitch import Stitcher
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
@@ -733,6 +737,8 @@ def main(cfg: DictConfig) -> None:
     if run:
         wandb.log({"stitched_images": wandb_imgs})
         run.finish()
+
+    mark_run_completed(cfg.output_dir, workflow="stitch")
 
 
 if __name__ == "__main__":

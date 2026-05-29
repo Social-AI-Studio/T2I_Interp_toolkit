@@ -174,6 +174,10 @@ def scan_fingerprints(roots: list[str | Path]) -> list[dict[str, Any]]:
                     "git_sha": (fp.get("git_sha") or "")[:8],
                     "git_dirty": fp.get("git_dirty", False),
                     "timestamp": fp.get("timestamp", ""),
+                    # Run finished cleanly iff the CLI wrote _RUN_COMPLETE.json
+                    # at the end of main(). Lets users distinguish a finished
+                    # run from one that left a fingerprint then crashed.
+                    "completed": (fp_file.parent / "_RUN_COMPLETE.json").exists(),
                     "path": str(fp_file.parent),
                 }
             )
