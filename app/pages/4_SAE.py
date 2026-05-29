@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import tempfile
-import time
 from pathlib import Path
 
 import streamlit as st
@@ -16,7 +15,7 @@ from app.lib import (
     model_preset_picker,
     render_app_footer,
     render_run_label_sidebar,
-    run_workflow,
+    render_workflow_run,
     scenario_radio,
     sweep_old_streamlit_tempdirs,
 )
@@ -258,22 +257,12 @@ with st.container(border=True):
 if run_clicked:
     out_dir = tempfile.mkdtemp(prefix="streamlit_sae_")
     overrides = _build_overrides(out_dir)
-    with st.status("Capturing activations and modulating features...", expanded=True) as status:
-        line_box = st.empty()
-        recent: list[str] = []
-        start = time.time()
-        result = None
-        for event in run_workflow("t2i-sae", overrides, output_dir=out_dir):
-            if isinstance(event, str):
-                recent.append(event)
-                line_box.code("\n".join(recent[-20:]))
-            else:
-                result = event
-        elapsed = time.time() - start
-        if result is not None and result.returncode == 0:
-            status.update(label=f"Done in {elapsed:.1f}s", state="complete")
-        else:
-            status.update(label="Run failed. See logs above.", state="error")
+    result, elapsed = render_workflow_run(
+        "t2i-sae",
+        overrides,
+        out_dir=out_dir,
+        running_label="Capturing activations and modulating features...",
+    )
 
     st.divider()
     st.subheader("Results")

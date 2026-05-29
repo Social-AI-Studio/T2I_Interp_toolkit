@@ -12,8 +12,6 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import time
-
 import streamlit as st
 
 from app.lib import (
@@ -31,7 +29,7 @@ from app.lib import (
     parse_pipe_lines,
     render_app_footer,
     render_run_label_sidebar,
-    run_workflow,
+    render_workflow_run,
     sweep_old_streamlit_tempdirs,
 )
 from app.lib import (
@@ -430,22 +428,12 @@ if run_clicked:
     with open(prompts_file, "w") as f:
         json.dump(prompts, f)
 
-    with st.status(f"Training {steer_type.upper()} and generating...", expanded=True) as status:
-        line_box = st.empty()
-        recent: list[str] = []
-        start = time.time()
-        result = None
-        for event in run_workflow("t2i-steer", overrides, output_dir=out_dir):
-            if isinstance(event, str):
-                recent.append(event)
-                line_box.code("\n".join(recent[-20:]))
-            else:
-                result = event
-        elapsed = time.time() - start
-        if result is not None and result.returncode == 0:
-            status.update(label=f"Done in {elapsed:.1f}s", state="complete")
-        else:
-            status.update(label="Run failed. See logs above.", state="error")
+    result, elapsed = render_workflow_run(
+        "t2i-steer",
+        overrides,
+        out_dir=out_dir,
+        running_label=f"Training {steer_type.upper()} and generating...",
+    )
 
     st.divider()
     st.subheader("Results")

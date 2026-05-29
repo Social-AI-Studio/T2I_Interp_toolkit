@@ -231,16 +231,11 @@ def main(cfg: DictConfig) -> None:
 
         Patches `cfg.prompt_col_a` / `cfg.prompt_col_b` to point at the
         in-memory column names so the rest of the script is source-agnostic.
+        See `t2i_interp.utils.inline_pairs` for the load/split helpers.
         """
-        raw = getattr(cfg, "inline_pairs", None)
-        pairs = OmegaConf.to_container(raw, resolve=True) if raw else []
-        if not pairs:
-            path = getattr(cfg, "inline_pairs_file", None)
-            if path and os.path.exists(path):
-                import json
+        from t2i_interp.utils.inline_pairs import load_inline_pairs, make_disjoint_split
 
-                with open(path) as f:
-                    pairs = json.load(f)
+        pairs = load_inline_pairs(cfg)
         if not pairs:
             return None
 
@@ -272,13 +267,7 @@ def main(cfg: DictConfig) -> None:
         cfg.prompt_col_b = "prompt_b"
         OmegaConf.set_struct(cfg, True)
 
-        # Disjoint train/val split. Very small datasets (≤3 rows) reuse train
-        # as val — smoke-test friendly; val metrics are meaningless either way.
-        if len(rows) <= 3:
-            train_rows, val_rows = rows, rows
-        else:
-            n_val = max(1, len(rows) // 5)
-            train_rows, val_rows = rows[:-n_val], rows[-n_val:]
+        train_rows, val_rows = make_disjoint_split(rows, seed=getattr(cfg, "seed", None))
         return DatasetDict(
             {
                 "train": Dataset.from_list(train_rows),

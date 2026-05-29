@@ -23,7 +23,7 @@ from app.lib.pages import (
 )
 from app.lib.parsing import detect_concept, has_unresolved_placeholders, parse_pipe_lines
 from app.lib.recipes import FIG2_SPECTACLES_PAYLOAD
-from app.lib.runner import run_workflow, sweep_old_streamlit_tempdirs
+from app.lib.runner import render_workflow_run, run_workflow, sweep_old_streamlit_tempdirs
 from app.lib.widgets import device_dtype_picker, model_preset_picker
 from app.lib.workflows import WORKFLOW_TO_PAGE
 
@@ -48,6 +48,7 @@ __all__ = [
     "parse_pipe_lines",
     "render_app_footer",
     "render_run_label_sidebar",
+    "render_workflow_run",
     "run_workflow",
     "scan_fingerprints",
     "scenario_radio",

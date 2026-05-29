@@ -144,32 +144,24 @@ def main(cfg: DictConfig) -> None:
     model.pipeline.set_progress_bar_config(disable=True)
 
     def _load_inline_pairs_dataset(cfg):
-        """Build an in-memory `DatasetDict` from inline positive/negative
-        prompt pairs (Streamlit playground / quick demos), and patch `cfg`
-        with the matching column names so the rest of the script is unaware
-        of the source. Returns `None` if no inline pairs are configured —
-        the caller falls back to `load_dataset(cfg.dataset_name)`.
+        """Build an in-memory `DatasetDict` from inline {pos, neg} prompt pairs.
 
-        Two input shapes are accepted:
-          * `cfg.inline_pairs`: a list of {pos, neg} dicts directly in the
-            config (works for both CLI YAML and Hydra overrides).
-          * `cfg.inline_pairs_file`: a path to a JSON file holding the same
-            list — used by the Streamlit page to avoid Hydra's awkward
-            list-of-dict override syntax for prompts containing spaces.
+        Used by the Streamlit playground / quick demos. Patches `cfg` with
+        the matching column names so the rest of the script is unaware of
+        the source. Returns None if no inline pairs are configured — the
+        caller falls back to `load_dataset(cfg.dataset_name)`.
+
+        See `t2i_interp.utils.inline_pairs` for the load/split helpers shared
+        with run_stitch.py.
         """
-        raw_inline = getattr(cfg, "inline_pairs", None)
-        pairs = OmegaConf.to_container(raw_inline, resolve=True) if raw_inline else []
-        if not pairs:
-            pairs_file = getattr(cfg, "inline_pairs_file", None)
-            if pairs_file and os.path.exists(pairs_file):
-                import json
+        from t2i_interp.utils.inline_pairs import load_inline_pairs, make_disjoint_split
 
-                with open(pairs_file) as f:
-                    pairs = json.load(f)
+        pairs = load_inline_pairs(cfg)
         if not pairs:
             return None
 
-        # Validate input shape early — easier to debug than a downstream KeyError.
+        # Validate the {pos, neg} shape early — easier to debug than a
+        # downstream KeyError.
         for i, p in enumerate(pairs):
             if not isinstance(p, dict) or "pos" not in p or "neg" not in p:
                 raise ValueError(
@@ -201,25 +193,7 @@ def main(cfg: DictConfig) -> None:
             setattr(cfg, k, v)
         OmegaConf.set_struct(cfg, True)
 
-        # Disjoint train/val split. For very small datasets (≤3 rows) we
-        # reuse train as val rather than empty-out train — useful for
-        # smoke tests; validation metrics are meaningless either way.
-        if len(rows) <= 3:
-            train_rows, val_rows = rows, rows
-        else:
-            # Shuffle rows BEFORE the tail-slice split. For CAA the rows
-            # alternate [pos, neg, pos, neg, ...] so taking the last 20%
-            # unshuffled gave adjacent pos/neg pairs to val and biased
-            # both halves. Use cfg.seed for reproducibility — same seed
-            # gives same split across machines.
-            import random
-
-            _split_seed = getattr(cfg, "seed", None)
-            _rng = random.Random(_split_seed if _split_seed is not None else 0)
-            rows = list(rows)
-            _rng.shuffle(rows)
-            n_val = max(1, len(rows) // 5)
-            train_rows, val_rows = rows[:-n_val], rows[-n_val:]
+        train_rows, val_rows = make_disjoint_split(rows, seed=getattr(cfg, "seed", None))
         return DatasetDict(
             {
                 "train": Dataset.from_list(train_rows),

@@ -18,6 +18,48 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def render_workflow_run(
+    command: str,
+    overrides: list[str],
+    *,
+    out_dir: str,
+    running_label: str,
+    done_label: str = "Done",
+):
+    """Streamlit helper: spawn a CLI, stream logs into `st.status`, return result.
+
+    The 4 workflow pages used to inline 15+ identical lines apiece: open a
+    `st.status`, drain `run_workflow` into a 20-line rolling tail in a code
+    block, time the run, and re-label the status based on returncode. This
+    helper centralises that scaffolding so the pages just supply the labels.
+
+    Returns `(WorkflowResult | None, elapsed_seconds)`. Pages keep their own
+    Results section because the per-workflow rendering is too different to
+    share (image-pairing labels, metric tiles, fingerprint detail).
+    """
+    import time as _time
+
+    import streamlit as st
+
+    with st.status(running_label, expanded=True) as status:
+        line_box = st.empty()
+        recent: list[str] = []
+        start = _time.time()
+        result: WorkflowResult | None = None
+        for event in run_workflow(command, overrides, output_dir=out_dir):
+            if isinstance(event, str):
+                recent.append(event)
+                line_box.code("\n".join(recent[-20:]))
+            else:
+                result = event
+        elapsed = _time.time() - start
+        if result is not None and result.returncode == 0:
+            status.update(label=f"{done_label} in {elapsed:.1f}s", state="complete")
+        else:
+            status.update(label="Run failed. See logs above.", state="error")
+    return result, elapsed
+
+
 def sweep_old_streamlit_tempdirs(prefix: str, max_age_seconds: float = 3600) -> int:
     """Remove `tempfile.gettempdir()/<prefix>*` directories older than the cutoff.
 
