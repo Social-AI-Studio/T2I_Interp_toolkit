@@ -12,7 +12,7 @@ wandb:
   sweep_report_type: stitch_steer
 
 # Reproducibility
-seed: null   # int → torch.manual_seed; null → unseeded
+seed: 42   # int → torch.manual_seed; override with seed=null for unseeded runs
 
 # Model
 model_key: stable-diffusion-v1-5/stable-diffusion-v1-5

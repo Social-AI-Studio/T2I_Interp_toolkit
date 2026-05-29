@@ -20,10 +20,14 @@ from app.lib import (
     render_run_label_sidebar,
     run_workflow,
     scenario_radio,
+    sweep_old_streamlit_tempdirs,
 )
 from app.lib.prompts import STITCH_GENERIC_PROMPTS
 
 st.set_page_config(page_title="Stitching • T2I-Interp", layout="wide")
+
+# Opportunistic cleanup of stale tempdirs from previous Run clicks.
+sweep_old_streamlit_tempdirs("streamlit_stitch_")
 
 # ── Defaults + recipe-payload intake ─────────────────────────────────────────
 _STITCH_DEFAULTS: dict[str, object] = {

@@ -14,7 +14,7 @@ device: cuda:0
 dtype: float16
 
 # Reproducibility
-seed: null   # int → torch.manual_seed; null → unseeded
+seed: 42   # int → torch.manual_seed; override with seed=null for unseeded runs
 
 # Dataset — set `inline_pairs_file` (JSON path) or `inline_pairs` (list of
 # {pos, neg} dicts) to skip the HF dataset and train on inline prompt pairs.

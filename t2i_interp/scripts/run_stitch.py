@@ -62,6 +62,23 @@ def main(cfg: DictConfig) -> None:
     # Reproducibility: seed all RNGs before model load / data ops.
     seed_everything(getattr(cfg, "seed", None))
 
+    # `prompts_file` (JSON list of strings) is the comma-safe alternative to
+    # passing `prompts=[a, b]` on the Hydra command line. Same pattern as
+    # `inline_pairs_file`.
+    prompts_file = getattr(cfg, "prompts_file", None)
+    if prompts_file and os.path.exists(prompts_file):
+        import json
+
+        with open(prompts_file) as _pf:
+            _loaded_prompts = json.load(_pf)
+        if not isinstance(_loaded_prompts, list) or not all(
+            isinstance(p, str) for p in _loaded_prompts
+        ):
+            raise ValueError(f"prompts_file={prompts_file!r} must contain a JSON list of strings")
+        OmegaConf.set_struct(cfg, False)
+        cfg.prompts = _loaded_prompts
+        OmegaConf.set_struct(cfg, True)
+
     # Optional wandb initialization
     run = None
     if getattr(cfg, "wandb", None) and cfg.wandb.get("project"):

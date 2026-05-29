@@ -62,6 +62,23 @@ def main(cfg: DictConfig) -> None:
     # Reproducibility: seed all RNGs before model load / data ops.
     seed_everything(getattr(cfg, "seed", None))
 
+    # `prompts_file` (JSON list of strings) is the comma-safe alternative to
+    # passing `prompts=[a, b]` on the Hydra command line — prompts containing
+    # commas/spaces break the list parser. The Streamlit page writes this file.
+    prompts_file = getattr(cfg, "prompts_file", None)
+    if prompts_file and os.path.exists(prompts_file):
+        import json
+
+        with open(prompts_file) as _pf:
+            _loaded_prompts = json.load(_pf)
+        if not isinstance(_loaded_prompts, list) or not all(
+            isinstance(p, str) for p in _loaded_prompts
+        ):
+            raise ValueError(f"prompts_file={prompts_file!r} must contain a JSON list of strings")
+        OmegaConf.set_struct(cfg, False)
+        cfg.prompts = _loaded_prompts
+        OmegaConf.set_struct(cfg, True)
+
     # Resolve layer_names + finalize output_dir BEFORE wandb.init / fingerprint
     # / model load so all three downstream snapshots see the SAME `cfg`
     # (W&B's run.config, the fingerprint JSON, and the actual output path
@@ -685,12 +702,6 @@ def main(cfg: DictConfig) -> None:
         if metric_results:
             print(f"[{prefix}] Metrics:", metric_results)
             all_metric_results.update({f"{prefix}/{k}": v for k, v in metric_results.items()})
-            path = os.path.join(cfg.output_dir, f"{prefix}_{j}.png")
-            img.save(path)
-            if run:
-                wandb_imgs.append(
-                    wandb.Image(path, caption=f"[{prefix}] {cfg.prompts[j % len(cfg.prompts)]}")
-                )
 
         print(f"Saved {len(imgs)} {prefix} images → {cfg.output_dir}")
 

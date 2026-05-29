@@ -82,8 +82,10 @@ def main(cfg: DictConfig) -> None:
     }
     print(f"Found {len(all_cross_attn)} cross-attn accessors with heads.")
 
-    # 3. Baseline
-    g = torch.Generator().manual_seed(cfg.seed)
+    # 3. Baseline. `cfg.seed` may be None — fall back to a fixed sentinel so
+    # the baseline is at least deterministic within one run; per-head seeding
+    # below uses the same fallback.
+    g = torch.Generator().manual_seed(cfg.seed if cfg.seed is not None else 0)
     baseline = model.pipeline(
         prompt=[cfg.prompt],
         num_inference_steps=cfg.num_inference_steps,
@@ -133,7 +135,7 @@ def main(cfg: DictConfig) -> None:
         model, acc, head_idx, factor, start_step, end_step, prompt, n_steps, seed, guidance_scale
     ):
         hook = make_hook(acc.module.heads, head_idx, factor, start_step, end_step)
-        g = torch.Generator().manual_seed(seed)
+        g = torch.Generator().manual_seed(seed if seed is not None else 0)
         return model.run_with_hooks(
             [prompt],
             hooks={acc.module: hook},

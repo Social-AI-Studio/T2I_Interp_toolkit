@@ -18,17 +18,26 @@ def collect_images(dir_: str | Path, *, include_prefix_siblings: bool = False) -
     the Streamlit page created. Workflows that don't rewrite their output
     path (Localisation, Stitching, SAE) don't need to opt in.
     """
+    # Matches the extensions pair_baseline_modified() recognises. Drop any
+    # one here and you re-introduce the silent "no images produced" UX bug.
+    _IMAGE_EXTS = (".png", ".jpg", ".jpeg")
+
+    def _images_in(root: Path):
+        for p in root.rglob("*"):
+            if p.is_file() and p.suffix.lower() in _IMAGE_EXTS:
+                yield p
+
     d = Path(dir_)
     images: list[Path] = []
     if d.exists():
-        images.extend(p for p in d.rglob("*.png") if p.is_file())
+        images.extend(_images_in(d))
     if include_prefix_siblings and d.parent.exists():
         prefix = d.name
         for sibling in d.parent.iterdir():
             if sibling == d:
                 continue  # already walked above
             if sibling.is_dir() and sibling.name.startswith(prefix):
-                images.extend(p for p in sibling.rglob("*.png") if p.is_file())
+                images.extend(_images_in(sibling))
     return sorted(images)
 
 

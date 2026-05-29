@@ -14,7 +14,7 @@ device: cuda:0
 dtype: float16
 
 # Reproducibility
-seed: null   # int → torch.manual_seed; null → unseeded
+seed: 42   # int → torch.manual_seed; override with seed=null for unseeded runs
 
 # Dataset
 # Note for LoReFT: Your dataset needs two prompt columns, one for base(student) and one for teacher.

@@ -18,9 +18,14 @@ from app.lib import (
     render_run_label_sidebar,
     run_workflow,
     scenario_radio,
+    sweep_old_streamlit_tempdirs,
 )
 
 st.set_page_config(page_title="Localisation • T2I-Interp", layout="wide")
+
+# Opportunistic cleanup of stale tempdirs from previous Run clicks. Skips the
+# in-flight one (only sweeps dirs older than the configured cutoff).
+sweep_old_streamlit_tempdirs("streamlit_loc_")
 
 # ── Defaults + recipe-payload intake ─────────────────────────────────────────
 _LOC_DEFAULTS: dict[str, object] = {
@@ -125,25 +130,73 @@ with st.container(border=True):
     st.markdown("### Step 2 · Where to look")
     st.caption("Which layer and head to scale.")
 
+    # Curated list of common cross-attn output sites — typo-safe dropdown
+    # plus an explicit "Custom..." escape hatch. Heads count is preset-aware
+    # (SD 1.5 has 8 heads per cross-attn; SDXL families have 10–20).
+    _SD15_ATTN2_LAYERS = [
+        "down_blocks_0_attentions_0_transformer_blocks_0_attn2_out",
+        "down_blocks_0_attentions_1_transformer_blocks_0_attn2_out",
+        "down_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
+        "down_blocks_1_attentions_1_transformer_blocks_0_attn2_out",
+        "down_blocks_2_attentions_0_transformer_blocks_0_attn2_out",
+        "down_blocks_2_attentions_1_transformer_blocks_0_attn2_out",
+        "mid_block_attentions_0_transformer_blocks_0_attn2_out",
+        "up_blocks_1_attentions_0_transformer_blocks_0_attn2_out",
+        "up_blocks_1_attentions_1_transformer_blocks_0_attn2_out",
+        "up_blocks_1_attentions_2_transformer_blocks_0_attn2_out",
+        "up_blocks_2_attentions_0_transformer_blocks_0_attn2_out",
+        "up_blocks_2_attentions_1_transformer_blocks_0_attn2_out",
+        "up_blocks_2_attentions_2_transformer_blocks_0_attn2_out",
+        "up_blocks_3_attentions_0_transformer_blocks_0_attn2_out",
+        "up_blocks_3_attentions_1_transformer_blocks_0_attn2_out",
+        "up_blocks_3_attentions_2_transformer_blocks_0_attn2_out",
+    ]
+    _CUSTOM_SENTINEL = "Custom..."
+    _layer_options = [*_SD15_ATTN2_LAYERS, _CUSTOM_SENTINEL]
+
+    _current_layer = str(st.session_state.get("loc_target_layer", _SD15_ATTN2_LAYERS[2]))
+    if _current_layer not in _SD15_ATTN2_LAYERS:
+        # Recipe payload or previous custom value — preselect Custom...
+        _default_dropdown = _CUSTOM_SENTINEL
+    else:
+        _default_dropdown = _current_layer
+
     c_layer, c_head = st.columns([2, 1])
     with c_layer:
-        st.text_input(
-            "Target layer (UNet path)",
+        _picked = st.selectbox(
+            "Target layer (UNet cross-attn output)",
+            _layer_options,
+            index=_layer_options.index(_default_dropdown),
             help=(
                 "`down_blocks_1` is early (rough composition). `mid_block` "
                 "is mid (object identity). `up_blocks_X` is late (textures "
                 "and fine detail). Suffix `_attn2_out` is the output of a "
-                "cross-attention layer (image to text)."
+                "cross-attention layer (image to text). Pick `Custom...` "
+                "to type a non-standard hook path."
             ),
-            key="loc_target_layer",
+            key="loc_target_layer_choice",
         )
+        if _picked == _CUSTOM_SENTINEL:
+            st.text_input(
+                "Custom UNet path",
+                value=_current_layer if _current_layer not in _SD15_ATTN2_LAYERS else "",
+                key="loc_target_layer",
+            )
+        else:
+            st.session_state["loc_target_layer"] = _picked
     with c_head:
+        # SD 1.5 cross-attn has 8 heads; SDXL cross-attn varies (10–20). Pick
+        # the safe upper bound for the selected preset so the dropdown won't
+        # offer head indices the model doesn't have.
+        _preset_choice = str(st.session_state.get("loc_model_preset", "sd15"))
+        _heads_by_preset = {"sd15": 8, "sdxl_turbo": 10}
+        _n_heads = _heads_by_preset.get(_preset_choice, 8)
         st.selectbox(
-            "Head index (0-7)",
-            list(range(8)),
+            f"Head index (0-{_n_heads - 1})",
+            list(range(_n_heads)),
             help=(
-                "SD 1.x cross-attn layers have 8 parallel heads. Iterate "
-                "over them to find the one that carries your concept."
+                f"This model preset has {_n_heads} cross-attn heads. "
+                "Iterate over them to find the one that carries your concept."
             ),
             key="loc_target_head",
         )

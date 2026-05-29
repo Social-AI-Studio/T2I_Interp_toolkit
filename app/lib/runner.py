@@ -9,9 +9,47 @@ Hydra hijacks sys.argv and `@hydra.main` is not re-entrant in the same kernel.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
+import tempfile
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
+
+
+def sweep_old_streamlit_tempdirs(prefix: str, max_age_seconds: float = 3600) -> int:
+    """Remove `tempfile.gettempdir()/<prefix>*` directories older than the cutoff.
+
+    Streamlit workflow pages mkdtemp a new `streamlit_<workflow>_<rand>` dir on
+    every Run so the just-produced images stay browsable until the user clicks
+    Run again. Without cleanup that means each click leaks a directory of
+    activations/images/.hydra metadata.
+
+    Call this at the top of each workflow page so old runs are pruned without
+    touching the in-flight one. Returns the count removed (best-effort —
+    failures swallowed since cleanup is opportunistic).
+    """
+    if not prefix:
+        return 0
+    root = Path(tempfile.gettempdir())
+    cutoff = time.time() - max_age_seconds
+    removed = 0
+    try:
+        candidates = list(root.glob(f"{prefix}*"))
+    except OSError:
+        return 0
+    for path in candidates:
+        try:
+            if not path.is_dir():
+                continue
+            if path.stat().st_mtime >= cutoff:
+                continue
+            shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 @dataclass

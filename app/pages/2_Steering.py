@@ -31,12 +31,16 @@ from app.lib import (
     render_app_footer,
     render_run_label_sidebar,
     run_workflow,
+    sweep_old_streamlit_tempdirs,
 )
 from app.lib import (
     is_available as llm_is_available,
 )
 
 st.set_page_config(page_title="Steering • T2I-Interp", layout="wide")
+
+# Opportunistic cleanup of stale tempdirs from previous Run clicks.
+sweep_old_streamlit_tempdirs("streamlit_steer_")
 
 # ── Defaults + recipe-payload intake ─────────────────────────────────────────
 
@@ -345,15 +349,20 @@ train_steps = int(st.session_state["steer_train_steps"])
 goal = str(st.session_state["steer_goal"])
 
 
-def _build_overrides(out_dir: str) -> tuple[list[str], str | None]:
-    """Build Hydra overrides + write inline pairs JSON if needed.
+def _build_overrides(out_dir: str) -> tuple[list[str], str | None, str]:
+    """Build Hydra overrides + paths for the JSON files we will write.
 
-    Returns `(overrides, inline_pairs_file_path)` so the caller can preview
-    one and only materialise the JSON when actually running.
+    Returns `(overrides, inline_pairs_file_path_or_none, prompts_file_path)`.
+    The caller materialises the JSON files only when Run is actually clicked
+    so script reruns from widget changes don't litter tempdirs.
     """
     pairs_file: str | None = None
     if inline_pairs:
         pairs_file = os.path.join(out_dir, "inline_pairs.json")
+    # Prompts go through a JSON file rather than `prompts=[a, b]` on the CLI —
+    # Hydra splits list literals on commas and chokes on prompts containing
+    # commas or spaces (e.g. "a photo of a person, smiling").
+    prompts_file = os.path.join(out_dir, "prompts.json")
     ovs = [
         f"--config-name=steer/{steer_type}",
         f"device={device}",
@@ -361,7 +370,7 @@ def _build_overrides(out_dir: str) -> tuple[list[str], str | None]:
         f"alpha={alpha}",
         f"max_samples={max_samples}",
         f"train_steps={train_steps}",
-        f"prompts=[{','.join(prompts)}]",
+        f"+prompts_file={prompts_file}",
         f"save_dir={out_dir}/cache",
         f"output_dir={out_dir}",
         f"hydra.run.dir={out_dir}/.hydra",
@@ -371,14 +380,14 @@ def _build_overrides(out_dir: str) -> tuple[list[str], str | None]:
         ovs.append(f"model={preset}")
     if pairs_file:
         ovs.append(f"inline_pairs_file={pairs_file}")
-    return ovs, pairs_file
+    return ovs, pairs_file, prompts_file
 
 
 # ── Step 4: Run ──────────────────────────────────────────────────────────────
 
 # Show the CLI preview with a placeholder out_dir so we don't create a new
 # tempdir on every script rerun (only when Run is actually clicked).
-_preview_overrides, _ = _build_overrides("/tmp/streamlit_steer_<auto>")
+_preview_overrides, _, _ = _build_overrides("/tmp/streamlit_steer_<auto>")
 
 with st.container(border=True):
     st.markdown("### Step 4 · Run")
@@ -413,10 +422,12 @@ with st.container(border=True):
 
 if run_clicked:
     out_dir = tempfile.mkdtemp(prefix="streamlit_steer_")
-    overrides, pairs_file = _build_overrides(out_dir)
+    overrides, pairs_file, prompts_file = _build_overrides(out_dir)
     if pairs_file:
         with open(pairs_file, "w") as f:
             json.dump(inline_pairs, f)
+    with open(prompts_file, "w") as f:
+        json.dump(prompts, f)
 
     with st.status(f"Training {steer_type.upper()} and generating...", expanded=True) as status:
         line_box = st.empty()

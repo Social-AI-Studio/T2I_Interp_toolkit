@@ -18,9 +18,13 @@ from app.lib import (
     render_run_label_sidebar,
     run_workflow,
     scenario_radio,
+    sweep_old_streamlit_tempdirs,
 )
 
 st.set_page_config(page_title="SAE • T2I-Interp", layout="wide")
+
+# Opportunistic cleanup of stale tempdirs from previous Run clicks.
+sweep_old_streamlit_tempdirs("streamlit_sae_")
 
 # ── Defaults + recipe-payload intake ─────────────────────────────────────────
 _SAE_DEFAULTS: dict[str, object] = {
@@ -97,14 +101,16 @@ st.caption(
     "strengths."
 )
 
-# Surface missing checkpoints early.
-ckpt_dir = Path("./sdxl-unbox/checkpoints")
+# Surface missing checkpoints early. Resolve relative to the repo root rather
+# than the launch CWD so `streamlit run app/Home.py` works from any directory.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+ckpt_dir = _REPO_ROOT / "sdxl-unbox" / "checkpoints"
 if not ckpt_dir.exists():
     st.error(
-        "Missing SAE checkpoints at `./sdxl-unbox/checkpoints/`. Run "
-        "`t2i-migrate-sae --checkpoint-dir ./sdxl-unbox/checkpoints` after "
-        "downloading from `anonymous-author-129/sdxl-unbox-saes` on "
-        "HuggingFace. Or follow `notebooks/sae.ipynb` for the full setup."
+        f"Missing SAE checkpoints at `{ckpt_dir}`. Run "
+        f"`t2i-migrate-sae --checkpoint-dir {ckpt_dir}` after downloading "
+        "from `anonymous-author-129/sdxl-unbox-saes` on HuggingFace. Or "
+        "follow `notebooks/sae.ipynb` for the full setup."
     )
     st.stop()
 

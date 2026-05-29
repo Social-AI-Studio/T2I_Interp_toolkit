@@ -87,8 +87,10 @@ def detect_concept(pairs: list[dict[str, str]]) -> str | None:
     every pair, what's left is the concept the steering direction will encode.
 
     Returns the detected concept as a lowercase string, or None when the
-    pairs share no common discriminating token (e.g. an empty list, or
-    deliberately diverse pairs that don't share one concept).
+    pairs share no common discriminating token OR when the intersection is
+    too ambiguous (>2 tokens) — returning a wrong multi-word compound is
+    worse than returning None and letting the UI fall back to a generic
+    label.
     """
     if not pairs:
         return None
@@ -103,8 +105,16 @@ def detect_concept(pairs: list[dict[str, str]]) -> str | None:
             common &= diff
     if not common:
         return None
-    # Sort for stable output, drop empty strings from stripping artifacts.
-    return " ".join(sorted(t for t in common if t)) or None
+    candidates = sorted(t for t in common if t)
+    if not candidates:
+        return None
+    # Two-token compounds like "black businessman" are sometimes the real
+    # concept (e.g. a specific phrase), but more often they signal that the
+    # pairs aren't isolating one variable. Cap at 2 tokens; above that, the
+    # signal is too noisy to label confidently.
+    if len(candidates) > 2:
+        return None
+    return " ".join(candidates)
 
 
 def has_unresolved_placeholders(raw: str) -> list[str]:
