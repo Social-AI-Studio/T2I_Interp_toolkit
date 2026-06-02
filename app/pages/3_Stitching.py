@@ -17,6 +17,7 @@ from app.lib import (
     model_preset_picker,
     parse_pipe_lines,
     render_app_footer,
+    render_metrics_panel,
     render_run_label_sidebar,
     render_wandb_panel,
     render_workflow_run,
@@ -409,18 +410,7 @@ if run_clicked:
     else:
         st.warning("No images produced. Check logs above.")
 
-    metrics = load_metrics(out_dir)
-    if metrics is not None:
-        with st.container(border=True):
-            st.markdown("##### Metrics")
-            if metrics:
-                with st.expander("Full JSON", expanded=False):
-                    st.json(metrics)
-            else:
-                st.info(
-                    "metrics.json is empty — CLIP / FID / LPIPS backends "
-                    "aren't installed. Run `uv sync --extra metrics` to enable."
-                )
+    render_metrics_panel(load_metrics(out_dir))
 
     render_wandb_panel(load_wandb_run(out_dir))
 

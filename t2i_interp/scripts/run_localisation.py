@@ -110,14 +110,11 @@ def main(cfg: DictConfig) -> None:
                 if hasattr(scorer, "score"):
                     scorers_dict[metric_name] = scorer
             except Exception as e:
-                # Hydra's "Error locating target" hides the real cause (usually
-                # `ModuleNotFoundError: 'lpips' / 'cleanfid' / 'open_clip'`).
-                # Surface the install hint so users don't grep for nonexistent
-                # `_target_` paths.
+                # Hydra's "Error locating target" hides the real cause.
+                # Surface enough info for diagnosis without bailing on the run.
                 print(
                     f"Failed to instantiate metric {metric_name}: {e}. "
-                    "Install the metric backends with `uv sync --extra metrics` "
-                    "or drop the entry from cfg.metrics."
+                    "Drop the entry from cfg.metrics if not needed."
                 )
 
     all_metric_results = {}

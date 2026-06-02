@@ -19,6 +19,7 @@ from app.lib.outputs import (
 from app.lib.pages import (
     apply_payload,
     render_app_footer,
+    render_metrics_panel,
     render_run_label_sidebar,
     render_wandb_panel,
     scenario_radio,
@@ -50,6 +51,7 @@ __all__ = [
     "pair_baseline_modified",
     "parse_pipe_lines",
     "render_app_footer",
+    "render_metrics_panel",
     "render_run_label_sidebar",
     "render_wandb_panel",
     "render_workflow_run",

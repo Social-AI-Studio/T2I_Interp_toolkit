@@ -114,6 +114,68 @@ def render_run_label_sidebar(*, key: str) -> None:
     )
 
 
+def render_metrics_panel(
+    metrics: dict[str, Any] | None,
+    *,
+    featured_prefixes: tuple[tuple[str, str], ...] = (
+        ("baseline/clip", "CLIP (baseline)"),
+        ("steered/clip", "CLIP (steered)"),
+        ("baseline/fid", "FID (baseline)"),
+        ("steered/fid", "FID (steered)"),
+        ("baseline/lpips", "LPIPS (baseline)"),
+        ("steered/lpips", "LPIPS (steered)"),
+    ),
+) -> None:
+    """Render the Metrics container — tile callouts for featured scalars,
+    JSON expander for everything else, info banner when empty.
+
+    Keys in `metrics.json` look like `baseline/clip/clip_score` — match by
+    prefix so per-scorer suffixes don't tie the UI to a specific module
+    path. List values (per-prompt scores) are averaged; NaN renders as "—".
+    """
+    if metrics is None:
+        return
+    import math
+
+    def _fmt(v):
+        if isinstance(v, list):
+            v = [x for x in v if isinstance(x, int | float) and not math.isnan(x)]
+            if not v:
+                return "—"
+            v = sum(v) / len(v)
+        if not isinstance(v, int | float) or math.isnan(v):
+            return "—"
+        return f"{v:.3f}"
+
+    with st.container(border=True):
+        st.markdown("##### Metrics")
+        if not metrics:
+            st.info(
+                "metrics.json is empty — the workflow finished but no "
+                "per-spec scorer returned a value. Check the run logs above "
+                "for per-metric failure messages."
+            )
+            return
+        shown: list[tuple[str, str]] = []
+        for prefix, label in featured_prefixes:
+            match = next((v for k, v in metrics.items() if k.startswith(prefix + "/")), None)
+            if match is None and prefix in metrics:
+                match = metrics[prefix]
+            if match is not None:
+                shown.append((label, _fmt(match)))
+        if shown:
+            st.caption(
+                "Lower FID/LPIPS = closer to baseline distribution. Higher "
+                "CLIP = better prompt alignment. Paper Figure 2 reports "
+                "these three."
+            )
+            cols = st.columns(min(len(shown), 3))
+            for i, (label, value) in enumerate(shown):
+                cols[i % len(cols)].metric(label, value)
+        with st.expander("All metrics (full JSON)", expanded=False):
+            st.json(metrics)
+
+
 def render_wandb_panel(wandb_run: dict[str, Any] | None, *, embed: bool = True) -> None:
     """Render a W&B run panel: "View on W&B" link + optional iframe embed.
 

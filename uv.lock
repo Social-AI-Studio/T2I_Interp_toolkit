@@ -4953,16 +4953,19 @@ source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "anthropic" },
+    { name = "clean-fid" },
     { name = "datasets" },
     { name = "diffusers" },
     { name = "einops" },
     { name = "hydra-core" },
     { name = "loguru" },
+    { name = "lpips" },
     { name = "matplotlib" },
     { name = "nnsight" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "omegaconf" },
+    { name = "open-clip-torch" },
     { name = "pandas" },
     { name = "pillow" },
     { name = "pydantic" },
@@ -4988,11 +4991,6 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
 ]
-metrics = [
-    { name = "clean-fid" },
-    { name = "lpips" },
-    { name = "open-clip-torch" },
-]
 notebook = [
     { name = "ipywidgets" },
     { name = "jupyter" },
@@ -5012,7 +5010,7 @@ dev = [
 requires-dist = [
     { name = "accelerate", specifier = ">=1.10.0" },
     { name = "anthropic", specifier = ">=0.104.1" },
-    { name = "clean-fid", marker = "extra == 'metrics'", specifier = ">=0.1.35" },
+    { name = "clean-fid", specifier = ">=0.1.35" },
     { name = "datasets", specifier = ">=2.14.0" },
     { name = "diffusers", specifier = ">=0.34.0" },
     { name = "einops", specifier = ">=0.8.2" },
@@ -5021,7 +5019,7 @@ requires-dist = [
     { name = "jupyter", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "jupyter", marker = "extra == 'notebook'", specifier = ">=1.0.0" },
     { name = "loguru", specifier = ">=0.7.0" },
-    { name = "lpips", marker = "extra == 'metrics'", specifier = ">=0.1.4" },
+    { name = "lpips", specifier = ">=0.1.4" },
     { name = "matplotlib", specifier = ">=3.7.0" },
     { name = "matplotlib", marker = "extra == 'notebook'", specifier = ">=3.7.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.5.0" },
@@ -5031,7 +5029,7 @@ requires-dist = [
     { name = "nnsight", specifier = ">=0.7.0" },
     { name = "numpy", specifier = ">=1.24.0" },
     { name = "omegaconf", specifier = ">=2.3.0" },
-    { name = "open-clip-torch", marker = "extra == 'metrics'", specifier = ">=2.24.0" },
+    { name = "open-clip-torch", specifier = ">=2.24.0" },
     { name = "pandas", specifier = ">=2.3.3" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.5.0" },
@@ -5049,7 +5047,7 @@ requires-dist = [
     { name = "webdataset", specifier = ">=1.0.2" },
     { name = "zstandard", specifier = ">=0.21.0" },
 ]
-provides-extras = ["dev", "ray", "notebook", "metrics"]
+provides-extras = ["dev", "ray", "notebook"]
 
 [package.metadata.requires-dev]
 dev = [
