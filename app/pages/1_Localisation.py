@@ -11,6 +11,7 @@ from app.lib import (
     collect_images,
     device_dtype_picker,
     load_fingerprint,
+    load_metrics,
     load_wandb_run,
     model_preset_picker,
     pair_baseline_modified,
@@ -371,6 +372,19 @@ if run_clicked:
             )
     else:
         st.warning("No images produced. Check logs above.")
+
+    metrics = load_metrics(out_dir)
+    if metrics is not None:
+        with st.container(border=True):
+            st.markdown("##### Metrics")
+            if metrics:
+                with st.expander("Full JSON", expanded=False):
+                    st.json(metrics)
+            else:
+                st.info(
+                    "metrics.json is empty — CLIP / FID / LPIPS backends "
+                    "aren't installed. Run `uv sync --extra metrics` to enable."
+                )
 
     render_wandb_panel(load_wandb_run(out_dir))
 
