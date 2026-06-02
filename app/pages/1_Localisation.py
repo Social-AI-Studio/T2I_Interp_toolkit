@@ -20,6 +20,7 @@ from app.lib import (
     render_workflow_run,
     scenario_radio,
     sweep_old_streamlit_tempdirs,
+    wandb_picker,
 )
 
 st.set_page_config(page_title="Localisation • T2I-Interp", layout="wide")
@@ -241,6 +242,7 @@ preset = model_preset_picker(
     options=("sd15", "sdxl_turbo"),
     key="loc_model_preset",
 )
+wandb_project, wandb_entity = wandb_picker()
 render_run_label_sidebar(key="loc_goal")
 
 # Pull session-state values for the override list
@@ -266,8 +268,13 @@ def _build_overrides(out_dir: str) -> list[str]:
         f"seed={seed}",
         f"output_dir={out_dir}",
         f"hydra.run.dir={out_dir}/.hydra",
-        "wandb.project=null",
     ]
+    if wandb_project:
+        ovs.append(f"wandb.project={wandb_project}")
+        if wandb_entity:
+            ovs.append(f"wandb.entity={wandb_entity}")
+    else:
+        ovs.append("wandb.project=null")
     if preset:
         ovs.append(f"model={preset}")
     return ovs
@@ -309,8 +316,15 @@ if run_clicked:
 
     images = collect_images(out_dir)
     if images:
+        # run_localisation.py writes a matplotlib composite grid for each
+        # swept layer at `<layer[:80]>.png` — baseline + every modified head
+        # in one figure. It's a convenience summary, not a separate result;
+        # render it standalone above the per-head pairs so it doesn't appear
+        # paired against an identical baseline.
+        composites = [p for p in images if "__h" not in p.name and p.name != "baseline.png"]
+        per_head = [p for p in images if p not in composites]
         triples = pair_baseline_modified(
-            images,
+            per_head,
             modified_kinds=("modified", "head", "layer", "ablated"),
             label_prefix="head",
         )
@@ -330,6 +344,15 @@ if run_clicked:
                         st.image(str(modified), use_container_width=True)
                     else:
                         st.caption("(missing)")
+        if composites:
+            with st.container(border=True):
+                st.markdown("##### Composite sweep grid")
+                st.caption(
+                    "Side-by-side baseline + every per-head ablation for the "
+                    "selected layer. Same data as the per-head containers above."
+                )
+                for grid in composites:
+                    st.image(str(grid), caption=grid.stem, use_container_width=True)
 
         with st.expander("How to read these results", expanded=False):
             st.markdown(

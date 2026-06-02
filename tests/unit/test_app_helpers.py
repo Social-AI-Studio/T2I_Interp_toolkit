@@ -317,6 +317,39 @@ class TestPairBaselineModified:
         assert "stitched_xyz.png" in labels
         assert "report.png" in labels
 
+    def test_leftovers_pair_with_shared_baseline(self):
+        # When a shared `baseline.png` exists, leftover files (e.g. the
+        # matplotlib composite grid Localisation writes) get the shared
+        # baseline in their triple so the page doesn't render "(missing)".
+        imgs = self._paths(["baseline.png", "weird_composite.png"])
+        out = pair_baseline_modified(imgs, modified_kinds=("modified",), label_prefix="head")
+        leftover = [t for t in out if t[0] == "weird_composite.png"][0]
+        assert leftover[1] is not None
+        assert leftover[1].name == "baseline.png"
+        assert leftover[2].name == "weird_composite.png"
+
+    def test_localisation_head_suffix_recognised(self):
+        # Localisation writes `<layer>__h<idx>.png` for each per-head
+        # ablation. The pairer should match the head index via the
+        # `__h<idx>` suffix and pair each with the shared baseline.
+        imgs = self._paths(
+            [
+                "baseline.png",
+                "down_blocks_1_attentions_0_transformer_blocks_0_attn2_out__h0.png",
+                "down_blocks_1_attentions_0_transformer_blocks_0_attn2_out__h3.png",
+            ]
+        )
+        out = pair_baseline_modified(
+            imgs, modified_kinds=("modified", "head", "layer", "ablated"), label_prefix="head"
+        )
+        labels = [t[0] for t in out]
+        assert "head 0" in labels
+        assert "head 3" in labels
+        # Every triple gets the shared baseline filled in.
+        for _label, baseline, modified in out:
+            assert baseline is not None and baseline.name == "baseline.png"
+            assert modified is not None
+
     def test_case_insensitive_filenames(self):
         imgs = self._paths(["BASELINE_0.PNG", "Steered_0.png"])
         out = pair_baseline_modified(imgs, modified_kinds=("steered",), label_prefix="prompt")

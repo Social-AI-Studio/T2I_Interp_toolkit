@@ -20,6 +20,7 @@ from app.lib import (
     render_workflow_run,
     scenario_radio,
     sweep_old_streamlit_tempdirs,
+    wandb_picker,
 )
 
 st.set_page_config(page_title="SAE • T2I-Interp", layout="wide")
@@ -194,6 +195,7 @@ preset = model_preset_picker(
     default=str(st.session_state.get("sae_model_preset", "sdxl_turbo")),
     key="sae_model_preset",
 )
+wandb_project, wandb_entity = wandb_picker()
 render_run_label_sidebar(key="sae_goal")
 
 prompt = str(st.session_state["sae_prompt"])
@@ -219,8 +221,13 @@ def _build_overrides(out_dir: str) -> list[str]:
         f"n_top_features={n_top_features}",
         f"output_dir={out_dir}",
         f"hydra.run.dir={out_dir}/.hydra",
-        "wandb.project=null",
     ]
+    if wandb_project:
+        ovs.append(f"wandb.project={wandb_project}")
+        if wandb_entity:
+            ovs.append(f"wandb.entity={wandb_entity}")
+    else:
+        ovs.append("wandb.project=null")
     if preset:
         ovs.append(f"model={preset}")
     return ovs

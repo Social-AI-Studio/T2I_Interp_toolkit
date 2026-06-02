@@ -39,6 +39,47 @@ def device_dtype_picker(default_device: str | None = None) -> tuple[str, str]:
     return device, dtype
 
 
+def wandb_picker() -> tuple[str | None, str | None]:
+    """Sidebar widget: enable W&B logging from the playground.
+
+    The Streamlit pages historically forced `wandb.project=null` on every
+    Hydra override so the playground stayed offline by default. This widget
+    lets users opt in: a "Log to W&B" checkbox surfaces text inputs for
+    `project` and `entity` that get forwarded to the CLI. The new W&B run
+    panel in Results then renders the live dashboard link + iframe embed.
+
+    Returns `(project, entity)` — both None when the toggle is off, which
+    keeps the override list at `wandb.project=null` (existing behaviour).
+    """
+    st.sidebar.header("W&B logging")
+    enabled = st.sidebar.checkbox(
+        "Log this run to W&B",
+        value=False,
+        help=(
+            "When on, the CLI passes `wandb.project=<your project>` and an "
+            "active run URL is written to `wandb_run.json`. The Results "
+            "panel surfaces a 'View on W&B' link + an iframe embed of the "
+            "live dashboard (plots, tables, artifacts). You need to be "
+            "logged into W&B in this browser; run `wandb login` first."
+        ),
+    )
+    if not enabled:
+        return None, None
+    project = st.sidebar.text_input(
+        "wandb.project",
+        value=st.session_state.get("wandb_project", "t2i-interp"),
+        key="wandb_project",
+        help="The W&B project to log into.",
+    )
+    entity = st.sidebar.text_input(
+        "wandb.entity (optional)",
+        value=st.session_state.get("wandb_entity", ""),
+        key="wandb_entity",
+        help="Leave blank to use your `wandb login` default entity.",
+    )
+    return (project or None, entity or None)
+
+
 def model_preset_picker(
     default: str = "sdxl_turbo",
     options: tuple[str, ...] = ("sd15", "sdxl", "sdxl_turbo"),

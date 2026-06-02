@@ -50,13 +50,15 @@ def pair_baseline_modified(
     """Group output images into (label, baseline, modified) triples.
 
     Recognises filenames like `baseline_0.png`, `baseline.png`, `steered_0.png`,
-    `modified_5.png`, etc. The `baseline_<idx>` form pairs with the matching
-    `<kind>_<idx>` modified image. A single unindexed `baseline.png` is
-    treated as the shared baseline for every modified index (the
-    Localisation case, where one baseline is shared across head ablations).
+    `modified_5.png`, and Localisation's `<layer>__h<head>.png` head-ablation
+    pattern. The `baseline_<idx>` form pairs with the matching `<kind>_<idx>`
+    modified image. A single unindexed `baseline.png` is treated as the
+    shared baseline for every modified index AND for any leftover images
+    (Localisation runs a single baseline against many per-head modifications).
 
-    Anything that doesn't match either pattern is returned as a leftover
-    triple `(name, None, image)` so it still gets displayed.
+    Anything that doesn't match a known pattern still gets displayed — as a
+    leftover triple `(filename, shared_baseline_or_None, image)` so the user
+    sees the file rather than the page silently dropping it.
     """
     indexed_baselines: dict[str, Path] = {}
     shared_baseline: Path | None = None
@@ -65,6 +67,10 @@ def pair_baseline_modified(
 
     modified_alt = "|".join(re.escape(k) for k in modified_kinds)
     modified_re = re.compile(rf"(?:{modified_alt})_(\d+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
+    # Localisation writes per-head files as `<layer>__h<head>.png`. The
+    # double-underscore lets us recognise the head index without colliding
+    # with `_<idx>.png` filenames from other workflows.
+    head_suffix_re = re.compile(r"__h(\d+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
     indexed_baseline_re = re.compile(r"baseline_(\d+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
     bare_baseline_re = re.compile(r"baseline\.(?:png|jpg|jpeg)$", re.IGNORECASE)
 
@@ -75,6 +81,8 @@ def pair_baseline_modified(
         elif bare_baseline_re.search(name):
             shared_baseline = img
         elif m := modified_re.search(name):
+            modified[m.group(1)] = img
+        elif m := head_suffix_re.search(name):
             modified[m.group(1)] = img
         else:
             leftovers.append(img)
@@ -88,8 +96,12 @@ def pair_baseline_modified(
     # alone, still show it once so the user sees what they got.
     if not indices and shared_baseline is not None:
         out.append((f"{label_prefix} (baseline only)", shared_baseline, None))
+    # Leftovers (unrecognised filenames). When we have a shared baseline,
+    # pair them so the column doesn't read "(missing)". Important for
+    # Localisation's matplotlib composite grids and any future workflow that
+    # emits an image whose filename doesn't match a known pattern.
     for img in leftovers:
-        out.append((img.name, None, img))
+        out.append((img.name, shared_baseline, img))
     return out
 
 

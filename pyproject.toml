@@ -201,4 +201,5 @@ markers = [
 [dependency-groups]
 dev = [
     "nbstripout>=0.9.1",
+    "playwright>=1.60.0",
 ]

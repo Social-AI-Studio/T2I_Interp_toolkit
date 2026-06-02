@@ -22,6 +22,7 @@ from app.lib import (
     render_workflow_run,
     scenario_radio,
     sweep_old_streamlit_tempdirs,
+    wandb_picker,
 )
 from app.lib.prompts import STITCH_GENERIC_PROMPTS
 
@@ -254,6 +255,7 @@ st.sidebar.selectbox(
         "and apply a steering direction (the paper's MODE=steer)."
     ),
 )
+wandb_project, wandb_entity = wandb_picker()
 render_run_label_sidebar(key="stitch_goal")
 
 with st.container(border=True):
@@ -315,8 +317,13 @@ def _build_overrides(out_dir: str) -> tuple[list[str], str | None, str]:
         f"save_dir={out_dir}/cache",
         f"output_dir={out_dir}",
         f"hydra.run.dir={out_dir}/.hydra",
-        "wandb.project=null",
     ]
+    if wandb_project:
+        ovs.append(f"wandb.project={wandb_project}")
+        if wandb_entity:
+            ovs.append(f"wandb.entity={wandb_entity}")
+    else:
+        ovs.append("wandb.project=null")
     if preset:
         ovs.append(f"model={preset}")
     if pairs_file:
@@ -403,11 +410,17 @@ if run_clicked:
         st.warning("No images produced. Check logs above.")
 
     metrics = load_metrics(out_dir)
-    if metrics:
+    if metrics is not None:
         with st.container(border=True):
             st.markdown("##### Metrics")
-            with st.expander("Full JSON", expanded=False):
-                st.json(metrics)
+            if metrics:
+                with st.expander("Full JSON", expanded=False):
+                    st.json(metrics)
+            else:
+                st.info(
+                    "metrics.json is empty — CLIP / FID / LPIPS backends "
+                    "aren't installed. Run `uv sync --extra metrics` to enable."
+                )
 
     render_wandb_panel(load_wandb_run(out_dir))
 

@@ -33,6 +33,7 @@ from app.lib import (
     render_wandb_panel,
     render_workflow_run,
     sweep_old_streamlit_tempdirs,
+    wandb_picker,
 )
 from app.lib import (
     is_available as llm_is_available,
@@ -277,6 +278,7 @@ preset = model_preset_picker(
     default=str(st.session_state.get("steer_model_preset", "sdxl_turbo")),
     key="steer_model_preset",
 )
+wandb_project, wandb_entity = wandb_picker()
 render_run_label_sidebar(key="steer_goal")
 
 with st.container(border=True):
@@ -375,8 +377,13 @@ def _build_overrides(out_dir: str) -> tuple[list[str], str | None, str]:
         f"save_dir={out_dir}/cache",
         f"output_dir={out_dir}",
         f"hydra.run.dir={out_dir}/.hydra",
-        "wandb.project=null",
     ]
+    if wandb_project:
+        ovs.append(f"wandb.project={wandb_project}")
+        if wandb_entity:
+            ovs.append(f"wandb.entity={wandb_entity}")
+    else:
+        ovs.append("wandb.project=null")
     if preset:
         ovs.append(f"model={preset}")
     if pairs_file:
@@ -485,33 +492,41 @@ if run_clicked:
         st.warning("No images produced. Check logs above.")
 
     metrics = load_metrics(out_dir, include_prefix_siblings=True)
-    if metrics:
+    if metrics is not None:
         with st.container(border=True):
             st.markdown("##### Metrics")
-            st.caption(
-                "Computed automatically per spec. Lower FID/LPIPS = closer "
-                "to baseline distribution. Higher CLIP = better prompt "
-                "alignment. The paper's Figure 2 sweep uses these three."
-            )
-            # Surface the most commonly-watched scalar metrics as st.metric
-            # tiles; fall back to a JSON dump for everything else.
-            _featured = [
-                ("baseline/clip", "CLIP (baseline)"),
-                ("steered/clip", "CLIP (steered)"),
-                ("baseline/fid", "FID (baseline)"),
-                ("steered/fid", "FID (steered)"),
-                ("baseline/lpips", "LPIPS (baseline)"),
-                ("steered/lpips", "LPIPS (steered)"),
-            ]
-            _shown = [(k, label) for k, label in _featured if k in metrics]
-            if _shown:
-                cols = st.columns(min(len(_shown), 3))
-                for i, (k, label) in enumerate(_shown):
-                    v = metrics[k]
-                    formatted = f"{v:.3f}" if isinstance(v, int | float) else str(v)
-                    cols[i % len(cols)].metric(label, formatted)
-            with st.expander("All metrics (full JSON)", expanded=False):
-                st.json(metrics)
+            if metrics:
+                st.caption(
+                    "Computed automatically per spec. Lower FID/LPIPS = closer "
+                    "to baseline distribution. Higher CLIP = better prompt "
+                    "alignment. The paper's Figure 2 sweep uses these three."
+                )
+                # Surface the most commonly-watched scalar metrics as st.metric
+                # tiles; fall back to a JSON dump for everything else.
+                _featured = [
+                    ("baseline/clip", "CLIP (baseline)"),
+                    ("steered/clip", "CLIP (steered)"),
+                    ("baseline/fid", "FID (baseline)"),
+                    ("steered/fid", "FID (steered)"),
+                    ("baseline/lpips", "LPIPS (baseline)"),
+                    ("steered/lpips", "LPIPS (steered)"),
+                ]
+                _shown = [(k, label) for k, label in _featured if k in metrics]
+                if _shown:
+                    cols = st.columns(min(len(_shown), 3))
+                    for i, (k, label) in enumerate(_shown):
+                        v = metrics[k]
+                        formatted = f"{v:.3f}" if isinstance(v, int | float) else str(v)
+                        cols[i % len(cols)].metric(label, formatted)
+                with st.expander("All metrics (full JSON)", expanded=False):
+                    st.json(metrics)
+            else:
+                st.info(
+                    "metrics.json is empty — CLIP / FID / LPIPS backends "
+                    "aren't installed in this environment. Run "
+                    "`uv sync --extra metrics` to enable the per-spec "
+                    "scores the paper Figure 2 sweep reports."
+                )
 
     render_wandb_panel(load_wandb_run(out_dir, include_prefix_siblings=True))
 
