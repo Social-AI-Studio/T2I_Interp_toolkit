@@ -1,10 +1,16 @@
 """Unit tests for render_wandb_panel — the panel that surfaces a live W&B
-run's link button + iframe in the Streamlit Results section.
+run's link button in the Streamlit Results section.
 
-In-browser e2e can't drive these without a real wandb run + live login.
+In-browser e2e can't drive this without a real wandb run + live login.
 Here we use Streamlit's AppTest to render a tiny harness that calls
 render_wandb_panel directly with a fake wandb_run dict, then inspect the
 resulting widget tree.
+
+(An earlier version of this panel also embedded the live run dashboard
+via `st.components.v1.iframe(run.url)`. W&B sets `X-Frame-Options:
+SAMEORIGIN` and a CSP `frame-ancestors 'self'` on every run page, so the
+iframe never loaded from a Streamlit origin — it was silently dead UX.
+That branch was removed; the link button is the reliable path.)
 """
 
 from __future__ import annotations
@@ -21,19 +27,17 @@ import streamlit as st
 from app.lib import render_wandb_panel
 
 wandb_run = st.session_state.get("__wandb_run__", None)
-embed = st.session_state.get("__embed__", True)
-render_wandb_panel(wandb_run, embed=embed)
+render_wandb_panel(wandb_run)
 """
 
 
-def _run(wandb_run, *, embed=True) -> AppTest:
+def _run(wandb_run) -> AppTest:
     """Render the harness with a given wandb_run payload."""
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
         f.write(_HARNESS)
         path = f.name
     at = AppTest.from_file(path)
     at.session_state["__wandb_run__"] = wandb_run
-    at.session_state["__embed__"] = embed
     at.run()
     Path(path).unlink()
     return at
@@ -65,21 +69,22 @@ def test_panel_renders_link_button_and_metadata():
         "name": "spectacles-alpha=10",
         "id": "abc123",
     }
-    at = _run(payload, embed=True)
+    at = _run(payload)
     assert not at.exception
     body = "\n".join(m.value for m in at.markdown)
     assert "W&B run" in body
     assert "dream-reader" in body
     assert "spectacles-alpha=10" in body
-    # The link_button surfaces as one of LinkButton elements.
     link_buttons = at.get("link_button")
     assert len(link_buttons) >= 1
     assert any(payload["url"] in (lb.url or "") for lb in link_buttons)
 
 
-def test_panel_embed_off_skips_iframe():
-    """embed=False keeps the link but suppresses the iframe — useful when
-    the user wants a compact panel."""
+def test_panel_does_not_render_iframe_expander():
+    """W&B sets X-Frame-Options: SAMEORIGIN and CSP frame-ancestors 'self'
+    on every run page, so the iframe embed could never load from a
+    Streamlit origin. The expander was removed; the panel must never
+    render it again."""
     payload = {
         "url": "https://wandb.ai/alice/p/runs/abc123",
         "entity": "alice",
@@ -87,27 +92,10 @@ def test_panel_embed_off_skips_iframe():
         "name": "test",
         "id": "abc123",
     }
-    at = _run(payload, embed=False)
+    at = _run(payload)
     assert not at.exception
-    # link button still present
-    assert len(at.get("link_button")) >= 1
-    # No expander labeled "Embedded W&B view"
     expander_labels = [e.label for e in at.get("expander")]
     assert "Embedded W&B view" not in expander_labels
-
-
-def test_panel_embed_on_creates_expander():
-    payload = {
-        "url": "https://wandb.ai/alice/p/runs/abc123",
-        "entity": "alice",
-        "project": "p",
-        "name": "test",
-        "id": "abc123",
-    }
-    at = _run(payload, embed=True)
-    assert not at.exception
-    expander_labels = [e.label for e in at.get("expander")]
-    assert "Embedded W&B view" in expander_labels
 
 
 # ── Full chain: CLI → record_wandb_run → load_wandb_run → render_wandb_panel ──
@@ -212,10 +200,8 @@ def test_full_chain_with_simulated_wandb_init(tmp_path, monkeypatch):
     assert payload is not None
 
     # And the panel renders the live link.
-    at = _run(payload, embed=True)
+    at = _run(payload)
     assert not at.exception
     link_buttons = at.get("link_button")
     assert len(link_buttons) >= 1
     assert link_buttons[0].url == live_run.url
-    # The expander for the iframe embed is present.
-    assert "Embedded W&B view" in [e.label for e in at.get("expander")]

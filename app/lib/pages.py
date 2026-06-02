@@ -176,13 +176,18 @@ def render_metrics_panel(
             st.json(metrics)
 
 
-def render_wandb_panel(wandb_run: dict[str, Any] | None, *, embed: bool = True) -> None:
-    """Render a W&B run panel: "View on W&B" link + optional iframe embed.
+def render_wandb_panel(wandb_run: dict[str, Any] | None) -> None:
+    """Render a W&B run panel: project + run-name metadata + an "Open in W&B"
+    link button.
 
-    `wandb_run` is the payload loaded by `outputs.load_wandb_run` (None when
-    wandb wasn't enabled for the run). The iframe shows the live wandb run
-    dashboard, which includes the charts/tables the workflow logged (image
-    panels, CLIP/FID/LPIPS line plots, fingerprint artifact).
+    `wandb_run` is the payload `outputs.load_wandb_run` returns (None when
+    wandb wasn't enabled for the run). An earlier version also embedded the
+    live run dashboard via `st.components.v1.iframe(run.url)` — that was
+    silently dead UX. W&B sets `X-Frame-Options: SAMEORIGIN` and a CSP
+    `frame-ancestors 'self'` on every run page, so the iframe never
+    actually loaded from a Streamlit origin. The link button is the
+    reliable path; the metric tiles in the Metrics panel already surface
+    the values the workflow logged via `wandb.log(...)`.
     """
     if not wandb_run:
         return
@@ -198,21 +203,18 @@ def render_wandb_panel(wandb_run: dict[str, Any] | None, *, embed: bool = True) 
             st.markdown(f"**Run name:** `{label}`")
         with cols[1]:
             st.link_button(
-                "Open in W&B",
+                "Open in W&B ↗",
                 url,
                 use_container_width=True,
-                help="Live W&B dashboard with plots, tables, and artifacts.",
+                help="Opens the live W&B dashboard with plots, tables, "
+                "media panels, and the fingerprint artifact.",
             )
-        if embed:
-            # The wandb run page is iframe-friendly. `?workspace=user-` keeps
-            # it private to the viewer's account.
-            embed_url = url.rstrip("/") + "/workspace?workspace=user-"
-            with st.expander("Embedded W&B view", expanded=False):
-                st.caption(
-                    "Iframe of the live run dashboard. Requires you to be "
-                    "signed into W&B in this browser."
-                )
-                st.components.v1.iframe(embed_url, height=700, scrolling=True)
+        st.caption(
+            "Per-step charts and per-image media panels live on W&B "
+            "itself — W&B blocks iframe embedding, so use the button "
+            "above. The Metrics panel right below surfaces the final "
+            "scalar values from this run."
+        )
 
 
 def render_app_footer() -> None:
