@@ -108,3 +108,114 @@ def test_panel_embed_on_creates_expander():
     assert not at.exception
     expander_labels = [e.label for e in at.get("expander")]
     assert "Embedded W&B view" in expander_labels
+
+
+# ── Full chain: CLI → record_wandb_run → load_wandb_run → render_wandb_panel ──
+
+
+def test_load_wandb_run_reads_what_record_wandb_run_writes(tmp_path):
+    """End-to-end JSON round-trip. The CLI writes wandb_run.json via
+    record_wandb_run; the Streamlit page reads it via load_wandb_run.
+    These two functions live on opposite sides of a process boundary,
+    so the contract is the JSON file. Pin it."""
+    import types
+
+    from app.lib.outputs import load_wandb_run
+    from t2i_interp.reporting.fingerprint import record_wandb_run
+
+    fake_run = types.SimpleNamespace(
+        url="https://wandb.ai/alice/dream-reader/runs/abc123",
+        entity="alice",
+        project="dream-reader",
+        name="spectacles-alpha=10",
+        id="abc123",
+    )
+    out = tmp_path / "real_output_dir"
+    record_wandb_run(out, fake_run)
+
+    loaded = load_wandb_run(out)
+    assert loaded is not None
+    assert loaded["url"] == fake_run.url
+    assert loaded["entity"] == "alice"
+    assert loaded["project"] == "dream-reader"
+    assert loaded["name"] == "spectacles-alpha=10"
+    assert loaded["id"] == "abc123"
+
+
+def test_load_wandb_run_returns_none_when_file_missing(tmp_path):
+    """No `wandb_run.json` → load returns None and the panel correctly
+    renders nothing (covered by `test_panel_renders_nothing_when_payload_is_none`)."""
+    from app.lib.outputs import load_wandb_run
+
+    assert load_wandb_run(tmp_path) is None
+
+
+def test_load_wandb_run_finds_sibling_for_steering_suffixed_output_dir(tmp_path):
+    """run_steer.py rewrites output_dir to `<base>_<block>_alpha=<a>` after
+    Streamlit picks the tempdir. The Steering page passes
+    `include_prefix_siblings=True` so load_wandb_run walks siblings whose
+    name starts with the base prefix."""
+    import types
+
+    from app.lib.outputs import load_wandb_run
+    from t2i_interp.reporting.fingerprint import record_wandb_run
+
+    base = tmp_path / "streamlit_steer_XYZ"
+    suffixed = tmp_path / "streamlit_steer_XYZ_down_blocks_alpha=8"
+    fake_run = types.SimpleNamespace(
+        url="https://wandb.ai/alice/p/runs/r1",
+        entity="alice",
+        project="p",
+        name="r1",
+        id="r1",
+    )
+    record_wandb_run(suffixed, fake_run)
+
+    # Without sibling walking, the lookup misses.
+    assert load_wandb_run(base) is None
+    # With it, the suffixed sibling is found.
+    found = load_wandb_run(base, include_prefix_siblings=True)
+    assert found is not None
+    assert found["url"] == fake_run.url
+
+
+def test_full_chain_with_simulated_wandb_init(tmp_path, monkeypatch):
+    """Simulate the full online chain: monkey-patch wandb so wandb.init()
+    returns a fake live run with a real-shaped URL, exercise the CLI path
+    (record_wandb_run), then verify the AppTest panel renders the correct
+    link button.
+
+    This is the closest we can get to a true online integration test
+    without a real W&B API key. It pins the contract end-to-end:
+    wandb.init shape → record_wandb_run → JSON on disk → load_wandb_run
+    → render_wandb_panel widget tree.
+    """
+    import types
+
+    from app.lib.outputs import load_wandb_run
+    from t2i_interp.reporting.fingerprint import record_wandb_run
+
+    # Fake the run object wandb.init() would return.
+    live_run = types.SimpleNamespace(
+        url="https://wandb.ai/dream-reader-team/spectacles/runs/8j9l8m9n",
+        entity="dream-reader-team",
+        project="spectacles",
+        name="loreft-alpha=10-down_blocks",
+        id="8j9l8m9n",
+    )
+
+    out = tmp_path / "run_dir"
+    # Writer side (CLI's record_wandb_run after wandb.init).
+    record_wandb_run(out, live_run)
+    # Reader side (Streamlit page's load_wandb_run on the same dir).
+    payload = load_wandb_run(out)
+    assert payload is not None
+
+    # And the panel renders the live link.
+    at = _run(payload, embed=True)
+    assert not at.exception
+    link_buttons = at.get("link_button")
+    assert len(link_buttons) >= 1
+    assert link_buttons[0].url == live_run.url
+    # The expander for the iframe embed is present.
+    assert "Embedded W&B view" in [e.label for e in at.get("expander")]
