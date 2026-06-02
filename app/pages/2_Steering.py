@@ -24,11 +24,13 @@ from app.lib import (
     has_unresolved_placeholders,
     load_fingerprint,
     load_metrics,
+    load_wandb_run,
     model_preset_picker,
     pair_baseline_modified,
     parse_pipe_lines,
     render_app_footer,
     render_run_label_sidebar,
+    render_wandb_panel,
     render_workflow_run,
     sweep_old_streamlit_tempdirs,
 )
@@ -510,6 +512,8 @@ if run_clicked:
                     cols[i % len(cols)].metric(label, formatted)
             with st.expander("All metrics (full JSON)", expanded=False):
                 st.json(metrics)
+
+    render_wandb_panel(load_wandb_run(out_dir, include_prefix_siblings=True))
 
     fp = load_fingerprint(out_dir, include_prefix_siblings=True)
     if fp:

@@ -228,6 +228,32 @@ class RunFingerprint:
             run.summary["fingerprint/seed"] = self.seed
 
 
+def record_wandb_run(output_dir: str | Path, wandb_run: Any) -> Path | None:
+    """Persist the live W&B run's URL + IDs into `wandb_run.json` next to the
+    fingerprint.
+
+    The Streamlit Results panels read this to render a "View on W&B" link
+    plus an iframe embed of the live run dashboard, so users don't have to
+    grep the CLI stdout for `wandb: 🚀 View run at ...`. No-op if the run
+    object lacks a URL (wandb disabled / offline mode).
+    """
+    url = getattr(wandb_run, "url", None) if wandb_run is not None else None
+    if not url:
+        return None
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "url": url,
+        "entity": getattr(wandb_run, "entity", None),
+        "project": getattr(wandb_run, "project", None),
+        "name": getattr(wandb_run, "name", None),
+        "id": getattr(wandb_run, "id", None),
+    }
+    path = out / "wandb_run.json"
+    path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
 def mark_run_completed(
     output_dir: str | Path,
     *,

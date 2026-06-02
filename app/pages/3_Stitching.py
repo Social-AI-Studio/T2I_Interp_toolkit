@@ -13,10 +13,12 @@ from app.lib import (
     device_dtype_picker,
     load_fingerprint,
     load_metrics,
+    load_wandb_run,
     model_preset_picker,
     parse_pipe_lines,
     render_app_footer,
     render_run_label_sidebar,
+    render_wandb_panel,
     render_workflow_run,
     scenario_radio,
     sweep_old_streamlit_tempdirs,
@@ -406,6 +408,8 @@ if run_clicked:
             st.markdown("##### Metrics")
             with st.expander("Full JSON", expanded=False):
                 st.json(metrics)
+
+    render_wandb_panel(load_wandb_run(out_dir))
 
     fp = load_fingerprint(out_dir)
     if fp:

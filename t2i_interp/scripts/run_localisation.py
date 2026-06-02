@@ -28,6 +28,7 @@ def main(cfg: DictConfig) -> None:
     from t2i_interp.reporting.fingerprint import (
         RunFingerprint,
         mark_run_completed,
+        record_wandb_run,
         seed_everything,
     )
     from t2i_interp.t2i import T2IModel
@@ -71,6 +72,7 @@ def main(cfg: DictConfig) -> None:
     print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
     if run is not None:
         fingerprint.log_to_wandb(run)
+        record_wandb_run(cfg.output_dir, run)
 
     # 1. Model
     model = T2IModel(
@@ -108,7 +110,15 @@ def main(cfg: DictConfig) -> None:
                 if hasattr(scorer, "score"):
                     scorers_dict[metric_name] = scorer
             except Exception as e:
-                print(f"Failed to instantiate metric {metric_name}: {e}")
+                # Hydra's "Error locating target" hides the real cause (usually
+                # `ModuleNotFoundError: 'lpips' / 'cleanfid' / 'open_clip'`).
+                # Surface the install hint so users don't grep for nonexistent
+                # `_target_` paths.
+                print(
+                    f"Failed to instantiate metric {metric_name}: {e}. "
+                    "Install the metric backends with `uv sync --extra metrics` "
+                    "or drop the entry from cfg.metrics."
+                )
 
     all_metric_results = {}
 

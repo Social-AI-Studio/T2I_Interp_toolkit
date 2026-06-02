@@ -114,6 +114,45 @@ def render_run_label_sidebar(*, key: str) -> None:
     )
 
 
+def render_wandb_panel(wandb_run: dict[str, Any] | None, *, embed: bool = True) -> None:
+    """Render a W&B run panel: "View on W&B" link + optional iframe embed.
+
+    `wandb_run` is the payload loaded by `outputs.load_wandb_run` (None when
+    wandb wasn't enabled for the run). The iframe shows the live wandb run
+    dashboard, which includes the charts/tables the workflow logged (image
+    panels, CLIP/FID/LPIPS line plots, fingerprint artifact).
+    """
+    if not wandb_run:
+        return
+    url = wandb_run.get("url")
+    if not url:
+        return
+    with st.container(border=True):
+        st.markdown("##### W&B run")
+        label = wandb_run.get("name") or wandb_run.get("id") or "Open in W&B"
+        cols = st.columns([3, 1])
+        with cols[0]:
+            st.markdown(f"**Project:** `{wandb_run.get('project', '?')}`")
+            st.markdown(f"**Run name:** `{label}`")
+        with cols[1]:
+            st.link_button(
+                "Open in W&B",
+                url,
+                use_container_width=True,
+                help="Live W&B dashboard with plots, tables, and artifacts.",
+            )
+        if embed:
+            # The wandb run page is iframe-friendly. `?workspace=user-` keeps
+            # it private to the viewer's account.
+            embed_url = url.rstrip("/") + "/workspace?workspace=user-"
+            with st.expander("Embedded W&B view", expanded=False):
+                st.caption(
+                    "Iframe of the live run dashboard. Requires you to be "
+                    "signed into W&B in this browser."
+                )
+                st.components.v1.iframe(embed_url, height=700, scrolling=True)
+
+
 def render_app_footer() -> None:
     """Sidebar footer shared by every page. Right now: a Clear cache button.
 

@@ -23,6 +23,7 @@ def main(cfg: DictConfig) -> None:
     from t2i_interp.reporting.fingerprint import (
         RunFingerprint,
         mark_run_completed,
+        record_wandb_run,
         seed_everything,
     )
     from t2i_interp.t2i import T2IModel
@@ -63,6 +64,7 @@ def main(cfg: DictConfig) -> None:
     print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
     if run is not None:
         fingerprint.log_to_wandb(run)
+        record_wandb_run(cfg.output_dir, run)
 
     # 1. Model
     model = T2IModel(

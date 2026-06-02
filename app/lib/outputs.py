@@ -121,6 +121,36 @@ def load_fingerprint(
         return None
 
 
+def load_wandb_run(
+    dir_: str | Path, *, include_prefix_siblings: bool = False
+) -> dict[str, Any] | None:
+    """Load `wandb_run.json` written by the CLI when wandb is enabled.
+
+    Same prefix-sibling treatment as load_fingerprint / load_metrics so the
+    Steering page (which rewrites output_dir to `<base>_<block>_alpha=<a>`)
+    can still find the file. Returns None when wandb wasn't enabled or the
+    file isn't present.
+    """
+    d = Path(dir_)
+    candidates: list[Path] = []
+    if d.exists():
+        candidates.extend(d.rglob("wandb_run.json"))
+    if include_prefix_siblings and d.parent.exists():
+        prefix = d.name
+        for sibling in d.parent.iterdir():
+            if sibling == d:
+                continue
+            if sibling.is_dir() and sibling.name.startswith(prefix):
+                candidates.extend(sibling.rglob("wandb_run.json"))
+    candidates.sort()
+    if not candidates:
+        return None
+    try:
+        return json.loads(candidates[0].read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def load_metrics(
     dir_: str | Path, *, include_prefix_siblings: bool = False
 ) -> dict[str, Any] | None:

@@ -68,6 +68,17 @@ notebook = [
     "ipywidgets>=8.0.0",
     "matplotlib>=3.7.0",
 ]
+# `metrics` enables CLIP / FID / LPIPS scoring during steer / stitch / sae /
+# localisation runs. Default-on in every workflow YAML's `metrics:` block, but
+# the model weights are large enough that we keep them opt-in. Install with
+# `uv sync --extra metrics` (or include in `all`) before relying on those
+# fields in metrics.json — without the extra the workflows still run but the
+# scores get logged as "Failed to instantiate metric".
+metrics = [
+    "open-clip-torch>=2.24.0",
+    "lpips>=0.1.4",
+    "clean-fid>=0.1.35",
+]
 
 [project.scripts]
 t2i              = "t2i_interp.cli:main"

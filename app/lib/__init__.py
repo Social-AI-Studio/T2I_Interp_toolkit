@@ -12,6 +12,7 @@ from app.lib.outputs import (
     collect_images,
     load_fingerprint,
     load_metrics,
+    load_wandb_run,
     pair_baseline_modified,
     scan_fingerprints,
 )
@@ -19,6 +20,7 @@ from app.lib.pages import (
     apply_payload,
     render_app_footer,
     render_run_label_sidebar,
+    render_wandb_panel,
     scenario_radio,
 )
 from app.lib.parsing import detect_concept, has_unresolved_placeholders, parse_pipe_lines
@@ -43,11 +45,13 @@ __all__ = [
     "is_available",
     "load_fingerprint",
     "load_metrics",
+    "load_wandb_run",
     "model_preset_picker",
     "pair_baseline_modified",
     "parse_pipe_lines",
     "render_app_footer",
     "render_run_label_sidebar",
+    "render_wandb_panel",
     "render_workflow_run",
     "run_workflow",
     "scan_fingerprints",
