@@ -12,6 +12,7 @@ from omegaconf import OmegaConf
 from t2i_interp.reporting.fingerprint import (
     RunFingerprint,
     mark_run_completed,
+    record_wandb_run,
     seed_everything,
 )
 
@@ -187,6 +188,47 @@ def test_hash_still_changes_when_logical_inputs_differ():
         _make_cfg(model_key="other/model"), workflow="steer", intervention=_intervention()
     )
     assert base.hash() != diff_model.hash()
+
+
+def test_record_wandb_run_writes_payload(tmp_path: Path):
+    """record_wandb_run persists the live W&B run's URL + IDs so the
+    Streamlit Results panel can render the link button + iframe embed."""
+    import types
+
+    fake_run = types.SimpleNamespace(
+        url="https://wandb.ai/alice/dream-reader/runs/abc123",
+        entity="alice",
+        project="dream-reader",
+        name="spectacles-alpha=10",
+        id="abc123",
+    )
+    out = tmp_path / "run_dir"
+    path = record_wandb_run(out, fake_run)
+    assert path == out / "wandb_run.json"
+    assert path.exists()
+    data = json.loads(path.read_text())
+    assert data["url"] == fake_run.url
+    assert data["entity"] == "alice"
+    assert data["project"] == "dream-reader"
+    assert data["name"] == "spectacles-alpha=10"
+    assert data["id"] == "abc123"
+
+
+def test_record_wandb_run_skips_when_url_missing(tmp_path: Path):
+    """W&B offline mode produces a run with url=None. record_wandb_run
+    should no-op rather than write a half-formed payload."""
+    import types
+
+    fake_run = types.SimpleNamespace(url=None, entity="alice", project="p", name=None, id="abc")
+    out = tmp_path / "run_dir"
+    path = record_wandb_run(out, fake_run)
+    assert path is None
+    assert not (out / "wandb_run.json").exists()
+
+
+def test_record_wandb_run_skips_when_run_is_none(tmp_path: Path):
+    """Cleanly no-ops on a None run (wandb disabled)."""
+    assert record_wandb_run(tmp_path, None) is None
 
 
 def test_mark_run_completed_writes_marker(tmp_path: Path):
