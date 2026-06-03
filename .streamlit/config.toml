@@ -1,0 +1,11 @@
+# Streamlit app config for the DreamReader demo.
+
+[client]
+# Hide the developer-mode toolbar items (Clear cache, Rerun, Settings) and
+# their keyboard shortcuts. The bare `C` shortcut was firing when users
+# tried to copy text out of the page. The cache-clear action is still
+# available from the sidebar via our own "Clear cache" button.
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false

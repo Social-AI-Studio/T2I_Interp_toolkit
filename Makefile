@@ -1,4 +1,4 @@
-.PHONY: help install install-prod sync clean test test-unit test-integration test-cov lint format check train infer steer stitch sae localise init pre-commit notebook notebook-strip
+.PHONY: help install install-prod sync clean test test-unit test-integration test-cov lint format check steer stitch sae localise init pre-commit notebook notebook-strip app
 
 # Default target
 help:
@@ -22,17 +22,18 @@ help:
 	@echo "  make test-integration Run integration tests only"
 	@echo "  make test-cov        Run tests with coverage report"
 	@echo ""
-	@echo "Experiments:"
-	@echo "  make train           Run training pipeline (pass TRAIN_ARGS=...)"
-	@echo "  make infer           Run inference pipeline (pass INFER_ARGS=...)"
-	@echo "  make steer           Run steering workflow"
-	@echo "  make stitch          Run stitching workflow"
-	@echo "  make sae             Run SAE workflow"
-	@echo "  make localise        Run localisation workflow"
+	@echo "Workflows (each forwards extra Hydra overrides):"
+	@echo "  make steer           Run steering workflow         (STEER_ARGS=...)"
+	@echo "  make stitch          Run stitching workflow        (STITCH_ARGS=...)"
+	@echo "  make sae             Run SAE workflow              (SAE_ARGS=...)"
+	@echo "  make localise        Run localisation workflow     (LOC_ARGS=...)"
 	@echo ""
 	@echo "Notebooks:"
 	@echo "  make notebook        Launch Jupyter Lab in notebooks/"
 	@echo "  make notebook-strip  Strip output cells from notebooks/*.ipynb"
+	@echo ""
+	@echo "Playground:"
+	@echo "  make app             Launch the Streamlit playground at localhost:8501"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean           Remove cache and build artifacts"
@@ -79,31 +80,24 @@ test-cov:
 	uv run pytest tests/ --cov=t2i_interp --cov=utils --cov-report=html --cov-report=term-missing
 	@echo "Coverage report generated in htmlcov/index.html"
 
-# Experiment targets
-DATASET ?= nirmalendu01/fairface-trainval-race-balanced-200
-ACCESSOR ?= model.unet_2.down_attn_blocks[0].self_attn_out
-RUN_NAME ?= test_run
-STEPS ?= 1000
-TRAIN_ARGS ?=
-INFER_ARGS ?=
-
-train:
-	python -m t2i_interp.scripts.train_pipeline $(TRAIN_ARGS)
-
-infer:
-	python -m t2i_interp.scripts.infer_pipeline $(INFER_ARGS)
+# Workflow targets — each forwards `*_ARGS` as Hydra overrides.
+# Example: make steer STEER_ARGS="model=sdxl_turbo alpha=20"
+STEER_ARGS ?=
+STITCH_ARGS ?=
+SAE_ARGS ?=
+LOC_ARGS ?=
 
 steer:
-	t2i-steer
+	t2i-steer $(STEER_ARGS)
 
 stitch:
-	t2i-stitch
+	t2i-stitch $(STITCH_ARGS)
 
 sae:
-	t2i-sae
+	t2i-sae $(SAE_ARGS)
 
 localise:
-	t2i-localise
+	t2i-localise $(LOC_ARGS)
 
 # Notebooks
 notebook:
@@ -112,6 +106,10 @@ notebook:
 notebook-strip:
 	uv run nbstripout notebooks/*.ipynb
 	@echo "Stripped output cells from all notebooks."
+
+# Streamlit playground (no-code GUI for the four workflows)
+app:
+	uv run streamlit run app/streamlit_app.py
 
 # Cleanup
 clean:

@@ -12,7 +12,7 @@ wandb:
   sweep_report_type: stitch_steer
 
 # Reproducibility
-seed: null   # int → torch.manual_seed; null → unseeded
+seed: 42   # int → torch.manual_seed; override with seed=null for unseeded runs
 
 # Model
 model_key: stable-diffusion-v1-5/stable-diffusion-v1-5
@@ -35,7 +35,12 @@ unet_b:
 device: cuda:0
 dtype: float16
 
-# Dataset
+# Dataset — set `inline_pairs_file` (JSON path) or `inline_pairs` (list of
+# strings, {a, b} dicts, or {pos, neg} dicts) to skip the HF dataset and
+# train the mapper on inline prompts. Plain strings feed the same prompt
+# into both models (typical for cross-model behaviour transfer).
+inline_pairs: null
+inline_pairs_file: null
 dataset_name: nirmalendu01/spectacles-bias-prompts
 prompt_col_a: base_prompt
 prompt_col_b: with_spectacles_prompt

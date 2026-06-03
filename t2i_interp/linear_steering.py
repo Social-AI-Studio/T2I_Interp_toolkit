@@ -392,29 +392,32 @@ class KSteer(Steer):
         probs = th.sigmoid(logits)
         return probs.cpu().numpy()
 
-    def steering_loss_uniform(
-        self,
-        logits: th.Tensor,
-        # *,
-        # target_idx: List[int] | th.Tensor,
-        # avoid_idx: List[int] | th.Tensor,
-    ) -> th.Tensor:
-        loss = 0
-        mean_logits = th.mean(logits, dim=1)
+    def steering_loss_uniform(self, logits: th.Tensor) -> th.Tensor:
+        """Pull every class's mean logit toward the overall mean (uniform target).
 
-        target_indices = [i for i, logits in enumerate(logits) if logits[:, i].mean() < mean_logits]
-        avoid_indices = [i for i, logits in enumerate(logits) if logits[:, i].mean() > mean_logits]
+        For each class i, target it if its current batch-mean logit is below
+        the across-class mean (push it up), avoid it if above (push it down).
+        Net effect: equalise class probabilities — useful for debias-style
+        applications where the goal is a uniform attribute distribution.
 
-        if target_indices:
-            target_logits = logits[:, target_indices]
-            # Negative because we want to maximize these logits (gradient descent will minimize)
-            loss = loss - target_logits.mean()
+        Previous implementation reused `logits` as the loop variable AND
+        compared a per-class scalar against a per-row tensor (`mean_logits`
+        had shape (B,)), so the comparison was broadcast in a way that
+        always selected nothing or everything depending on batch size.
+        """
+        if logits.ndim > 2:
+            logits = logits.reshape(-1, logits.shape[-1])
 
-        if avoid_indices:
-            avoid_logits = logits[:, avoid_indices]
-            # Positive because we want to minimize these logits
-            loss = loss + avoid_logits.mean()
+        per_class_mean = logits.mean(dim=0)  # shape (C,)
+        overall_mean = per_class_mean.mean()  # scalar
+        target_mask = per_class_mean < overall_mean
+        avoid_mask = per_class_mean > overall_mean
 
+        loss = logits.new_zeros(())
+        if target_mask.any():
+            loss = loss - logits[:, target_mask].mean()
+        if avoid_mask.any():
+            loss = loss + logits[:, avoid_mask].mean()
         return loss
 
     def compute_steering_loss(
@@ -465,9 +468,9 @@ class KSteer(Steer):
         if not hasattr(self, "classifier") and mapper is not None:
             self.classifier = mapper
 
-        assert hasattr(
-            self, "classifier"
-        ), "Classifier not found. Please fit the model or provide a classifier_path."
+        assert hasattr(self, "classifier"), (
+            "Classifier not found. Please fit the model or provide a classifier_path."
+        )
 
         if avoid_idx is None:
             avoid_idx = []
@@ -683,9 +686,9 @@ class CAA(Steer):
         pass
 
 
-class LoREEFT(Steer):
+class LoReFT(Steer):
     def __init__(self, model: T2IModel = None):
-        """Initialise LoREEFT steering mechanism.
+        """Initialise LoReFT steering mechanism.
 
         Args:
             model: :class:`T2IModel` instance (can also be provided in
@@ -874,7 +877,7 @@ class LoREEFT(Steer):
             loader.reset()
 
         yield Update(
-            info=f"Starting LoREEFT-UNet training: layer={layer_name}, d_model={true_d_model}, "
+            info=f"Starting LoReFT-UNet training: layer={layer_name}, d_model={true_d_model}, "
             f"rank={rank}, steps={num_steps}, val={'yes' if val_loader is not None else 'no'}"
         )
 
@@ -951,9 +954,9 @@ class LoREEFT(Steer):
         # restore best checkpoint
         if val_loader is not None:
             loreft.load_state_dict(best_loreft_sd)
-            yield Update(info=f"LoREEFT-UNet training done. Best val_loss={best_val:.6f}")
+            yield Update(info=f"LoReFT-UNet training done. Best val_loss={best_val:.6f}")
         else:
-            yield Update(info="LoREEFT-UNet training done.")
+            yield Update(info="LoReFT-UNet training done.")
         return loreft
 
     # ------------------------------------------------------------------
@@ -1123,9 +1126,9 @@ class LoREEFT(Steer):
             else getattr(self, "lorefts", {names[0]: getattr(self, "loreft", None)})
         )
 
-        assert (
-            _lorefts is not None and len(_lorefts) > 0
-        ), "No trained LoReFT module found. Call fit() first."
+        assert _lorefts is not None and len(_lorefts) > 0, (
+            "No trained LoReFT module found. Call fit() first."
+        )
 
         if "clip" in str(names[0]).lower():
             # Multi-layer CLIP not fully scaled, falls back to single layer parser
@@ -1185,3 +1188,8 @@ class LoREEFT(Steer):
 
     def eval(self, *args, **kwargs):
         pass
+
+
+# Historical typo retained as an alias so external scripts importing `LoREEFT`
+# keep working. New code should use LoReFT (matches the paper, README, configs).
+LoREEFT = LoReFT

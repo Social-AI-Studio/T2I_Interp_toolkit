@@ -41,10 +41,15 @@ def main(cfg: DictConfig) -> None:
 
     diffusers_logging.set_verbosity_error()
     transformers.logging.set_verbosity_error()
-    from datasets import load_dataset
+    from datasets import Dataset, DatasetDict, load_dataset
 
     from t2i_interp.mapper import MLPMapper
-    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
+    from t2i_interp.reporting.fingerprint import (
+        RunFingerprint,
+        mark_run_completed,
+        record_wandb_run,
+        seed_everything,
+    )
     from t2i_interp.stitch import Stitcher
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
@@ -61,6 +66,23 @@ def main(cfg: DictConfig) -> None:
 
     # Reproducibility: seed all RNGs before model load / data ops.
     seed_everything(getattr(cfg, "seed", None))
+
+    # `prompts_file` (JSON list of strings) is the comma-safe alternative to
+    # passing `prompts=[a, b]` on the Hydra command line. Same pattern as
+    # `inline_pairs_file`.
+    prompts_file = getattr(cfg, "prompts_file", None)
+    if prompts_file and os.path.exists(prompts_file):
+        import json
+
+        with open(prompts_file) as _pf:
+            _loaded_prompts = json.load(_pf)
+        if not isinstance(_loaded_prompts, list) or not all(
+            isinstance(p, str) for p in _loaded_prompts
+        ):
+            raise ValueError(f"prompts_file={prompts_file!r} must contain a JSON list of strings")
+        OmegaConf.set_struct(cfg, False)
+        cfg.prompts = _loaded_prompts
+        OmegaConf.set_struct(cfg, True)
 
     # Optional wandb initialization
     run = None
@@ -92,6 +114,7 @@ def main(cfg: DictConfig) -> None:
     print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
     if run is not None:
         fingerprint.log_to_wandb(run)
+        record_wandb_run(cfg.output_dir, run)
 
     # 1. Models
     # model_a: owns layer_a (source activations)
@@ -197,10 +220,67 @@ def main(cfg: DictConfig) -> None:
     mode = getattr(cfg, "mode", "train")
     ds_full = ds_train = ds_val = None
 
+    def _load_inline_pairs_dataset(cfg):
+        """Build an in-memory `DatasetDict` for the mapper from inline prompts.
+
+        Accepted entry shapes inside `cfg.inline_pairs` (or
+        `cfg.inline_pairs_file` JSON):
+          * `{"a": str, "b": str}` — paired prompts (one per model)
+          * `{"pos": str, "neg": str}` — same shape used by run_steer.py;
+            `pos` → `prompt_b`, `neg` → `prompt_a`
+          * plain `str` — same prompt fed into both models (the common case
+            for cross-model behaviour transfer)
+
+        Patches `cfg.prompt_col_a` / `cfg.prompt_col_b` to point at the
+        in-memory column names so the rest of the script is source-agnostic.
+        See `t2i_interp.utils.inline_pairs` for the load/split helpers.
+        """
+        from t2i_interp.utils.inline_pairs import load_inline_pairs, make_disjoint_split
+
+        pairs = load_inline_pairs(cfg)
+        if not pairs:
+            return None
+
+        rows = []
+        for i, p in enumerate(pairs):
+            if isinstance(p, dict):
+                a = p.get("a") or p.get("neg") or ""
+                b = p.get("b") or p.get("pos") or ""
+                if not a or not b:
+                    raise ValueError(
+                        f"inline_pairs[{i}] dict must yield non-empty prompts via "
+                        f"{{a, b}} or {{pos, neg}} keys; got {p!r}"
+                    )
+            elif isinstance(p, str):
+                if not p.strip():
+                    raise ValueError(f"inline_pairs[{i}] is an empty string")
+                a = b = p
+            else:
+                raise ValueError(
+                    f"inline_pairs[{i}] must be str or dict with a/b or pos/neg keys; "
+                    f"got {type(p).__name__}={p!r}"
+                )
+            rows.append({"prompt_a": a, "prompt_b": b})
+        if not rows:
+            return None
+
+        OmegaConf.set_struct(cfg, False)
+        cfg.prompt_col_a = "prompt_a"
+        cfg.prompt_col_b = "prompt_b"
+        OmegaConf.set_struct(cfg, True)
+
+        train_rows, val_rows = make_disjoint_split(rows, seed=getattr(cfg, "seed", None))
+        return DatasetDict(
+            {
+                "train": Dataset.from_list(train_rows),
+                "validation": Dataset.from_list(val_rows),
+            }
+        )
+
     # steer_contrast / steer_transfer don't need a training dataset
     needs_dataset = mode not in ("steer_contrast", "steer_transfer")
     if needs_dataset:
-        ds_full = load_dataset(cfg.dataset_name)
+        ds_full = _load_inline_pairs_dataset(cfg) or load_dataset(cfg.dataset_name)
         ds_train = ds_full["train"]
         ds_val = (
             ds_full.get("validation")
@@ -648,6 +728,8 @@ def main(cfg: DictConfig) -> None:
     if run:
         wandb.log({"stitched_images": wandb_imgs})
         run.finish()
+
+    mark_run_completed(cfg.output_dir, workflow="stitch")
 
 
 if __name__ == "__main__":

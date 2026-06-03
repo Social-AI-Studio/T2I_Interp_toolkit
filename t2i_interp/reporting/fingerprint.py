@@ -53,9 +53,12 @@ def _git_sha() -> str | None:
 
 
 def _git_dirty() -> bool:
+    # Untracked files (build artifacts, local notes, downloaded weights) don't
+    # change the logical run, so `--untracked-files=no` keeps dirty true to its
+    # actual meaning: tracked code differs from HEAD.
     try:
         out = subprocess.check_output(
-            ["git", "status", "--porcelain"],
+            ["git", "status", "--porcelain", "--untracked-files=no"],
             stderr=subprocess.DEVNULL,
             timeout=2,
         )
@@ -112,6 +115,22 @@ class RunFingerprint:
         "platform",
     )
 
+    # Config keys stripped before hashing so the hash is machine-independent.
+    # device/dtype select the runtime path (CUDA float16 vs MPS bfloat16) but
+    # represent the *same* logical experiment. Local paths (output_dir, save_dir,
+    # inline_pairs_file) are absolutised by Hydra entry points and naturally
+    # differ between machines. The wandb block is user-specific. Hydra's own
+    # block is bookkeeping. None of these should change the identity of a run.
+    _NON_REPRODUCIBLE_CONFIG_KEYS: ClassVar[tuple[str, ...]] = (
+        "device",
+        "dtype",
+        "output_dir",
+        "save_dir",
+        "inline_pairs_file",
+        "wandb",
+        "hydra",
+    )
+
     @classmethod
     def from_cfg(
         cls,
@@ -151,10 +170,20 @@ class RunFingerprint:
         )
 
     def hash(self) -> str:
-        """Stable 16-char SHA-256 hex digest of the canonical content."""
+        """Stable 16-char SHA-256 hex digest of the canonical content.
+
+        Same logical experiment from a laptop (MPS, bfloat16, /Users/...) and a
+        CUDA cluster (cuda:0, float16, /home/...) produces the same hash —
+        device/dtype/local-path keys are stripped from the embedded config
+        before hashing. See `_VOLATILE_FIELDS` and `_NON_REPRODUCIBLE_CONFIG_KEYS`.
+        """
         d = asdict(self)
         for k in self._VOLATILE_FIELDS:
             d.pop(k, None)
+        if isinstance(d.get("config"), dict):
+            d["config"] = {
+                k: v for k, v in d["config"].items() if k not in self._NON_REPRODUCIBLE_CONFIG_KEYS
+            }
         s = json.dumps(d, sort_keys=True, default=str)
         return hashlib.sha256(s.encode()).hexdigest()[:16]
 
@@ -199,6 +228,61 @@ class RunFingerprint:
             run.summary["fingerprint/seed"] = self.seed
 
 
+def record_wandb_run(output_dir: str | Path, wandb_run: Any) -> Path | None:
+    """Persist the live W&B run's URL + IDs into `wandb_run.json` next to the
+    fingerprint.
+
+    The Streamlit Results panels read this to render a "View on W&B" link
+    plus an iframe embed of the live run dashboard, so users don't have to
+    grep the CLI stdout for `wandb: 🚀 View run at ...`. No-op if the run
+    object lacks a URL (wandb disabled / offline mode).
+    """
+    url = getattr(wandb_run, "url", None) if wandb_run is not None else None
+    if not url:
+        return None
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "url": url,
+        "entity": getattr(wandb_run, "entity", None),
+        "project": getattr(wandb_run, "project", None),
+        "name": getattr(wandb_run, "name", None),
+        "id": getattr(wandb_run, "id", None),
+    }
+    path = out / "wandb_run.json"
+    path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
+def mark_run_completed(
+    output_dir: str | Path,
+    *,
+    workflow: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> Path:
+    """Write `_RUN_COMPLETE.json` into `output_dir` at the end of a successful run.
+
+    Lets downstream consumers (Fingerprints page, crash-detection scripts)
+    distinguish a finished run from one that left a fingerprint behind but
+    crashed mid-train. The file's mere existence is the signal; the contents
+    record when and which workflow finished.
+
+    Returns the path written.
+    """
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    if workflow:
+        payload["workflow"] = workflow
+    if extra:
+        payload.update(extra)
+    marker = out / "_RUN_COMPLETE.json"
+    marker.write_text(json.dumps(payload, indent=2))
+    return marker
+
+
 def seed_everything(seed: int | None) -> None:
     """Set deterministic seeds across torch, numpy, and Python's random.
 
@@ -225,5 +309,14 @@ def seed_everything(seed: int | None) -> None:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
+        # MPS shares the global torch RNG (torch.manual_seed seeds it too) but
+        # we set it explicitly anyway so future torch versions that introduce
+        # a separate MPS generator stay covered. The `if available` guard
+        # avoids a UserWarning on non-Apple-Silicon machines.
+        mps_backend = getattr(torch.backends, "mps", None)
+        if mps_backend is not None and mps_backend.is_available():
+            mps_module = getattr(torch, "mps", None)
+            if mps_module is not None and hasattr(mps_module, "manual_seed"):
+                mps_module.manual_seed(seed)
     except ImportError:
         pass

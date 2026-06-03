@@ -10,8 +10,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -51,6 +51,7 @@ logs/
 *.log
 nohup.out
 .wandb/
+wandb/
 
 # Workflow output dirs (defaults from t2i_interp/config/*/run.yaml)
 output_images/

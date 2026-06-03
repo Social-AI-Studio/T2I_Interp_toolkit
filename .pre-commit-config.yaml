@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.0
+    rev: v0.14.5
     hooks:
       # Run the formatter (equivalent to `make format`)
       - id: ruff-format
@@ -12,7 +12,7 @@ repos:
       #   args: [--fix, --exit-non-zero-on-fix]
 
   - repo: https://github.com/kynan/nbstripout
-    rev: 0.7.1
+    rev: 0.9.1
     hooks:
       # Strip output cells from notebooks before commit.
       # Keeps the repo lean (we went from 97 MB → 72 KB of notebooks).

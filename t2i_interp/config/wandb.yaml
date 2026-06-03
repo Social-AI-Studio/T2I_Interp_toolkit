@@ -1,6 +1,8 @@
-# W&B configuration
+# W&B configuration. Override `entity` on the CLI: `wandb.entity=your-handle`.
+# Default leaves entity null so the user's `wandb login` default is used and the
+# config file does not bake a personal handle into every fingerprint.
 project: "t2i-interp"
-entity: nirmalendu12345-sutd-singapore-university-of-technology- 
+entity: null
 name: null
 tags: []
 sweep_report_type: "steer"

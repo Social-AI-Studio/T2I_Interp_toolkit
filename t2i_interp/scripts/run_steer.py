@@ -45,11 +45,16 @@ def main(cfg: DictConfig) -> None:
 
     diffusers_logging.set_verbosity_error()
     transformers.logging.set_verbosity_error()
-    from datasets import load_dataset
+    from datasets import Dataset, DatasetDict, load_dataset
 
     from t2i_interp.linear_steering import KSteer
     from t2i_interp.mapper import MLPMapper
-    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
+    from t2i_interp.reporting.fingerprint import (
+        RunFingerprint,
+        mark_run_completed as _mark_completed_impl,
+        record_wandb_run,
+        seed_everything,
+    )
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.buffer import ActivationsDataloader, PairedLoader
@@ -61,6 +66,23 @@ def main(cfg: DictConfig) -> None:
 
     # Reproducibility: seed all RNGs before model load / data ops.
     seed_everything(getattr(cfg, "seed", None))
+
+    # `prompts_file` (JSON list of strings) is the comma-safe alternative to
+    # passing `prompts=[a, b]` on the Hydra command line — prompts containing
+    # commas/spaces break the list parser. The Streamlit page writes this file.
+    prompts_file = getattr(cfg, "prompts_file", None)
+    if prompts_file and os.path.exists(prompts_file):
+        import json
+
+        with open(prompts_file) as _pf:
+            _loaded_prompts = json.load(_pf)
+        if not isinstance(_loaded_prompts, list) or not all(
+            isinstance(p, str) for p in _loaded_prompts
+        ):
+            raise ValueError(f"prompts_file={prompts_file!r} must contain a JSON list of strings")
+        OmegaConf.set_struct(cfg, False)
+        cfg.prompts = _loaded_prompts
+        OmegaConf.set_struct(cfg, True)
 
     # Resolve layer_names + finalize output_dir BEFORE wandb.init / fingerprint
     # / model load so all three downstream snapshots see the SAME `cfg`
@@ -113,6 +135,7 @@ def main(cfg: DictConfig) -> None:
     print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
     if run is not None:
         fingerprint.log_to_wandb(run)
+        record_wandb_run(cfg.output_dir, run)
 
     # 1. Model
     from diffusers import AutoPipelineForText2Image
@@ -122,8 +145,66 @@ def main(cfg: DictConfig) -> None:
     )
     model.pipeline.set_progress_bar_config(disable=True)
 
-    # 2. Dataset
-    ds_full = load_dataset(cfg.dataset_name)
+    def _load_inline_pairs_dataset(cfg):
+        """Build an in-memory `DatasetDict` from inline {pos, neg} prompt pairs.
+
+        Used by the Streamlit playground / quick demos. Patches `cfg` with
+        the matching column names so the rest of the script is unaware of
+        the source. Returns None if no inline pairs are configured — the
+        caller falls back to `load_dataset(cfg.dataset_name)`.
+
+        See `t2i_interp.utils.inline_pairs` for the load/split helpers shared
+        with run_stitch.py.
+        """
+        from t2i_interp.utils.inline_pairs import load_inline_pairs, make_disjoint_split
+
+        pairs = load_inline_pairs(cfg)
+        if not pairs:
+            return None
+
+        # Validate the {pos, neg} shape early — easier to debug than a
+        # downstream KeyError.
+        for i, p in enumerate(pairs):
+            if not isinstance(p, dict) or "pos" not in p or "neg" not in p:
+                raise ValueError(
+                    f"inline_pairs[{i}] must be a dict with 'pos' and 'neg' keys; "
+                    f"got {type(p).__name__}={p!r}"
+                )
+            if not p["pos"] or not p["neg"]:
+                raise ValueError(f"inline_pairs[{i}] has empty 'pos' or 'neg': {p!r}")
+
+        steer_type_early = getattr(cfg, "steer_type", "caa")
+        if steer_type_early == "loreft":
+            # LoReFT wants paired columns on the SAME row: one base, one teacher.
+            rows = [{"base_prompt": p["neg"], "teacher_prompt": p["pos"]} for p in pairs]
+            patch = {"prompt_cols": ["base_prompt", "teacher_prompt"]}
+        else:
+            # CAA / KSteer want a single `prompt_col` + binary label per row.
+            rows = []
+            for p in pairs:
+                rows.append({"caption": p["pos"], "label": 1})
+                rows.append({"caption": p["neg"], "label": 0})
+            patch = {
+                "prompt_col": "caption",
+                "label_col": "label",
+                "pos_labels": [1],
+                "neg_labels": [0],
+            }
+        OmegaConf.set_struct(cfg, False)
+        for k, v in patch.items():
+            setattr(cfg, k, v)
+        OmegaConf.set_struct(cfg, True)
+
+        train_rows, val_rows = make_disjoint_split(rows, seed=getattr(cfg, "seed", None))
+        return DatasetDict(
+            {
+                "train": Dataset.from_list(train_rows),
+                "validation": Dataset.from_list(val_rows),
+            }
+        )
+
+    # 2. Dataset — either inline prompt pairs (playground) or a HuggingFace dataset.
+    ds_full = _load_inline_pairs_dataset(cfg) or load_dataset(cfg.dataset_name)
     ds_train = ds_full["train"]
     ds_val = (
         ds_full.get("validation")
@@ -286,9 +367,9 @@ def main(cfg: DictConfig) -> None:
         steer = CAA(model=model)
         mapper = None
     elif steer_type == "loreft":
-        from t2i_interp.linear_steering import LoREEFT
+        from t2i_interp.linear_steering import LoReFT
 
-        steer = LoREEFT(model=model)
+        steer = LoReFT(model=model)
         mapper = None
     else:
         from t2i_interp.linear_steering import KSteer
@@ -334,6 +415,17 @@ def main(cfg: DictConfig) -> None:
                     label = label.cpu().tolist()
                 if not isinstance(label, list) and label is not None:
                     label = [label] * batch_size
+                # Defensive cap. The act loader (flatten=True) treats each tar
+                # entry's (seq, dim) activation as `seq` rows, while the label
+                # loader (flatten=False) treats one entry as one row. PairedLoader
+                # zips them per-batch, so an act batch of size 16 can pair with a
+                # label batch of size <16 when the underlying entry count is
+                # small (typical for inline-pair runs). Iterating beyond the
+                # shorter side raises IndexError. We honour the labels we have
+                # and drop the rest of the act batch — same semantics as the
+                # pre-existing zip-truncation behaviour for full-batch runs.
+                if isinstance(label, list) and len(label) < batch_size:
+                    batch_size = len(label)
                 for i in range(batch_size):
                     l = label[i] if label else None
                     if torch.is_tensor(l):
@@ -511,14 +603,20 @@ def main(cfg: DictConfig) -> None:
 
     scorers_dict = {}
     if getattr(cfg, "metrics", None):
-        # Keep raw scorers around to evaluate manually afterwards
+        # Keep raw scorers around to evaluate manually afterwards.
         for metric_name, metric_cfg in cfg.metrics.items():
             try:
                 scorer = hydra.utils.instantiate(metric_cfg)
                 if hasattr(scorer, "score"):
                     scorers_dict[metric_name] = scorer
             except Exception as e:
-                print(f"Failed to instantiate metric {metric_name}: {e}")
+                # The "Error locating target" wrapper from Hydra hides the real
+                # cause. Surface enough info for diagnosis without bailing on
+                # the whole run.
+                print(
+                    f"Failed to instantiate metric {metric_name}: {e}. "
+                    "Drop the entry from cfg.metrics if not needed."
+                )
 
     specs = []
     if getattr(cfg, "use_baseline", False):
@@ -554,7 +652,10 @@ def main(cfg: DictConfig) -> None:
     specs.append(InferenceSpec(name="steered", inference_fn=run_steer, kwargs={}))
 
     all_metric_results = {}
-    wandb_imgs = []
+    # wandb image groups, keyed by spec prefix ("baseline" / "steered") so
+    # the UI can compare baseline vs steered side-by-side rather than dumping
+    # everything into one bucket.
+    wandb_imgs_by_prefix: dict[str, list] = {}
 
     baseline_disk_paths = []
 
@@ -573,7 +674,7 @@ def main(cfg: DictConfig) -> None:
             img.save(path)
             local_paths.append(path)
             if run:
-                wandb_imgs.append(
+                wandb_imgs_by_prefix.setdefault(prefix, []).append(
                     wandb.Image(path, caption=f"[{prefix}] {cfg.prompts[j % len(cfg.prompts)]}")
                 )
 
@@ -601,17 +702,11 @@ def main(cfg: DictConfig) -> None:
         if metric_results:
             print(f"[{prefix}] Metrics:", metric_results)
             all_metric_results.update({f"{prefix}/{k}": v for k, v in metric_results.items()})
-            path = os.path.join(cfg.output_dir, f"{prefix}_{j}.png")
-            img.save(path)
-            if run:
-                wandb_imgs.append(
-                    wandb.Image(path, caption=f"[{prefix}] {cfg.prompts[j % len(cfg.prompts)]}")
-                )
 
         print(f"Saved {len(imgs)} {prefix} images → {cfg.output_dir}")
 
     if run:
-        log_dict = {"steered_images": wandb_imgs}
+        log_dict: dict = {f"{prefix}_images": imgs for prefix, imgs in wandb_imgs_by_prefix.items()}
         log_dict.update(all_metric_results)
         alpha_val = float(getattr(cfg, "alpha", 0))
         log_dict["alpha"] = alpha_val
@@ -619,10 +714,14 @@ def main(cfg: DictConfig) -> None:
         run.summary["alpha"] = alpha_val
         run.finish()
 
-    # Write metrics to disk so callbacks can read them without Hydra serialization bugs
-
+    # Write metrics to disk so callbacks can read them without Hydra serialization bugs.
     metrics_path = os.path.join(cfg.output_dir, "metrics.json")
     save_json(all_metric_results, metrics_path)
+
+    # Completion marker: lets downstream consumers (Fingerprints page,
+    # crash-detection scripts) distinguish a finished run from one that
+    # left a fingerprint behind but crashed mid-train. Written last.
+    _mark_completed_impl(cfg.output_dir, workflow="steer")
 
     return {"output_dir": cfg.output_dir, "metrics_file": metrics_path}
 

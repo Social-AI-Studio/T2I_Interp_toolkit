@@ -2,6 +2,8 @@
 
 A text-to-image interpretability toolkit for steering, SAE analysis, stitching, and cross-attention localisation in diffusion models.
 
+**Demos:** [Hugging Face Space](https://huggingface.co/spaces/withmartian/dream_reader_demo) · [YouTube walkthrough](https://youtu.be/VIuacdjSMcU)
+
 ## Citation
 
 If you use this toolkit in your research, please cite our paper:
@@ -112,6 +114,26 @@ W&B override example:
 t2i-localise wandb.project="attention-ablation" wandb.name="baseline-sweep"
 ```
 
+## Interactive playground (Streamlit)
+
+No-code GUI for the four workflows. Launches a local web app at
+`http://localhost:8501` with one page per workflow + a fingerprint browser:
+
+```bash
+make app
+```
+
+Each page exposes the same config knobs as the CLI (model preset, device,
+dtype, prompts, intervention strength, etc.), runs the underlying
+`t2i-*` command, streams the log live, and shows the generated images +
+the run's reproducibility fingerprint. Pages:
+
+- **Localisation** — pick a UNet layer + head, scale it, see the effect.
+- **Steering** — train CAA / K-Steer / LoReFT, sweep alpha.
+- **Stitching** — train an MLP mapper across activation spaces.
+- **SAE** — discover top-activating sparse features and modulate them.
+- **Fingerprints** — browse every past run's hash, model, seed, git SHA.
+
 ## Model presets
 
 Pick a model with one Hydra override — its CFG scale, denoising steps, and
@@ -174,11 +196,28 @@ model load.
 
 ## Reproducing Figure 2 (SDXL-Turbo + LoReFT spectacles)
 
+Figure 2 is a **sweep** over hook-site groups (down / mid / up cross-attention
+blocks), reporting CLIP score, FID and LPIPS per cell. A single-cell run uses
+the loreft config defaults:
+
 ```bash
 t2i-steer --config-name=steer/loreft model=sdxl_turbo
 ```
 
-That's the entire case study from the paper. To sweep over alpha:
+To reproduce the actual sweep, launch a Hydra multirun over the three layer
+groups (the same partitioning the paper plots: `unet.down_blocks` /
+`unet.mid_block` / `unet.up_blocks`):
+
+```bash
+bash bash/run_loreft_macro_sweep.sh
+```
+
+That script sets `model=sdxl_turbo` and sweeps `layer_names` across all
+down / mid / up cross-attn blocks in one `-m` invocation, logging
+CLIP / FID / LPIPS to W&B so the per-cell metrics from the paper are
+directly comparable.
+
+Sweep alpha alone (within one layer group):
 
 ```bash
 t2i-steer --config-name=steer/loreft model=sdxl_turbo -m alpha=5,10,20
@@ -213,23 +252,33 @@ t2i-steer model=sdxl_turbo device=mps dtype=bfloat16
 
 ```text
 T2I_Interp_toolkit/
+├── app/                       # Streamlit playground (no-code GUI)
+│   ├── Home.py                # landing page
+│   ├── pages/                 # one page per workflow + Recipes / Fingerprints / Glossary
+│   └── lib/                   # parsers, runner, recipe payloads
 ├── t2i_interp/
-│   ├── cli.py                 # unified `t2i` entry point
-│   ├── accessors/             # ModuleAccessor / ModelWrapper
-│   ├── hooks/                 # capture / alter hooks
-│   ├── config/                # Hydra YAMLs (steer, stitch, sae, localisation)
+│   ├── cli.py                 # entry point definitions (t2i-steer etc.)
+│   ├── accessors/             # ModuleAccessor / model registry
+│   ├── hooks/                 # capture / alter hooks for activation interventions
+│   ├── config/                # Hydra YAMLs (steer, stitch, sae, localisation, model)
 │   ├── scripts/               # run_steer / run_stitch / run_sae / run_localisation
-│   ├── reporting/             # W&B integration, sweep reports
-│   ├── utils/                 # T2I helpers, metrics, plotting, training
+│   ├── reporting/             # fingerprint, W&B sweep callback
+│   ├── utils/                 # T2I buffer, inline_pairs, metrics, plot, training
 │   ├── linear_steering.py     # CAA, KSteer, LoReFT
-│   ├── loreft.py              # LoReFTLayer
+│   ├── loreft.py              # LoReFTLayer + StepConditionalLoReFT
 │   ├── sae.py                 # SAEManager
 │   ├── stitch.py              # Stitcher (mapper, graft, diffusion lens)
+│   ├── mapper.py              # MLPMapper used by stitching
+│   ├── intervention.py        # intervention primitives (ablation, scaling)
 │   └── t2i.py                 # T2IModel pipeline wrapper
-├── dictionary_learning/       # vendored SAE training library
+├── dictionary_learning/       # vendored SAE training library (see NOTICE)
 ├── bash/                      # convenience sweep launchers
 ├── notebooks/                 # workflow walkthroughs
-├── tests/                     # unit + integration
+├── tests/
+│   ├── unit/                  # buffer, fingerprint, inline_pairs, app helpers
+│   └── integration/           # Streamlit AppTest + slow e2e CLI
+├── CITATION.cff
+├── LICENSE
 ├── Makefile
 ├── pyproject.toml
 └── uv.lock
@@ -260,6 +309,35 @@ All Makefile targets:
 make help
 ```
 
+## Responsible use
+
+This toolkit exposes the activation steering, classifier-guided gradient
+steering, and SAE feature ablation techniques the paper describes. They
+generalise: the same primitives that "add spectacles to a portrait" can
+shift demographic representations, suppress safety filters, or reproduce
+sensitive content. Two practical guidelines:
+
+- **Don't ship a steered model as a finished product without auditing
+  what else changed.** A direction trained on one concept frequently
+  reduces image quality, alters demographics, or breaks composition
+  outside the intended axis. CLIP / FID / LPIPS catch some of this; a
+  diverse held-out prompt set catches more.
+- **Don't use this toolkit to circumvent published safety mitigations**
+  on third-party models without permission. The interpretability
+  workflows are designed for research and red-team analysis; using them
+  to disable safety features in a deployed model is not what the paper
+  endorses.
+
+If you find a misuse path that the documentation should flag explicitly,
+open an issue.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+Vendored upstream projects keep their own licenses:
+
+- `dictionary_learning/` is a vendored snapshot of
+  https://github.com/saprmarks/dictionary_learning (MIT); see
+  [dictionary_learning/NOTICE](dictionary_learning/NOTICE) for the
+  upstream pin and the rationale for vendoring.

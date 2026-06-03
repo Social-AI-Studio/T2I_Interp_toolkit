@@ -31,7 +31,7 @@
 set -e
 
 # ── Model / layer config ──────────────────────────────────────────────────────
-BASE_MODEL="runwayml/stable-diffusion-v1-5"
+BASE_MODEL="stable-diffusion-v1-5/stable-diffusion-v1-5"
 LCM_LORA="latent-consistency/lcm-lora-sdv1-5"
 
 # SD 1.5 mid_block: 1 attention × 1 transformer block

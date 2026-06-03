@@ -1,27 +1,134 @@
 import io
 import os
+import pickle
+import warnings
 
 import torch
 import webdataset as wds
 
 
-# Custom decoder to handle .pth files that might contain unpickled data (e.g. raw strings)
+# Opt-in env var to allow torch.load(weights_only=False) for legacy tar shards
+# that contain non-tensor pickled objects beyond the safe-builtins fallback
+# below. Off by default. Set T2I_ALLOW_UNSAFE_PICKLE=1 only for shards you
+# produced yourself, since weights_only=False executes arbitrary pickle code.
+_UNSAFE_PICKLE_ENV = "T2I_ALLOW_UNSAFE_PICKLE"
+
+# Python builtins safe to reconstruct without code execution. collect_latents
+# routinely writes plain `str` / `int` extras (e.g. `caption.pth`, `label.pth`)
+# whose pickle opcodes torch.load(weights_only=True) rejects too aggressively.
+_SAFE_PICKLE_CLASSES = frozenset(
+    {
+        ("builtins", name)
+        for name in (
+            "str",
+            "int",
+            "float",
+            "bool",
+            "complex",
+            "list",
+            "dict",
+            "tuple",
+            "set",
+            "frozenset",
+            "bytes",
+            "bytearray",
+            "NoneType",
+        )
+    }
+    | {("collections", "OrderedDict")}
+)
+
+
+class _SafeBuiltinsUnpickler(pickle.Unpickler):
+    """Pickle Unpickler that allow-lists only plain-data Python builtins.
+
+    Refuses to import or reconstruct anything else, including any class that
+    would call `__reduce__` / `__setstate__` paths. Safe to run on untrusted
+    bytes as long as no allowed type triggers code execution at construction
+    (the listed builtins do not).
+    """
+
+    def find_class(self, module, name):
+        if (module, name) in _SAFE_PICKLE_CLASSES:
+            return super().find_class(module, name)
+        raise pickle.UnpicklingError(
+            f"safe_pth_decoder: refusing to import {module}.{name} from pickle"
+        )
+
+
+class _SafePickleModule:
+    """Drop-in `pickle_module` for `torch.load` that uses _SafeBuiltinsUnpickler.
+
+    `torch.save` writes a zip archive whose `data.pkl` member is plain pickle;
+    `torch.load(..., pickle_module=...)` lets us swap the unpickler used to
+    read it. Combined with `weights_only=False` this restores the legacy code
+    path for loading non-tensor extras (str / int / list / dict) while still
+    refusing to import arbitrary classes.
+    """
+
+    Pickler = pickle.Pickler
+    Unpickler = _SafeBuiltinsUnpickler
+
+    @staticmethod
+    def load(file, **kwargs):
+        return _SafeBuiltinsUnpickler(file, **kwargs).load()
+
+    @staticmethod
+    def loads(data, **kwargs):
+        return _SafeBuiltinsUnpickler(io.BytesIO(data), **kwargs).load()
+
+
 def safe_pth_decoder(key, data):
+    """WebDataset decoder for `.pth` shard entries that refuses arbitrary pickle.
+
+    Tries three escalating paths:
+      1. `torch.load(weights_only=True)` for tensors — strictest, default.
+      2. A class-restricted unpickler that only allows plain Python builtins,
+         used for collect_latents's `caption.pth` / `label.pth` extras (str
+         and int). Cannot reconstruct user-defined classes or torch modules.
+      3. Full `torch.load(weights_only=False)` — disabled by default. Enable
+         per-process with `T2I_ALLOW_UNSAFE_PICKLE=1` ONLY for shards you
+         produced yourself or fully trust.
+
+    A historical version silently fell back to `weights_only=False` on any
+    failure, which executed arbitrary code from any `.tar` shard on disk.
+    """
     extension = os.path.splitext(key)[1]
-    if extension == ".pth":
+    if extension != ".pth":
+        return None
+    # WebDataset's TarWriter writes plain Python `str` values for `.pth` keys
+    # as raw UTF-8 bytes (no torch.save / pickle wrapper). collect_latents
+    # routinely does this for prompt extras like `caption.pth`. Detect that
+    # path by looking for the torch.save zip magic and short-circuit.
+    if not data.startswith(b"PK\x03\x04") and not data.startswith(b"\x80"):
         try:
-            # weights_only=True uses a fast, restricted deserializer (tensors only).
-            # Falls back to full pickle if the file contains non-tensor objects.
-            return torch.load(io.BytesIO(data), weights_only=True)
-        except Exception:
-            try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data
+    try:
+        return torch.load(io.BytesIO(data), weights_only=True)
+    except Exception as torch_err:
+        try:
+            return torch.load(
+                io.BytesIO(data),
+                weights_only=False,
+                pickle_module=_SafePickleModule,
+            )
+        except Exception as safe_err:
+            if os.environ.get(_UNSAFE_PICKLE_ENV) == "1":
+                warnings.warn(
+                    f"safe_pth_decoder: safe paths failed for {key!r} "
+                    f"(torch.load: {torch_err!r}; safe-unpickler: {safe_err!r}); "
+                    f"falling back to unsafe pickle because {_UNSAFE_PICKLE_ENV}=1.",
+                    stacklevel=2,
+                )
                 return torch.load(io.BytesIO(data), weights_only=False)
-            except Exception:
-                try:
-                    return data.decode("utf-8")
-                except Exception:
-                    return data
-    return None
+            raise RuntimeError(
+                f"safe_pth_decoder: refusing to deserialise {key!r} "
+                f"(torch.load(weights_only=True) failed: {torch_err!r}; "
+                f"restricted-builtins unpickler failed: {safe_err!r}). "
+                f"If you trust this shard, re-run with {_UNSAFE_PICKLE_ENV}=1."
+            ) from safe_err
 
 
 class ActivationsDataloader:
@@ -128,20 +235,27 @@ class ActivationsDataloader:
         if not to_merge:
             raise StopIteration
 
-        # No new samples were loaded (dataset exhausted) and carry-over rows
-        # alone are fewer than one batch → signal end-of-stream so iterate()
-        # can yield the tail and return rather than looping forever.
-        carry_rows = to_merge[0].shape[0] if to_merge else 0
-        if new_loaded == 0 and to_retrieve > 0 and carry_rows < self.batch_size:
-            raise StopIteration
-
+        # Materialise whatever rows we still have into self.buffer BEFORE
+        # signalling end-of-stream. The fallback in `iterate()` (the
+        # `except StopIteration` branch) yields `self.buffer[self.pointer:]`
+        # only when `self.buffer is not None`. The previous order — raise
+        # before catting — silently dropped the under-sized tail and
+        # `next(loader.iterate())` raised StopIteration whenever the dataset
+        # had fewer rows than batch_size (e.g. a 13-row CAA train split
+        # against batch_size=16).
         self.buffer = torch.cat(to_merge, dim=0)
+        self.pointer = 0
+
+        # No new samples were loaded (dataset exhausted) and the buffered
+        # rows alone are fewer than one batch → signal end-of-stream so
+        # iterate() can yield the tail and return rather than looping forever.
+        if new_loaded == 0 and to_retrieve > 0 and self.buffer.shape[0] < self.batch_size:
+            raise StopIteration
 
         if self.shuffle:
             N = self.buffer.shape[0]
             shuffled_indices = torch.randperm(N, generator=self.generator)
             self.buffer = self.buffer[shuffled_indices]
-        self.pointer = 0
 
     def reset(self):
         """Reset the iterator to the beginning of the dataset."""

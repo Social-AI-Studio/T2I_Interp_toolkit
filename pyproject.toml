@@ -42,6 +42,17 @@ dependencies = [
     "webdataset>=1.0.2",
     "nnsight>=0.7.0",
     "einops>=0.8.2",
+    "streamlit>=1.57.0",
+    "pandas>=2.3.3",
+    "anthropic>=0.104.1",
+    # CLIP / FID / LPIPS scoring backends. Required because every workflow
+    # YAML's `metrics:` block defaults them on — the paper's headline
+    # Figure 2 sweep reports CLIP / FID / LPIPS per cell, and the Streamlit
+    # Results page surfaces them as metric tiles. Heavier than the rest of
+    # the dependency set but unavoidable for a paper-faithful install.
+    "open-clip-torch>=2.24.0",
+    "lpips>=0.1.4",
+    "clean-fid>=0.1.35",
 ]
 
 [project.optional-dependencies]
@@ -187,4 +198,5 @@ markers = [
 [dependency-groups]
 dev = [
     "nbstripout>=0.9.1",
+    "playwright>=1.60.0",
 ]

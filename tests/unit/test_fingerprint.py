@@ -9,7 +9,12 @@ from pathlib import Path
 import pytest
 from omegaconf import OmegaConf
 
-from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
+from t2i_interp.reporting.fingerprint import (
+    RunFingerprint,
+    mark_run_completed,
+    record_wandb_run,
+    seed_everything,
+)
 
 
 def _make_cfg(**overrides):
@@ -140,6 +145,104 @@ def test_seed_everything_makes_torch_deterministic():
     seed_everything(7)
     b = torch.randn(8)
     assert torch.equal(a, b)
+
+
+def test_hash_is_machine_independent_across_device_dtype_paths():
+    """The paper's central reproducibility claim: same logical experiment
+    from a laptop (MPS, bfloat16, /Users/...) and a CUDA cluster (cuda:0,
+    float16, /home/...) must hash identically. device/dtype/local-path
+    keys are stripped from the embedded config before hashing.
+    """
+    fp_mac = RunFingerprint.from_cfg(
+        _make_cfg(
+            device="mps",
+            dtype="bfloat16",
+            output_dir="/Users/alice/runs/spectacles",
+            save_dir="/Users/alice/cache/latents",
+            inline_pairs_file="/Users/alice/pairs.json",
+            wandb={"project": "p", "entity": "alice"},
+        ),
+        workflow="steer",
+        intervention=_intervention(),
+    )
+    fp_cluster = RunFingerprint.from_cfg(
+        _make_cfg(
+            device="cuda:0",
+            dtype="float16",
+            output_dir="/home/bob/runs/spectacles",
+            save_dir="/scratch/bob/latents",
+            inline_pairs_file="/home/bob/pairs.json",
+            wandb={"project": "p", "entity": "bob"},
+        ),
+        workflow="steer",
+        intervention=_intervention(),
+    )
+    assert fp_mac.hash() == fp_cluster.hash()
+
+
+def test_hash_still_changes_when_logical_inputs_differ():
+    """Strip-list shouldn't accidentally hide logical changes — model_key,
+    dataset, seed, intervention, hyperparams must still drive the hash."""
+    base = RunFingerprint.from_cfg(_make_cfg(), workflow="steer", intervention=_intervention())
+    diff_model = RunFingerprint.from_cfg(
+        _make_cfg(model_key="other/model"), workflow="steer", intervention=_intervention()
+    )
+    assert base.hash() != diff_model.hash()
+
+
+def test_record_wandb_run_writes_payload(tmp_path: Path):
+    """record_wandb_run persists the live W&B run's URL + IDs so the
+    Streamlit Results panel can render the link button + iframe embed."""
+    import types
+
+    fake_run = types.SimpleNamespace(
+        url="https://wandb.ai/alice/dream-reader/runs/abc123",
+        entity="alice",
+        project="dream-reader",
+        name="spectacles-alpha=10",
+        id="abc123",
+    )
+    out = tmp_path / "run_dir"
+    path = record_wandb_run(out, fake_run)
+    assert path == out / "wandb_run.json"
+    assert path.exists()
+    data = json.loads(path.read_text())
+    assert data["url"] == fake_run.url
+    assert data["entity"] == "alice"
+    assert data["project"] == "dream-reader"
+    assert data["name"] == "spectacles-alpha=10"
+    assert data["id"] == "abc123"
+
+
+def test_record_wandb_run_skips_when_url_missing(tmp_path: Path):
+    """W&B offline mode produces a run with url=None. record_wandb_run
+    should no-op rather than write a half-formed payload."""
+    import types
+
+    fake_run = types.SimpleNamespace(url=None, entity="alice", project="p", name=None, id="abc")
+    out = tmp_path / "run_dir"
+    path = record_wandb_run(out, fake_run)
+    assert path is None
+    assert not (out / "wandb_run.json").exists()
+
+
+def test_record_wandb_run_skips_when_run_is_none(tmp_path: Path):
+    """Cleanly no-ops on a None run (wandb disabled)."""
+    assert record_wandb_run(tmp_path, None) is None
+
+
+def test_mark_run_completed_writes_marker(tmp_path: Path):
+    """mark_run_completed writes a _RUN_COMPLETE.json that downstream code
+    can use to distinguish finished runs from crashed-mid-train ones."""
+    out = tmp_path / "run_dir"
+    marker = mark_run_completed(out, workflow="steer", extra={"alpha": 10.0})
+
+    assert marker == out / "_RUN_COMPLETE.json"
+    assert marker.exists()
+    data = json.loads(marker.read_text())
+    assert data["workflow"] == "steer"
+    assert data["alpha"] == 10.0
+    assert "completed_at" in data
 
 
 def test_log_to_wandb_records_summary_fields(monkeypatch):

@@ -20,7 +20,12 @@ def main(cfg: DictConfig) -> None:
     import wandb
     from diffusers import AutoPipelineForText2Image
 
-    from t2i_interp.reporting.fingerprint import RunFingerprint, seed_everything
+    from t2i_interp.reporting.fingerprint import (
+        RunFingerprint,
+        mark_run_completed,
+        record_wandb_run,
+        seed_everything,
+    )
     from t2i_interp.t2i import T2IModel
     from t2i_interp.utils.inference import Inference, InferenceSpec
     from t2i_interp.utils.T2I.policy import scale_indx_policy
@@ -59,6 +64,7 @@ def main(cfg: DictConfig) -> None:
     print(f"[fingerprint] {fingerprint.hash()} → {cfg.output_dir}/fingerprint.json")
     if run is not None:
         fingerprint.log_to_wandb(run)
+        record_wandb_run(cfg.output_dir, run)
 
     # 1. Model
     model = T2IModel(
@@ -68,6 +74,18 @@ def main(cfg: DictConfig) -> None:
 
     # 2. SAE Manager construction
     from t2i_interp.build_sae import build_sae_manager
+
+    # Resolve relative checkpoint paths against the repo root so `t2i-sae`
+    # works from any CWD. The YAML default for `saes.<hook>.path` is the
+    # readable `./sdxl-unbox/checkpoints/...`; invoking the CLI from the
+    # repo or from a tmpdir should both find the bundled checkpoints.
+    _repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    OmegaConf.set_struct(cfg, False)
+    for _hook, _sae_cfg in cfg.saes.items():
+        _path = str(_sae_cfg.path)
+        if not os.path.isabs(_path):
+            _sae_cfg.path = os.path.normpath(os.path.join(_repo_root, _path))
+    OmegaConf.set_struct(cfg, True)
 
     sae_manager, sae_list = build_sae_manager(
         model, saes_config=cfg.saes, device=cfg.device, dtype=getattr(torch, cfg.dtype)
@@ -139,6 +157,8 @@ def main(cfg: DictConfig) -> None:
     if run:
         wandb.log({"sae_feature_grid": wandb.Image(grid_path)})
         run.finish()
+
+    mark_run_completed(cfg.output_dir, workflow="sae")
 
 
 if __name__ == "__main__":

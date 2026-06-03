@@ -1,0 +1,227 @@
+"""Find and load run artifacts (images + fingerprint.json) for display."""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any
+
+
+def collect_images(dir_: str | Path, *, include_prefix_siblings: bool = False) -> list[Path]:
+    """Recursively list image files under `dir_` (best-effort, ignores missing).
+
+    With `include_prefix_siblings=True`, also walks sibling directories whose
+    name starts with `dir_.name`. The Steering workflow uses this because
+    `run_steer.py` appends `_<block>_alpha=<alpha>` to the configured
+    output_dir, so the real outputs land next to (not under) the directory
+    the Streamlit page created. Workflows that don't rewrite their output
+    path (Localisation, Stitching, SAE) don't need to opt in.
+    """
+    # Matches the extensions pair_baseline_modified() recognises. Drop any
+    # one here and you re-introduce the silent "no images produced" UX bug.
+    _IMAGE_EXTS = (".png", ".jpg", ".jpeg")
+
+    def _images_in(root: Path):
+        for p in root.rglob("*"):
+            if p.is_file() and p.suffix.lower() in _IMAGE_EXTS:
+                yield p
+
+    d = Path(dir_)
+    images: list[Path] = []
+    if d.exists():
+        images.extend(_images_in(d))
+    if include_prefix_siblings and d.parent.exists():
+        prefix = d.name
+        for sibling in d.parent.iterdir():
+            if sibling == d:
+                continue  # already walked above
+            if sibling.is_dir() and sibling.name.startswith(prefix):
+                images.extend(_images_in(sibling))
+    return sorted(images)
+
+
+def pair_baseline_modified(
+    images: list[Path],
+    *,
+    modified_kinds: tuple[str, ...] = ("steered", "modified", "head", "ablated"),
+    label_prefix: str = "prompt",
+) -> list[tuple[str, Path | None, Path | None]]:
+    """Group output images into (label, baseline, modified) triples.
+
+    Recognises filenames like `baseline_0.png`, `baseline.png`, `steered_0.png`,
+    `modified_5.png`, and Localisation's `<layer>__h<head>.png` head-ablation
+    pattern. The `baseline_<idx>` form pairs with the matching `<kind>_<idx>`
+    modified image. A single unindexed `baseline.png` is treated as the
+    shared baseline for every modified index AND for any leftover images
+    (Localisation runs a single baseline against many per-head modifications).
+
+    Anything that doesn't match a known pattern still gets displayed — as a
+    leftover triple `(filename, shared_baseline_or_None, image)` so the user
+    sees the file rather than the page silently dropping it.
+    """
+    indexed_baselines: dict[str, Path] = {}
+    shared_baseline: Path | None = None
+    modified: dict[str, Path] = {}
+    leftovers: list[Path] = []
+
+    modified_alt = "|".join(re.escape(k) for k in modified_kinds)
+    modified_re = re.compile(rf"(?:{modified_alt})_(\d+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
+    # Localisation writes per-head files as `<layer>__h<head>.png`. The
+    # double-underscore lets us recognise the head index without colliding
+    # with `_<idx>.png` filenames from other workflows.
+    head_suffix_re = re.compile(r"__h(\d+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
+    indexed_baseline_re = re.compile(r"baseline_(\d+)\.(?:png|jpg|jpeg)$", re.IGNORECASE)
+    bare_baseline_re = re.compile(r"baseline\.(?:png|jpg|jpeg)$", re.IGNORECASE)
+
+    for img in images:
+        name = img.name
+        if m := indexed_baseline_re.search(name):
+            indexed_baselines[m.group(1)] = img
+        elif bare_baseline_re.search(name):
+            shared_baseline = img
+        elif m := modified_re.search(name):
+            modified[m.group(1)] = img
+        elif m := head_suffix_re.search(name):
+            modified[m.group(1)] = img
+        else:
+            leftovers.append(img)
+
+    indices = sorted(set(indexed_baselines) | set(modified), key=int)
+    out: list[tuple[str, Path | None, Path | None]] = []
+    for idx in indices:
+        baseline = indexed_baselines.get(idx, shared_baseline)
+        out.append((f"{label_prefix} {idx}", baseline, modified.get(idx)))
+    # If there are no modified-with-index images but we have a shared baseline
+    # alone, still show it once so the user sees what they got.
+    if not indices and shared_baseline is not None:
+        out.append((f"{label_prefix} (baseline only)", shared_baseline, None))
+    # Leftovers (unrecognised filenames). When we have a shared baseline,
+    # pair them so the column doesn't read "(missing)". Important for
+    # Localisation's matplotlib composite grids and any future workflow that
+    # emits an image whose filename doesn't match a known pattern.
+    for img in leftovers:
+        out.append((img.name, shared_baseline, img))
+    return out
+
+
+def load_fingerprint(
+    dir_: str | Path, *, include_prefix_siblings: bool = False
+) -> dict[str, Any] | None:
+    """Find and parse the closest fingerprint.json under `dir_`, or None.
+
+    With `include_prefix_siblings=True`, also searches sibling directories
+    whose name starts with `dir_.name`. Same rationale as `collect_images`.
+    """
+    d = Path(dir_)
+    candidates: list[Path] = []
+    if d.exists():
+        candidates.extend(d.rglob("fingerprint.json"))
+    if include_prefix_siblings and d.parent.exists():
+        prefix = d.name
+        for sibling in d.parent.iterdir():
+            if sibling == d:
+                continue
+            if sibling.is_dir() and sibling.name.startswith(prefix):
+                candidates.extend(sibling.rglob("fingerprint.json"))
+    candidates.sort()
+    if not candidates:
+        return None
+    try:
+        return json.loads(candidates[0].read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def load_wandb_run(
+    dir_: str | Path, *, include_prefix_siblings: bool = False
+) -> dict[str, Any] | None:
+    """Load `wandb_run.json` written by the CLI when wandb is enabled.
+
+    Same prefix-sibling treatment as load_fingerprint / load_metrics so the
+    Steering page (which rewrites output_dir to `<base>_<block>_alpha=<a>`)
+    can still find the file. Returns None when wandb wasn't enabled or the
+    file isn't present.
+    """
+    d = Path(dir_)
+    candidates: list[Path] = []
+    if d.exists():
+        candidates.extend(d.rglob("wandb_run.json"))
+    if include_prefix_siblings and d.parent.exists():
+        prefix = d.name
+        for sibling in d.parent.iterdir():
+            if sibling == d:
+                continue
+            if sibling.is_dir() and sibling.name.startswith(prefix):
+                candidates.extend(sibling.rglob("wandb_run.json"))
+    candidates.sort()
+    if not candidates:
+        return None
+    try:
+        return json.loads(candidates[0].read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def load_metrics(
+    dir_: str | Path, *, include_prefix_siblings: bool = False
+) -> dict[str, Any] | None:
+    """Load `metrics.json` produced by run_steer/run_stitch.
+
+    Looks in `dir_` first, then in sibling directories with the same name
+    prefix when `include_prefix_siblings=True` (Steering rewrites its
+    output_dir; same rationale as `collect_images`). Returns None when no
+    metrics file is present or it doesn't parse.
+    """
+    d = Path(dir_)
+    candidates: list[Path] = []
+    if d.exists():
+        candidates.extend(d.rglob("metrics.json"))
+    if include_prefix_siblings and d.parent.exists():
+        prefix = d.name
+        for sibling in d.parent.iterdir():
+            if sibling == d:
+                continue
+            if sibling.is_dir() and sibling.name.startswith(prefix):
+                candidates.extend(sibling.rglob("metrics.json"))
+    candidates.sort()
+    if not candidates:
+        return None
+    try:
+        return json.loads(candidates[0].read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def scan_fingerprints(roots: list[str | Path]) -> list[dict[str, Any]]:
+    """Walk given roots, parse every fingerprint.json found. Returns rows
+    suitable for st.dataframe (sorted by timestamp descending)."""
+    rows: list[dict[str, Any]] = []
+    for root in roots:
+        p = Path(root)
+        if not p.exists():
+            continue
+        for fp_file in p.rglob("fingerprint.json"):
+            try:
+                fp = json.loads(fp_file.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+            rows.append(
+                {
+                    "hash": fp.get("fingerprint_hash", "?"),
+                    "workflow": fp.get("workflow", "?"),
+                    "model": fp.get("model_id", "?"),
+                    "dataset": fp.get("dataset_id") or "-",
+                    "seed": fp.get("seed"),
+                    "git_sha": (fp.get("git_sha") or "")[:8],
+                    "git_dirty": fp.get("git_dirty", False),
+                    "timestamp": fp.get("timestamp", ""),
+                    # Run finished cleanly iff the CLI wrote _RUN_COMPLETE.json
+                    # at the end of main(). Lets users distinguish a finished
+                    # run from one that left a fingerprint then crashed.
+                    "completed": (fp_file.parent / "_RUN_COMPLETE.json").exists(),
+                    "path": str(fp_file.parent),
+                }
+            )
+    rows.sort(key=lambda r: r["timestamp"], reverse=True)
+    return rows

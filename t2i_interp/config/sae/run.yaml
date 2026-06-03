@@ -9,12 +9,22 @@ defaults:
   - optional /model: null   # override: t2i-sae model=sdxl_turbo
 
 # Model
-model_key: CompVis/stable-diffusion-v1-4
+# The bundled SAE checkpoints under sdxl-unbox/ were trained on SDXL-Turbo
+# (hidden_dim=5120 matches that model's cross-attention output). Earlier
+# versions of this file pinned CompVis/stable-diffusion-v1-4 here, which
+# silently mismatched the SAE — the run "succeeded" but the captured
+# activations and the dictionary's expected shape disagreed and produced
+# garbage features.
+model_key: stabilityai/sdxl-turbo
 device: cuda:0
 dtype: float16
 
 # SAE Configurations
-# Map of "model_hook_name" -> sae config
+# Map of "model_hook_name" -> sae config.
+#
+# Relative `path`s are resolved against the repo root by run_sae.py at run
+# time, so `t2i-sae` works from any CWD. Absolute paths are honoured as-is
+# (override via `t2i-sae saes.<hook>.path=/abs/path/state_dict.pth`).
 saes:
   model_unet_down_blocks_2_attentions_1_out:
     path: "./sdxl-unbox/checkpoints/unet.down_blocks.2.attentions.1_k10_hidden5120_auxk256_bs4096_lr0.0001/final/state_dict.pth"

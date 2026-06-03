@@ -1,0 +1,13 @@
+Vendored from upstream: https://github.com/saprmarks/dictionary_learning
+Original copyright: (c) 2024 saprmarks
+Original license: MIT (preserved at ./LICENSE in this directory)
+
+This directory is a vendored snapshot, not a submodule. The upstream
+project has its own pyproject.toml; we keep the source in-tree so the
+DreamReader toolkit can pin it precisely against our torch / diffusers
+matrix and patch the SAE loaders for our hook sites without forcing
+contributors to maintain a separate fork.
+
+Original README and CHANGELOG are preserved at ./README.md and
+./CHANGELOG.md respectively. Any local changes belong in those files'
+diffs against the snapshotted upstream commit.
